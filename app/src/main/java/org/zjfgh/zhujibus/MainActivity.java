@@ -1,6 +1,9 @@
 package org.zjfgh.zhujibus;
 
+import android.content.Intent;
 import android.os.Bundle;
+import android.view.View;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.activity.EdgeToEdge;
@@ -10,11 +13,11 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 
 public class MainActivity extends AppCompatActivity {
     private RecyclerView recyclerView;
+    private TextView tv_search_line;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -22,8 +25,9 @@ public class MainActivity extends AppCompatActivity {
         EdgeToEdge.enable(this);
         setContentView(R.layout.activity_main);
         recyclerView = findViewById(R.id.recyclerView);
+        tv_search_line = findViewById(R.id.tv_search_line);
         BusApiClient client = new BusApiClient();
-        client.getNearbyStations(120.234727, 29.727366, "2", 3, 5, new BusApiClient.ApiCallback<>() {
+        client.getNearbyStations(120.235555, 29.713397, "2", 3, 5, new BusApiClient.ApiCallback<>() {
             @Override
             public void onSuccess(BusApiClient.StationAroundResponse response) {
                 List<StationItem> stations = new ArrayList<>();
@@ -43,7 +47,6 @@ public class MainActivity extends AppCompatActivity {
                 StationRouteAdapter adapter = new StationRouteAdapter(stations);
                 recyclerView.setLayoutManager(new LinearLayoutManager(MainActivity.this));
                 recyclerView.setAdapter(adapter);
-
                 // 添加分隔线（可选）
                 recyclerView.addItemDecoration(new DividerItemDecoration(MainActivity.this, DividerItemDecoration.VERTICAL));
             }
@@ -51,6 +54,13 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onError(BusApiClient.BusApiException e) {
                 Toast.makeText(MainActivity.this, "e" + e, Toast.LENGTH_SHORT).show();
+            }
+        });
+        tv_search_line.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                Intent intent = new Intent(MainActivity.this, BusRouteSearchActivity.class);
+                startActivity(intent);
             }
         });
     }

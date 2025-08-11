@@ -42,6 +42,7 @@
                 android:layout_marginEnd="4dp" />
 
             <TextView
+                android:id="@+id/tv_search_line"
                 android:textSize="15sp"
                 android:textColorHint="#2c2c2c"
                 android:background="@null"
