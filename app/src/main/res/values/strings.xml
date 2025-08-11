@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">诸暨公交</string>
+    <string name="todo">TODO</string>
+    <string name="search_hint">请输入公交线路、站点、目的地等...</string>
+</resources>

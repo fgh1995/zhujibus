@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+
+    <!-- 更大的圆角（更柔和） -->
+    <corners android:radius="16dp" />
+
+    <!-- 低饱和度淡蓝灰渐变 -->
+    <gradient
+        android:type="linear"
+        android:angle="90"
+        android:startColor="#4066C7F6"
+        android:endColor="#30E0E0E0"
+        android:centerColor="#385EB5EF" />
+
+    <!-- 极细的白色描边（几乎隐形但提升质感） -->
+    <stroke
+        android:width="0.5dp"
+        android:color="#10FFFFFF" />
+
+    <!-- 内边距避免内容贴边 -->
+    <padding
+        android:left="8dp"
+        android:top="8dp"
+        android:right="8dp"
+        android:bottom="8dp" />
+
+</shape>
