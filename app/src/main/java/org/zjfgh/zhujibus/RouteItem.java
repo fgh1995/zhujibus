@@ -1,12 +1,18 @@
 package org.zjfgh.zhujibus;
 
 public class RouteItem {
-    private String routeName;
-    private String routeInfo;
+    private final String routeName;
+    private final String routeInfo;
+    private final String startStation;
+    private final String endStation;
+    private final int arrivalTime;
 
-    public RouteItem(String routeName, String routeInfo) {
+    public RouteItem(String routeName, String routeInfo, String startStation, String endStation, int arrivalTime) {
         this.routeName = routeName;
         this.routeInfo = routeInfo;
+        this.startStation = startStation;
+        this.endStation = endStation;
+        this.arrivalTime = arrivalTime;
     }
 
     // Getter 方法
@@ -16,5 +22,17 @@ public class RouteItem {
 
     public String getRouteInfo() {
         return routeInfo;
+    }
+
+    public String getStartStation() {
+        return startStation;
+    }
+
+    public String getEndStation() {
+        return endStation;
+    }
+
+    public int getArrivalTime() {
+        return arrivalTime;
     }
 }

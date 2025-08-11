@@ -41,7 +41,7 @@
                 android:contentDescription="@string/todo"
                 android:layout_marginEnd="4dp" />
 
-            <EditText
+            <TextView
                 android:textSize="15sp"
                 android:textColorHint="#2c2c2c"
                 android:background="@null"
@@ -49,7 +49,6 @@
                 android:layout_height="wrap_content"
                 android:hint="@string/search_hint"
                 android:layout_weight="1"
-                android:inputType="text"
                 android:autofillHints="" />
         </LinearLayout>
 
@@ -129,8 +128,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="8dp"
-                    android:layout_marginBottom="8dp"
-                    android:paddingStart="8dp"
+                    android:paddingStart="4dp"
                     android:paddingEnd="2dp">
 
                     <ImageView
@@ -146,7 +144,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="车辆预估到达时间会随着车辆实际行驶路况随之变化，请务必在该页面持续关注车辆行驶状态(到站时间)!"
-                        android:layout_marginStart="10dp" />
+                        android:layout_marginStart="4dp" />
                 </LinearLayout>
 
                 <LinearLayout

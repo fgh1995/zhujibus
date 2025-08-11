@@ -9,6 +9,7 @@ import androidx.recyclerview.widget.DividerItemDecoration;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
@@ -25,7 +26,26 @@ public class MainActivity extends AppCompatActivity {
         client.getNearbyStations(120.234727, 29.727366, "2", 3, 5, new BusApiClient.ApiCallback<>() {
             @Override
             public void onSuccess(BusApiClient.StationAroundResponse response) {
-                Toast.makeText(MainActivity.this, "stationAroundResponse" + response.code, Toast.LENGTH_SHORT).show();
+                List<StationItem> stations = new ArrayList<>();
+                for (int i = 0; i < response.data.size(); i++) {
+                    List<RouteItem> routes1 = new ArrayList<>();
+                    List<BusApiClient.DistanceData> distanceDataList = response.data.get(i).distanceData;
+                    if (distanceDataList != null) {
+                        for (int j = 0; j < response.data.get(i).distanceData.size(); j++) {
+                            BusApiClient.DistanceData distanceData = response.data.get(i).distanceData.get(j);
+                            routes1.add(new RouteItem(distanceData.lineName, "距离" + distanceData.nextNumber + "站/"
+                                    + DistanceUtils.formatDistance(distanceData.distance), distanceData.startStation, distanceData.endStation, distanceData.arrivalTime));
+                        }
+                    }
+                    stations.add(new StationItem(response.data.get(i).stationName, DistanceUtils.formatDistance(response.data.get(i).distance), routes1));
+                }
+                // 设置Adapter
+                StationRouteAdapter adapter = new StationRouteAdapter(stations);
+                recyclerView.setLayoutManager(new LinearLayoutManager(MainActivity.this));
+                recyclerView.setAdapter(adapter);
+
+                // 添加分隔线（可选）
+                recyclerView.addItemDecoration(new DividerItemDecoration(MainActivity.this, DividerItemDecoration.VERTICAL));
             }
 
             @Override
@@ -33,31 +53,5 @@ public class MainActivity extends AppCompatActivity {
                 Toast.makeText(MainActivity.this, "e" + e, Toast.LENGTH_SHORT).show();
             }
         });
-        //setupRecyclerView();
-    }
-
-    private void setupRecyclerView() {
-        // 准备数据
-        List<RouteItem> routes1 = Arrays.asList(
-                new RouteItem("30路", "距离4站/2.6公里"),
-                new RouteItem("31路", "距离2站/1.2公里")
-        );
-
-        List<RouteItem> routes2 = List.of(
-                new RouteItem("长弄堂商业街临时站", "距离10站/7.2公里")
-        );
-
-        List<StationItem> stations = Arrays.asList(
-                new StationItem("陶朱南路（红旗路口）", "273米", routes1),
-                new StationItem("新农和公交首末站", "299米", routes2)
-        );
-
-        // 设置Adapter
-        StationRouteAdapter adapter = new StationRouteAdapter(stations);
-        recyclerView.setLayoutManager(new LinearLayoutManager(this));
-        recyclerView.setAdapter(adapter);
-
-        // 添加分隔线（可选）
-        recyclerView.addItemDecoration(new DividerItemDecoration(this, DividerItemDecoration.VERTICAL));
     }
 }

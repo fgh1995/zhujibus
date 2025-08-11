@@ -44,12 +44,14 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
+            android:ellipsize="end"
             android:textSize="14sp"
             android:textColor="#5B5B5B"
+            android:maxLines="1"
             android:text="建银大厦公交首末站 → 新农都公交首末站" />
 
         <TextView
-            android:id="@+id/tv_route_station_time"
+            android:id="@+id/tv_route_arrival_time"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:textSize="14sp"
