@@ -97,7 +97,6 @@ public class BusApiClient {
                 longitude, latitude, showStationNum, showLineNum, pageSize);
         callApiAsync("query/station/point/around", request, StationAroundResponse.class, callback);
     }
-
     // ==================== 回调接口 ====================
     public interface ApiCallback<T> {
         void onSuccess(T response);
@@ -167,5 +166,55 @@ public class BusApiClient {
         public String startStation;
         public String stationId;
         public int inOutState;
+    }
+    // ==================== 公交搜索接口数据模型 ====================
+    public static class BusLineSearchRequest {
+        public String lineName;
+        public int needGeometry;
+
+        public BusLineSearchRequest(String lineName, int needGeometry) {
+            this.lineName = lineName;
+            this.needGeometry = needGeometry;
+        }
+    }
+
+    public static class BusLineSearchResponse {
+        public String returnFlag;
+        public String returnInfo;
+        public String code;
+        public String msg;
+        public PageData<BusLineInfo> data;
+    }
+
+    public static class PageData<T> {
+        public int pageNum;
+        public int pageSize;
+        public int currentPageSize;
+        public int total;
+        public int pages;
+        public List<T> list;
+        public boolean firstPage;
+        public boolean lastPage;
+    }
+
+    public static class BusLineInfo {
+        public String endStation;
+        public String lineName;
+        public String startStation;
+        // 可以根据实际返回数据添加更多字段
+    }
+
+// ==================== 公交搜索API方法 ====================
+    /**
+     * 搜索公交线路
+     * @param lineName 要搜索的线路名称
+     * @param needGeometry 是否需要几何数据
+     * @param callback 回调接口
+     */
+    public void searchBusLines(String lineName,
+                               int needGeometry,
+                               ApiCallback<BusLineSearchResponse> callback) {
+        BusLineSearchRequest request = new BusLineSearchRequest(lineName, needGeometry);
+        callApiAsync("busLine/searchBusLines", request, BusLineSearchResponse.class, callback);
     }
 }
