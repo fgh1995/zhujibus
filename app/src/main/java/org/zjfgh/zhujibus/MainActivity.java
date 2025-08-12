@@ -29,7 +29,7 @@ public class MainActivity extends AppCompatActivity {
         BusApiClient client = new BusApiClient();
         client.getNearbyStations(120.235555, 29.713397, "2", 3, 5, new BusApiClient.ApiCallback<>() {
             @Override
-            public void onSuccess(BusApiClient.StationAroundResponse response) {
+            public void onSuccess(BusApiClient.StationLineAroundResponse response) {
                 List<StationItem> stations = new ArrayList<>();
                 for (int i = 0; i < response.data.size(); i++) {
                     List<RouteItem> routes1 = new ArrayList<>();

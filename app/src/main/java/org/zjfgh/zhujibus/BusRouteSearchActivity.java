@@ -21,7 +21,7 @@ import com.google.android.material.tabs.TabLayoutMediator;
 
 import org.zjfgh.zhujibus.databinding.ActivityBusRouteSearchBinding;
 
-public class BusRouteSearchActivity extends AppCompatActivity {
+public class  BusRouteSearchActivity extends AppCompatActivity {
     private EditText edSearchBus;
     private ViewPager2 viewPager;
     private SearchPagerAdapter adapter;

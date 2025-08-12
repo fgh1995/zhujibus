@@ -4,12 +4,10 @@ import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import okhttp3.*;
 
-import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -92,10 +90,10 @@ public class BusApiClient {
                                   String showStationNum,
                                   int showLineNum,
                                   int pageSize,
-                                  ApiCallback<StationAroundResponse> callback) {
+                                  ApiCallback<StationLineAroundResponse> callback) {
         StationAroundRequest request = new StationAroundRequest(
                 longitude, latitude, showStationNum, showLineNum, pageSize);
-        callApiAsync("query/station/point/around", request, StationAroundResponse.class, callback);
+        callApiAsync("query/station/point/around", request, StationLineAroundResponse.class, callback);
     }
     // ==================== 回调接口 ====================
     public interface ApiCallback<T> {
@@ -204,7 +202,7 @@ public class BusApiClient {
         // 可以根据实际返回数据添加更多字段
     }
 
-// ==================== 公交搜索API方法 ====================
+    // ==================== 公交搜索API方法 ====================
     /**
      * 搜索公交线路
      * @param lineName 要搜索的线路名称
@@ -216,5 +214,89 @@ public class BusApiClient {
                                ApiCallback<BusLineSearchResponse> callback) {
         BusLineSearchRequest request = new BusLineSearchRequest(lineName, needGeometry);
         callApiAsync("busLine/searchBusLines", request, BusLineSearchResponse.class, callback);
+    }
+    // ==================== 公交线路详情查询接口 ====================
+    /**
+     * 查询公交线路详细信息
+     * @param lineName 线路名称(如"18路")
+     * @param needGeometry 是否需要返回线路几何数据(1需要,0不需要)
+     * @param callback 回调接口
+     */
+    public void queryBusLineDetail(String lineName,
+                                   int needGeometry,
+                                   ApiCallback<BusLineDetailResponse> callback) {
+        BusLineQueryRequest request = new BusLineQueryRequest(lineName, needGeometry);
+        callApiAsync("busLine/queryLine", request, BusLineDetailResponse.class, callback);
+    }
+
+    // ==================== 请求和响应模型 ====================
+    public static class BusLineQueryRequest {
+        public String lineName;    // 线路名称
+        public int needGeometry;   // 是否需要几何数据(1需要,0不需要)
+
+        public BusLineQueryRequest(String lineName, int needGeometry) {
+            this.lineName = lineName;
+            this.needGeometry = needGeometry;
+        }
+    }
+
+    public static class BusLineDetailResponse {
+        public String returnFlag;  // 返回标志
+        public String returnInfo;  // 返回信息
+        public String code;       // 状态码
+        public String msg;        // 消息
+        public BusLineDetailData data; // 线路详情数据(重命名避免冲突)
+    }
+
+    // ==================== 线路详情数据结构 ====================
+    public static class BusLineDetailData {
+        public String areaCode;    // 区域代码
+        public String lineName;   // 线路名称
+        public BusLineDirection up;   // 上行方向信息(重命名)
+        public BusLineDirection down; // 下行方向信息(重命名)
+    }
+
+    // ==================== 线路方向信息 ====================
+    public static class BusLineDirection {
+        public String endStation;      // 终点站名称
+        public double totalPrice;      // 全程票价
+        public int hasCj;              // 是否有场站(0无,1有)
+        public String startLast;       // 末班车时间
+        public int lineLength;         // 线路长度(公里)
+        public String noticeId;        // 通知ID
+        public List<BusLineStation> stationList; // 站点列表(重命名)
+        public String startFirst;      // 首班车时间
+        public String startStation;    // 起点站名称
+        public String geometry;        // 线路几何数据(WKT格式)
+        public String id;             // 线路ID
+        public int hasMm;             // 是否有末班车(0无,1有)
+        public String notice;         // 通知内容
+    }
+
+    // ==================== 线路站点信息 ====================
+    public static class BusLineStation {
+        public int haveBikeStation;    // 是否有自行车站点(0无,1有)
+        public double poiOriginLon;    // 站点经度
+        public String stationName;     // 站点名称
+        public String id;             // 站点ID
+        public int stationOrder;      // 站点顺序
+        public int lastDistance;      // 与上一站距离(米)
+        public double poiOriginLat;    // 站点纬度
+    }
+
+    // ==================== 原附近站点模型保持不变 ====================
+    public static class StationLineAroundResponse {
+        public String returnFlag;
+        public String returnInfo;
+        public String code;
+        public String msg;
+        public List<NearbyStationInfo> data;
+    }
+
+    public static class NearbyStationInfo {
+        public double distance;
+        public String stationName;
+        public String stationId;
+        public List<DistanceData> distanceData;
     }
 }

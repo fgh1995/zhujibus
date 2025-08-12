@@ -2,6 +2,7 @@ package org.zjfgh.zhujibus;
 
 import java.util.Collections;
 
+import android.content.Intent;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.LayoutInflater;
@@ -46,7 +47,7 @@ public class LineFragment extends Fragment {
         // 设置点击监听
         busLineAdapter.setOnItemClickListener(line -> {
             // 处理线路点击事件，例如跳转到详情页
-            //showBusLineDetails(line);
+            showBusLineDetails(line);
         });
     }
 
@@ -81,14 +82,14 @@ public class LineFragment extends Fragment {
             }
         });
     }
-//    private void showBusLineDetails(BusApiClient.BusLineInfo line) {
-//        // 实现跳转到线路详情页的逻辑
-//        Intent intent = new Intent(getActivity(), BusLineDetailActivity.class);
-//        intent.putExtra("line_name", line.lineName);
-//        intent.putExtra("start_station", line.startStation);
-//        intent.putExtra("end_station", line.endStation);
-//        startActivity(intent);
-//    }
+    private void showBusLineDetails(BusApiClient.BusLineInfo line) {
+        // 实现跳转到线路详情页的逻辑
+        Intent intent = new Intent(getActivity(), BusLineDetailActivity.class);
+        intent.putExtra("line_name", line.lineName);
+        intent.putExtra("start_station", line.startStation);
+        intent.putExtra("end_station", line.endStation);
+        startActivity(intent);
+    }
 
     private void showEmptyView() {
         // 显示无数据视图
