@@ -288,6 +288,34 @@ public class BusApiClient {
         public int stationOrder;      // 站点顺序
         public int lastDistance;      // 与上一站距离(米)
         public double poiOriginLat;    // 站点纬度
+        public int stationId; // 站点ID
+        public double lat;    // 纬度
+        public double lng;    // 经度
+        public int distanceToNext; // 到下一站距离(米)
+        public String plateNumber;
+
+        // 实时状态
+        public enum StationStatus {
+            NORMAL,       // 正常状态
+            NEXT_STATION, // 下一站
+            CURRENT,      // 当前站
+            DEFAULT, PASSED        // 已过站
+        }
+
+        public StationStatus status = StationStatus.NORMAL;
+        public int arrivalTime; // 预计到达时间(秒)
+    }
+
+    // 车辆位置数据包装类
+    public static class BusPosition {
+        public int currentStationOrder; // 当前所在站点顺序号(来自vehicleOrder)
+        public boolean isArrived;       // 是否已到站(来自isArriveStation)
+        public int nextStationOrder;    // 下一站顺序号
+        public int distanceToNext;      // 距下一站距离(米)(来自distance)
+        public String plateNumber;      // 车牌号
+        public long updateTime;         // 数据更新时间
+        public double lat;              // 车辆纬度
+        public double lng;              // 车辆经度
     }
 
     // ==================== 原附近站点模型保持不变 ====================

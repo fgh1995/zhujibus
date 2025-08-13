@@ -6,6 +6,7 @@ import android.os.Bundle;
 
 import androidx.appcompat.app.AppCompatActivity;
 
+import android.os.Handler;
 import android.util.Log;
 import android.view.View;
 import android.widget.LinearLayout;
@@ -21,8 +22,8 @@ import androidx.recyclerview.widget.RecyclerView;
 import java.util.ArrayList;
 import java.util.List;
 
-public class BusLineDetailActivity extends AppCompatActivity {
-    
+public class BusLineDetailActivity extends AppCompatActivity implements BusRealTimeManager.RealTimeUpdateListener {
+
     private String lineName;
     private String startStation;
     private String endStation;
@@ -38,6 +39,10 @@ public class BusLineDetailActivity extends AppCompatActivity {
     private boolean isTwoWayLine = false;
     // 缓存线路数据
     private BusApiClient.BusLineDetailResponse cachedResponse;
+    private BusRealTimeManager realTimeManager;
+    private Handler handler = new Handler();
+    private RecyclerView stationListRecyclerView;
+    private StationAdapter stationAdapter;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -158,6 +163,19 @@ public class BusLineDetailActivity extends AppCompatActivity {
         }
     }
 
+    @Override
+    protected void onResume() {
+        super.onResume();
+
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        // 停止获取实时数据
+        realTimeManager.stopTracking();
+    }
+
     /**
      * 切换线路方向
      */
@@ -202,7 +220,10 @@ public class BusLineDetailActivity extends AppCompatActivity {
                     (lineDirection.startStation != null ? lineDirection.startStation : "未知起点") +
                     " → " +
                     (lineDirection.endStation != null ? lineDirection.endStation : "未知终点"));
-
+            //停止之前的实时数据刷新
+            if (realTimeManager != null) {
+                realTimeManager.stopTracking();
+            }
             if (lineDirection.hasCj == 1) {
                 accessibilityTag.setVisibility(View.VISIBLE);
             }
@@ -215,17 +236,15 @@ public class BusLineDetailActivity extends AppCompatActivity {
             // 处理站点列表
             if (lineDirection.stationList != null) {
                 // 设置RecyclerView
-                RecyclerView stationListRecyclerView = findViewById(R.id.station_list);
+                stationListRecyclerView = findViewById(R.id.station_list);
                 stationListRecyclerView.setLayoutManager(new LinearLayoutManager(this));
 
                 // 创建并设置适配器
-                StationAdapter adapter = new StationAdapter(lineDirection.stationList, station -> {
+                stationAdapter = new StationAdapter(lineDirection.stationList, station -> {
                     // 处理站点点击事件
                     //showStationDetails(station);
                 });
-                stationListRecyclerView.setAdapter(adapter);
-                // 添加装饰器（可选）
-                stationListRecyclerView.addItemDecoration(new DividerItemDecoration(this, DividerItemDecoration.VERTICAL));
+                stationListRecyclerView.setAdapter(stationAdapter);
                 for (BusApiClient.BusLineStation station : lineDirection.stationList) {
                     if (station != null) {
                         stationData.add(station);
@@ -234,6 +253,8 @@ public class BusLineDetailActivity extends AppCompatActivity {
                     }
                 }
                 // TODO: 这里可以更新UI显示站点列表
+                realTimeManager = new BusRealTimeManager(handler, lineDirection.stationList);
+                realTimeManager.startTracking(lineDirection.id, this);
             } else {
                 Log.w("BusInfo", directionName + "方向无站点数据");
             }
@@ -274,5 +295,39 @@ public class BusLineDetailActivity extends AppCompatActivity {
             return "未知";
         }
         return formatPrice(price.doubleValue());
+    }
+
+
+    @Override
+    public void onBusPositionsUpdated(List<BusApiClient.BusPosition> positions) {
+        runOnUiThread(() -> {
+            if (!positions.isEmpty()) {
+                // 更新UI显示车辆位置
+                BusApiClient.BusPosition firstBus = positions.get(0);
+
+                // 更新适配器中的车辆位置
+                stationAdapter.updateBusAverageSpeed(realTimeManager.busAverageSpeed);
+                stationAdapter.updateBusPositions(positions);
+
+                // 滚动到当前站
+                scrollToStation(firstBus.currentStationOrder);
+            }
+        });
+    }
+
+    private void scrollToStation(int stationOrder) {
+        for (int i = 0; i < stationAdapter.getItemCount(); i++) {
+            if (stationAdapter.getStationAt(i).stationOrder == stationOrder) {
+                stationListRecyclerView.smoothScrollToPosition(i);
+                break;
+            }
+        }
+    }
+
+    @Override
+    public void onError(String message) {
+        runOnUiThread(() -> {
+            Toast.makeText(this, "实时更新失败: " + message, Toast.LENGTH_SHORT).show();
+        });
     }
 }
