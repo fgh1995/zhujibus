@@ -1,0 +1,333 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/main_container"
+    android:orientation="vertical"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <!-- 线路号码 -->
+    <TextView
+        android:id="@+id/route_number"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:background="#0070FD"
+        android:padding="5dp"
+        android:text="00路"
+        android:textSize="22sp"
+        android:textColor="@color/white"
+        android:textStyle="bold" />
+
+    <!-- 通知栏 -->
+    <LinearLayout
+        android:id="@+id/notice_bar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:background="#FAD8D9"
+        android:padding="4dp">
+
+        <ImageView
+            android:id="@+id/notice_icon"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:contentDescription="@string/todo"
+            android:src="@drawable/notice_icon" />
+
+        <TextView
+            android:id="@+id/notice_text"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:textColor="#FF0000"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:text="@string/app_name" />
+    </LinearLayout>
+
+    <!-- 线路信息 -->
+    <LinearLayout
+        android:id="@+id/route_info"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="10dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+                <!-- 起点站 -->
+                <LinearLayout
+                    android:id="@+id/start_station"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content">
+
+                    <TextView
+                        android:id="@+id/start_marker"
+                        android:layout_width="22dp"
+                        android:layout_height="22dp"
+                        android:background="@drawable/blue_circle"
+                        android:layout_gravity="center"
+                        android:gravity="center"
+                        android:textColor="@color/white"
+                        android:text="起"
+                        android:textSize="10sp"
+                        tools:ignore="SmallSp" />
+
+                    <TextView
+                        android:id="@+id/start_station_name"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:gravity="center"
+                        android:textColor="@color/black"
+                        android:text="起点站名" />
+                </LinearLayout>
+
+                <!-- 线路指示条 -->
+                <View
+                    android:id="@+id/route_line"
+                    android:layout_width="22dp"
+                    android:layout_height="18dp"
+                    android:layout_marginTop="4dp"
+                    android:background="@drawable/three_circles" />
+
+                <!-- 终点站 -->
+                <LinearLayout
+                    android:id="@+id/end_station"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content">
+
+                    <TextView
+                        android:id="@+id/end_marker"
+                        android:layout_width="22dp"
+                        android:layout_height="22dp"
+                        android:background="@drawable/red_circle"
+                        android:layout_gravity="center"
+                        android:gravity="center"
+                        android:textColor="@color/white"
+                        android:text="终"
+                        android:textSize="10sp"
+                        tools:ignore="SmallSp" />
+
+                    <TextView
+                        android:id="@+id/end_station_name"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:gravity="center"
+                        android:textColor="@color/black"
+                        android:text="终点站名" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/swap_orientation"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical">
+
+                <View
+                    android:layout_width="1dp"
+                    android:layout_height="40dp"
+                    android:background="#D0D0D0" />
+
+                <View
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:background="@drawable/ic_swap" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="换向"
+                    android:textColor="@color/black"
+                    android:textStyle="bold"
+                    android:textSize="18sp" />
+            </LinearLayout>
+
+        </LinearLayout>
+
+        <!-- 时刻信息 -->
+        <LinearLayout
+            android:id="@+id/schedule_info"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:layout_marginTop="8dp">
+
+            <!-- 首班车 -->
+            <LinearLayout
+                android:id="@+id/first_bus"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_vertical"
+                android:gravity="center_vertical"
+                tools:ignore="UselessParent">
+
+                <TextView
+                    android:id="@+id/first_bus_marker"
+                    android:layout_width="22dp"
+                    android:layout_height="22dp"
+                    android:background="@drawable/green_circle_border"
+                    android:layout_gravity="center"
+                    android:gravity="center"
+                    android:text="首"
+                    android:textColor="#266735"
+                    android:textSize="10sp"
+                    tools:ignore="SmallSp" />
+
+                <TextView
+                    android:id="@+id/first_bus_time"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center_vertical"
+                    android:layout_marginStart="5dp"
+                    android:text="06:00" />
+            </LinearLayout>
+
+            <!-- 末班车 -->
+            <LinearLayout
+                android:id="@+id/last_bus"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                tools:ignore="UselessParent"
+                android:gravity="center_vertical"
+                android:layout_marginStart="4dp">
+
+                <TextView
+                    android:id="@+id/last_bus_marker"
+                    android:layout_width="22dp"
+                    android:layout_height="22dp"
+                    android:background="@drawable/red_circle_border"
+                    android:layout_gravity="center"
+                    android:gravity="center"
+                    android:text="末"
+                    android:textColor="#FF0000"
+                    android:textSize="10sp"
+                    tools:ignore="SmallSp" />
+
+                <TextView
+                    android:id="@+id/last_bus_time"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center_vertical"
+                    android:layout_marginStart="4dp"
+                    android:text="18:10" />
+            </LinearLayout>
+
+            <!-- 时刻表按钮 -->
+            <TextView
+                android:id="@+id/schedule_button"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_vertical"
+                android:gravity="center"
+                android:background="@drawable/blue_rounded_bg"
+                android:paddingStart="4dp"
+                android:paddingEnd="4dp"
+                android:paddingTop="2dp"
+                android:paddingBottom="3dp"
+                android:layout_marginStart="6dp"
+                android:textSize="12sp"
+                android:text="时刻表"
+                android:textColor="@color/white" />
+
+            <!-- 线路摘要 -->
+            <TextView
+                android:id="@+id/route_summary"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical|end"
+                android:layout_marginStart="10dp"
+                android:text="总里程：10公里  票价：1元"
+                android:textColor="@color/black"
+                android:textSize="14sp"
+                tools:ignore="SmallSp" />
+        </LinearLayout>
+
+        <!-- 标签容器 -->
+        <LinearLayout
+            android:id="@+id/tags_container"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content">
+
+            <!-- 无障碍标签 -->
+            <LinearLayout
+                android:id="@+id/accessibility_tag"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:gravity="center_vertical"
+                android:paddingStart="4dp"
+                android:paddingEnd="4dp"
+                android:paddingTop="2dp"
+                android:paddingBottom="3dp"
+                android:background="@drawable/light_blue_rounded_bg"
+                tools:ignore="UselessParent">
+
+                <ImageView
+                    android:id="@+id/accessibility_icon"
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:contentDescription="@string/todo"
+                    android:src="@drawable/accessibility_icon" />
+
+                <TextView
+                    android:id="@+id/accessibility_label"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center_vertical"
+                    android:gravity="center"
+                    android:textSize="12sp"
+                    android:layout_marginStart="4dp"
+                    android:text="支持残疾人乘坐"
+                    android:textStyle="bold"
+                    android:textColor="#2196F3" />
+            </LinearLayout>
+
+            <!-- 环线标签 -->
+            <LinearLayout
+                android:id="@+id/loop_line_tag"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:layout_marginTop="6dp"
+                android:gravity="center_vertical"
+                android:paddingStart="4dp"
+                android:paddingEnd="4dp"
+                android:paddingTop="2dp"
+                android:paddingBottom="3dp"
+                android:background="@drawable/red_rounded_bg"
+                tools:ignore="UselessParent">
+
+                <TextView
+                    android:id="@+id/loop_line_label"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center_vertical"
+                    android:gravity="center"
+                    android:textSize="12sp"
+                    android:text="环线"
+                    android:textStyle="bold"
+                    android:textColor="#FFFFFF" />
+            </LinearLayout>
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- 站点列表 -->
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/station_list"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="5dp"
+        android:layout_marginEnd="5dp" />
+</LinearLayout>
