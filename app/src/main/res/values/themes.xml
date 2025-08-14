@@ -6,4 +6,10 @@
     </style>
 
     <style name="Theme.诸暨公交" parent="Base.Theme.诸暨公交" />
+
+    <style name="ModalDialogTheme" parent="Theme.AppCompat.Light.Dialog.Alert">
+        <item name="android:windowIsFloating">true</item>
+        <item name="android:windowCloseOnTouchOutside">false</item>
+        <item name="android:backgroundDimEnabled">true</item>
+    </style>
 </resources>

@@ -5,13 +5,22 @@ import static com.google.android.material.internal.ViewUtils.dpToPx;
 import android.annotation.SuppressLint;
 import android.content.Intent;
 import android.graphics.Rect;
+import android.graphics.Typeface;
 import android.os.Bundle;
 
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 
 import android.os.Handler;
+import android.text.Html;
+import android.text.Spanned;
 import android.util.Log;
+import android.view.Gravity;
+import android.view.LayoutInflater;
 import android.view.View;
+import android.view.Window;
+import android.view.WindowManager;
+import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -50,6 +59,8 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private StationAdapter stationAdapter;
     private List<BusEtaItem> etaItems = new ArrayList<>();
     private BusEtaAdapter busEtaAdapter;
+    private TextView scheduleButton;
+    private static final String TAG = "BusLineDetailActivity";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -60,6 +71,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             lineName = intent.getStringExtra("line_name");
             startStation = intent.getStringExtra("start_station");
             endStation = intent.getStringExtra("end_station");
+            scheduleButton = findViewById(R.id.schedule_button);
             routeNumber = findViewById(R.id.route_number);
             routeNumber.setText(lineName);
             LinearLayout noticeBar = findViewById(R.id.notice_bar);
@@ -77,40 +89,39 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             loopLineTag.setVisibility(View.GONE);
             accessibilityTag = findViewById(R.id.accessibility_tag);
             accessibilityTag.setVisibility(View.GONE);
-
             // 数据验证
             if (lineName == null) {
                 Toast.makeText(this, "线路信息获取失败", Toast.LENGTH_SHORT).show();
                 finish();
             } else {
                 busApiClient = new BusApiClient();
-
                 // 先查询线路通知
                 busApiClient.queryLineNotification(lineName, new BusApiClient.ApiCallback<>() {
                     @Override
                     public void onSuccess(BusApiClient.LineNotificationResponse response) {
                         if (response == null || response.data == null) {
-                            Log.e("BusInfo", "通知响应数据为空");
+                            Log.e(TAG + "-BusInfo-", "公告-无数据");
                             return;
                         }
                         if (!"200".equals(response.code)) {
-                            Log.e("BusInfo", "通知请求失败：" + response.code);
+                            Log.e(TAG + "-BusInfo-", "公告-状态码错误：" + response.code);
                             return;
                         }
                         if (response.data.hasNotification) {
                             runOnUiThread(() -> {
                                 noticeBar.setVisibility(View.VISIBLE);
                                 noticeText.setText(HtmlParser.htmlToFormattedText(response.data.text));
+                                // 设置公告栏点击事件
+                                noticeBar.setOnClickListener(v -> showFullNoticeDialog(response.data.text));
                             });
                         }
                     }
 
                     @Override
                     public void onError(BusApiClient.BusApiException e) {
-                        Log.e("API Error", "获取通知失败: " + e.getMessage());
+                        Log.e(TAG + "-BusInfo-", "公告-网络请求失败：" + e.getMessage());
                     }
                 });
-
                 // 查询公交线路详情（获取双向数据）
                 busApiClient.queryBusLineDetail(lineName, 1, new BusApiClient.ApiCallback<>() { // 0表示获取双向数据
                     @Override
@@ -120,15 +131,11 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
 
                         // 安全处理公交线路数据
                         if (response == null || response.data == null) {
-                            Log.e("BusInfo", "线路响应数据为空");
-                            runOnUiThread(() ->
-                                    Toast.makeText(BusLineDetailActivity.this, "线路数据异常", Toast.LENGTH_SHORT).show());
+                            Log.e(TAG + "-BusInfo-", "公交线路-无数据");
                             return;
                         }
                         if (!"200".equals(response.code)) {
-                            Log.e("BusInfo", "线路请求失败：" + response.code);
-                            runOnUiThread(() ->
-                                    Toast.makeText(BusLineDetailActivity.this, "获取线路数据失败", Toast.LENGTH_SHORT).show());
+                            Log.e(TAG + "-BusInfo-", "公交线路-状态码错误：" + response.code);
                             return;
                         }
 
@@ -153,17 +160,14 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                                 loopLineTag.setVisibility(View.VISIBLE);
                             } else {
                                 // 没有方向数据
-                                Log.e("BusInfo", "线路无方向数据");
-                                Toast.makeText(BusLineDetailActivity.this, "线路数据异常", Toast.LENGTH_SHORT).show();
+                                Log.e(TAG + "-BusInfo-", "公交线路-没有方向数据：" + response.code);
                             }
                         });
                     }
 
                     @Override
                     public void onError(BusApiClient.BusApiException e) {
-                        Log.e("API Error", "获取线路失败: " + e.getMessage());
-                        runOnUiThread(() ->
-                                Toast.makeText(BusLineDetailActivity.this, "获取线路数据失败", Toast.LENGTH_SHORT).show());
+                        Log.e(TAG + "-BusInfo-", "获取公交线路失败");
                     }
                 });
             }
@@ -183,6 +187,40 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         realTimeManager.stopTracking();
     }
 
+    // 显示完整公告的弹窗方法
+    private void showFullNoticeDialog(String noticeContent) {
+        // 1. 创建模态对话框
+        AlertDialog.Builder builder = new AlertDialog.Builder(this, R.style.ModalDialogTheme);
+        // 2. 加载布局
+        View dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_notice, null);
+        builder.setView(dialogView);
+
+        // 3. 创建并显示对话框
+        AlertDialog dialog = builder.create();
+        dialog.setCanceledOnTouchOutside(true); // 点击外部不消失
+
+        // 4. 处理HTML内容
+        TextView noticeTextView = dialogView.findViewById(R.id.notice_content);
+        Spanned html = Html.fromHtml(noticeContent, Html.FROM_HTML_MODE_COMPACT);
+        noticeTextView.setText(html);
+        // 6. 显示前配置窗口参数（优化显示效果）
+        dialog.setOnShowListener(d -> {
+            Window window = dialog.getWindow();
+            if (window != null) {
+                // 设置背景变暗效果
+                window.setDimAmount(0.4f);
+                // 设置宽度为屏幕的90%
+                WindowManager.LayoutParams lp = new WindowManager.LayoutParams();
+                lp.copyFrom(window.getAttributes());
+                lp.width = (int) (getResources().getDisplayMetrics().widthPixels);
+                lp.height = WindowManager.LayoutParams.WRAP_CONTENT;
+                window.setAttributes(lp);
+            }
+        });
+
+        dialog.show();
+    }
+
     /**
      * 切换线路方向
      */
@@ -190,7 +228,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         if (!isTwoWayLine) return;
         // 切换方向
         currentDirection = (currentDirection == 1) ? 2 : 1;
-        Log.d("BusInfo", "切换方向到: " + (currentDirection == 1 ? "上行" : "下行"));
+        Log.e(TAG + "-BusInfo-", "切换方向到: " + (currentDirection == 1 ? "上行" : "下行"));
         // 使用缓存数据显示新方向
         showDirection(currentDirection);
     }
@@ -205,7 +243,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     @SuppressLint("SetTextI18n")
     private void showDirection(int direction) {
         if (cachedResponse == null || cachedResponse.data == null) {
-            Log.e("BusInfo", "显示方向失败: 缓存数据为空");
+            Log.e(TAG + "-BusInfo-", "显示方向失败: 缓存数据为空");
             return;
         }
 
@@ -221,10 +259,31 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         }
 
         if (lineDirection != null) {
-            Log.d("BusInfo", "显示" + directionName + "方向: " +
-                    (lineDirection.startStation != null ? lineDirection.startStation : "未知起点") +
-                    " → " +
-                    (lineDirection.endStation != null ? lineDirection.endStation : "未知终点"));
+            BusApiClient.BusLineDirection finalLineDirection = lineDirection;
+            scheduleButton.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    busApiClient.getBusLinePlanTime(finalLineDirection.id, new BusApiClient.ApiCallback<BusApiClient.BusLinePlanTimeResponse>() {
+                        @Override
+                        public void onSuccess(BusApiClient.BusLinePlanTimeResponse response) {
+                            if (response == null || response.data == null) {
+                                Log.e(TAG + "-BusInfo-", "时刻表-无数据");
+                                return;
+                            }
+                            if (!"200".equals(response.code)) {
+                                Log.e(TAG + "-BusInfo-", "时刻表-状态码错误：" + response.code);
+                                return;
+                            }
+                            runOnUiThread(() -> showScheduleDialog(response.data));
+                        }
+
+                        @Override
+                        public void onError(BusApiClient.BusApiException e) {
+                            Log.e(TAG + "-BusInfo-", "时刻表-请求失败：" + e.getMessage());
+                        }
+                    });
+                }
+            });
             //停止之前的实时数据刷新
             if (realTimeManager != null) {
                 realTimeManager.stopTracking();
@@ -255,8 +314,6 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 for (BusApiClient.BusLineStation station : lineDirection.stationList) {
                     if (station != null) {
                         stationData.add(station);
-                        String stationName = station.stationName != null ? station.stationName : "未知站点";
-                        Log.d("BusInfo", station.stationOrder + ". " + stationName);
                     }
                 }
                 // TODO: 这里可以更新UI显示站点列表
@@ -269,18 +326,45 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                         false
                 );
                 rvLiveVehicles.setLayoutManager(rvLiveVehiclesLayoutManager);
-                busEtaAdapter = new BusEtaAdapter(etaItems, item -> {
-                    // 处理item点击事件
-                    Toast.makeText(this, "选择了" + item.getStopCount() + "站后的车辆", Toast.LENGTH_SHORT).show();
-                });
                 rvLiveVehicles.setAdapter(busEtaAdapter);
             } else {
-                Log.w("BusInfo", directionName + "方向无站点数据");
+                Log.w(TAG + "-BusInfo-", directionName + "方向无站点数据");
             }
 
         } else {
-            Log.e("BusInfo", "无法显示" + (direction == 1 ? "上行" : "下行") + "方向: 数据为空");
+            Log.w(TAG + "-BusInfo-", "无法显示" + (direction == 1 ? "上行" : "下行") + "方向: 数据为空");
         }
+    }
+
+    private void showScheduleDialog(List<String> scheduleTimes) {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        View dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_bus_schedule, null);
+        builder.setView(dialogView);
+        AlertDialog dialog = builder.create();
+
+        TextView scheduleText = dialogView.findViewById(R.id.schedule_text);
+        scheduleText.setTypeface(Typeface.MONOSPACE); // 等宽字体保证对齐
+
+        StringBuilder formattedSchedule = new StringBuilder();
+        int itemsPerRow = 5; // 每行4个时间点
+
+        for (int i = 0; i < scheduleTimes.size(); i++) {
+            // 关键修改：最后一个不加空格
+            if ((i + 1) % itemsPerRow == 0 || i == scheduleTimes.size() - 1) {
+                formattedSchedule.append(scheduleTimes.get(i)); // 行尾直接追加，不加空格
+            } else {
+                // 非行尾时间点：固定7字符宽度（左对齐）
+                formattedSchedule.append(String.format("%-6s", scheduleTimes.get(i)));
+            }
+
+            // 换行逻辑
+            if ((i + 1) % itemsPerRow == 0 && i != scheduleTimes.size() - 1) {
+                formattedSchedule.append("\n\n");
+            }
+        }
+
+        scheduleText.setText(formattedSchedule.toString());
+        dialog.show();
     }
 
     private void showStationDetails(BusApiClient.BusLineStation station, int position) {
@@ -307,6 +391,8 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         }
     }
 
+    private int lastSelectedStationIndex;
+
     /**
      * 重载方法，处理可能为null的Double对象
      *
@@ -320,7 +406,6 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         return formatPrice(price.doubleValue());
     }
 
-
     @Override
     public void onBusPositionsUpdated(List<BusApiClient.BusPosition> positions) {
         runOnUiThread(() -> {
@@ -329,14 +414,14 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 stationAdapter.updateBusPositions(positions);
 
                 int selectedStationIndex = stationAdapter.getSelectedPosition();
-                Log.d("BusInfo", "当前选中站点的索引位置: " + selectedStationIndex);
-
                 if (selectedStationIndex != -1) {
                     BusApiClient.BusLineStation selectedStation = stationAdapter.getBusLineStation(selectedStationIndex);
-                    Log.d("BusInfo", "选中站点名称: " + selectedStation.stationName);
                     etaItems.clear();
 
-                    // 用于记录最近车辆的信息
+                    // 临时列表用于保持原始顺序
+                    List<BusEtaItem> tempList = new ArrayList<>();
+
+                    // 找出距离选中站点最近的车辆
                     BusApiClient.BusPosition nearestVehicle = null;
                     int minStopCount = Integer.MAX_VALUE;
 
@@ -345,51 +430,51 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
 
                         // 安全检查
                         if (vehicleStationIndex < 0 || vehicleStationIndex >= stationAdapter.getItemCount()) {
-                            Log.e("BusInfo", "车辆索引越界: " + vehicleStationIndex);
                             continue;
                         }
 
                         int stopCount = selectedStationIndex - vehicleStationIndex;
 
-                        // 找出距离选中站点最近的车辆
-                        if (stopCount >= 0 && stopCount < minStopCount) {
+                        // 更新最近车辆
+                        if (stopCount >= 0 && stopCount <= minStopCount) {
                             minStopCount = stopCount;
                             nearestVehicle = vehicle;
                         }
 
+                        // 计算距离和时间
                         if (vehicleStationIndex <= selectedStationIndex) {
                             int totalDistanceMeters = vehicle.distanceToNext;
-
-                            // 计算途经站点距离
                             for (int stationIndex = vehicleStationIndex + 1; stationIndex < selectedStationIndex; stationIndex++) {
-                                if (stationIndex >= stationAdapter.getItemCount()) break;
-                                totalDistanceMeters += stationAdapter.getBusLineStation(stationIndex).lastDistance;
+                                if (stationIndex < stationAdapter.getItemCount()) {
+                                    totalDistanceMeters += stationAdapter.getBusLineStation(stationIndex).lastDistance;
+                                }
                             }
-
-                            // 计算预计时间（分钟）
                             int etaMinutes = realTimeManager.busAverageSpeed > 0 ?
                                     Math.round((float) totalDistanceMeters / realTimeManager.busAverageSpeed) : 0;
-
-                            etaItems.add(new BusEtaItem(
-                                    stopCount,
-                                    etaMinutes,
-                                    totalDistanceMeters
-                            ));
-
-                            Log.d("BusInfo", "车辆 " + vehicle.plateNumber +
-                                    "\n站数:" + stopCount +
-                                    "\n总距离:" + totalDistanceMeters + "米" +
-                                    "\n预计时间:" + etaMinutes + "分钟");
-                        } else {
-                            Log.d("BusInfo", "车辆 " + vehicle.plateNumber + " 已过选中站点");
+                            tempList.add(new BusEtaItem(stopCount, etaMinutes, totalDistanceMeters));
                         }
                     }
-                    // 播报最近车辆的下一站信息
-                    if (nearestVehicle != null && nearestVehicle.isArrived) {
-                        int nextStationIndex = nearestVehicle.currentStationOrder; // 当前车辆所在站点的order
-                        BusApiClient.BusLineStation nextStation = stationAdapter.getBusLineStation(nextStationIndex);
-                        TTSUtils.getInstance(this).speak("下一站：" + nextStation.stationName);
+
+                    // 反转etaItems列表（关键修改点）
+                    Collections.reverse(tempList);
+                    etaItems.addAll(tempList);
+                    assert nearestVehicle != null;
+                    if (!nearestVehicle.isArrived) {
+                        lastSelectedStationIndex = 0;
                     }
+
+                    // 播报逻辑保持不变
+                    if (nearestVehicle != null && nearestVehicle.isArrived && lastSelectedStationIndex != selectedStationIndex) {
+                        int nextStationIndex = nearestVehicle.currentStationOrder;
+                        if (nextStationIndex < stationAdapter.getItemCount()) {
+                            BusApiClient.BusLineStation nextStation = stationAdapter.getBusLineStation(nextStationIndex);
+                            String announcement = "开往" + startStation + "方向的" + lineName +
+                                    "公交车，即将到达：" + nextStation.stationName;
+                            TTSUtils.getInstance(this).speak(announcement);
+                            lastSelectedStationIndex = selectedStationIndex;
+                        }
+                    }
+
                     busEtaAdapter.notifyDataSetChanged();
                 }
             }
@@ -399,7 +484,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     @Override
     public void onError(String message) {
         runOnUiThread(() -> {
-            Toast.makeText(this, "实时更新失败: " + message, Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "车辆实时位置更新失败: " + message, Toast.LENGTH_SHORT).show();
         });
     }
 }

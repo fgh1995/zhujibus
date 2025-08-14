@@ -7,7 +7,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class BusRealTimeManager {
-    private static final long REFRESH_INTERVAL = 5 * 1000; // 15秒刷新一次
+    private static final long REFRESH_INTERVAL = 10 * 1000; // 15秒刷新一次
     private Handler handler;
     private String currentLineId;
     private List<BusApiClient.BusPosition> busPositions = new ArrayList<>();

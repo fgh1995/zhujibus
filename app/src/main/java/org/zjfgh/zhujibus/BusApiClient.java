@@ -416,4 +416,35 @@ public class BusApiClient {
         public String plateNumber;   // 车牌号
         public int isArriveStation;  // 是否到站(0:未到站,1:已到站)
     }
+    // ==================== 公交线路计划发车时间查询接口 ====================
+
+    /**
+     * 查询公交线路计划发车时间
+     *
+     * @param lineId   线路ID
+     * @param callback 回调接口
+     */
+    public void getBusLinePlanTime(String lineId,
+                                   ApiCallback<BusLinePlanTimeResponse> callback) {
+        BusLinePlanTimeRequest request = new BusLinePlanTimeRequest(lineId);
+        callApiAsync("/gzcx-busServer/client/busLine/getBusLinePlanSimpleTime",
+                request, BusLinePlanTimeResponse.class, callback);
+    }
+
+    // ==================== 计划发车时间请求和响应模型 ====================
+    public static class BusLinePlanTimeRequest {
+        public String lineId;  // 线路ID
+
+        public BusLinePlanTimeRequest(String lineId) {
+            this.lineId = lineId;
+        }
+    }
+
+    public static class BusLinePlanTimeResponse {
+        public String returnFlag;  // 返回标志
+        public String returnInfo;  // 返回信息
+        public String code;       // 状态码
+        public String msg;        // 消息
+        public List<String> data; // 发车时间列表
+    }
 }

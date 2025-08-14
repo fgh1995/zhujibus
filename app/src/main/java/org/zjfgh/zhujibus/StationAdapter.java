@@ -131,13 +131,9 @@ public class StationAdapter extends RecyclerView.Adapter<StationAdapter.StationV
             case CURRENT:
                 // 当前站 - 显示已到站图标
                 holder.arrivedContainer.setVisibility(View.VISIBLE);
-                Log.d("BusInfo", "arrivalStatus.已到站:" + station.stationName);
-                Log.d("BusInfo", "arrivalStatus.正在上下客");
                 break;
             case NEXT_STATION:
                 holder.onWayContainer.setVisibility(View.VISIBLE);
-                Log.d("BusInfo", "arrivalStatus.途中:" + station.stationName);
-                Log.d("BusInfo", "station.arrivalTime" + station.arrivalTime);
                 break;
 
             case DEFAULT:

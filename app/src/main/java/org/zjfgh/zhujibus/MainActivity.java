@@ -27,7 +27,7 @@ public class MainActivity extends AppCompatActivity {
         recyclerView = findViewById(R.id.recyclerView);
         tv_search_line = findViewById(R.id.tv_search_line);
         BusApiClient client = new BusApiClient();
-        TTSUtils ttsUtils = TTSUtils.getInstance(this);
+        TTSUtils.getInstance(this);
         client.getNearbyStations(120.235555, 29.713397, "2", 3, 5, new BusApiClient.ApiCallback<>() {
             @Override
             public void onSuccess(BusApiClient.StationLineAroundResponse response) {
