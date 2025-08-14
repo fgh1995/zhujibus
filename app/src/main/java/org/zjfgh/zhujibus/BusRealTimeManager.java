@@ -61,10 +61,8 @@ public class BusRealTimeManager {
     private void processResponse(BusApiClient.BusVehicleDynamicData data,
                                  RealTimeUpdateListener listener) {
         List<BusApiClient.BusPosition> newPositions = new ArrayList<>();
-
         for (BusApiClient.VehicleDynamicInfo vehicle : data.list) {
             BusApiClient.BusPosition position = new BusApiClient.BusPosition();
-
             position.plateNumber = vehicle.plateNumber;
             position.isArrived = vehicle.isArriveStation == 1;
             position.distanceToNext = vehicle.distance;

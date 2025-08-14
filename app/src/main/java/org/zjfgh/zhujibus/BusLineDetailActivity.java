@@ -1,7 +1,10 @@
 package org.zjfgh.zhujibus;
 
+import static com.google.android.material.internal.ViewUtils.dpToPx;
+
 import android.annotation.SuppressLint;
 import android.content.Intent;
+import android.graphics.Rect;
 import android.os.Bundle;
 
 import androidx.appcompat.app.AppCompatActivity;
@@ -20,7 +23,9 @@ import androidx.recyclerview.widget.RecyclerView;
 
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 
 public class BusLineDetailActivity extends AppCompatActivity implements BusRealTimeManager.RealTimeUpdateListener {
 
@@ -43,6 +48,8 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private Handler handler = new Handler();
     private RecyclerView stationListRecyclerView;
     private StationAdapter stationAdapter;
+    private List<BusEtaItem> etaItems = new ArrayList<>();
+    private BusEtaAdapter busEtaAdapter;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -181,11 +188,9 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
      */
     private void swapDirection() {
         if (!isTwoWayLine) return;
-
         // 切换方向
         currentDirection = (currentDirection == 1) ? 2 : 1;
         Log.d("BusInfo", "切换方向到: " + (currentDirection == 1 ? "上行" : "下行"));
-
         // 使用缓存数据显示新方向
         showDirection(currentDirection);
     }
@@ -245,10 +250,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 };
                 stationListRecyclerView.setLayoutManager(layoutManager);
                 // 创建并设置适配器
-                stationAdapter = new StationAdapter(lineDirection.stationList, station -> {
-                    // 处理站点点击事件
-                    //showStationDetails(station);
-                });
+                stationAdapter = new StationAdapter(lineDirection.stationList, this::showStationDetails);
                 stationListRecyclerView.setAdapter(stationAdapter);
                 for (BusApiClient.BusLineStation station : lineDirection.stationList) {
                     if (station != null) {
@@ -260,6 +262,18 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 // TODO: 这里可以更新UI显示站点列表
                 realTimeManager = new BusRealTimeManager(handler, lineDirection.stationList);
                 realTimeManager.startTracking(lineDirection.id, this);
+                RecyclerView rvLiveVehicles = findViewById(R.id.rv_live_vehicles);
+                LinearLayoutManager rvLiveVehiclesLayoutManager = new LinearLayoutManager(
+                        this,
+                        LinearLayoutManager.HORIZONTAL,  // 关键设置
+                        false
+                );
+                rvLiveVehicles.setLayoutManager(rvLiveVehiclesLayoutManager);
+                busEtaAdapter = new BusEtaAdapter(etaItems, item -> {
+                    // 处理item点击事件
+                    Toast.makeText(this, "选择了" + item.getStopCount() + "站后的车辆", Toast.LENGTH_SHORT).show();
+                });
+                rvLiveVehicles.setAdapter(busEtaAdapter);
             } else {
                 Log.w("BusInfo", directionName + "方向无站点数据");
             }
@@ -267,6 +281,10 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         } else {
             Log.e("BusInfo", "无法显示" + (direction == 1 ? "上行" : "下行") + "方向: 数据为空");
         }
+    }
+
+    private void showStationDetails(BusApiClient.BusLineStation station, int position) {
+        stationAdapter.setSelectedPosition(position);
     }
 
     /**
@@ -309,6 +327,71 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             if (!positions.isEmpty()) {
                 stationAdapter.updateBusAverageSpeed(realTimeManager.busAverageSpeed);
                 stationAdapter.updateBusPositions(positions);
+
+                int selectedStationIndex = stationAdapter.getSelectedPosition();
+                Log.d("BusInfo", "当前选中站点的索引位置: " + selectedStationIndex);
+
+                if (selectedStationIndex != -1) {
+                    BusApiClient.BusLineStation selectedStation = stationAdapter.getBusLineStation(selectedStationIndex);
+                    Log.d("BusInfo", "选中站点名称: " + selectedStation.stationName);
+                    etaItems.clear();
+
+                    // 用于记录最近车辆的信息
+                    BusApiClient.BusPosition nearestVehicle = null;
+                    int minStopCount = Integer.MAX_VALUE;
+
+                    for (BusApiClient.BusPosition vehicle : positions) {
+                        int vehicleStationIndex = vehicle.currentStationOrder - 1;
+
+                        // 安全检查
+                        if (vehicleStationIndex < 0 || vehicleStationIndex >= stationAdapter.getItemCount()) {
+                            Log.e("BusInfo", "车辆索引越界: " + vehicleStationIndex);
+                            continue;
+                        }
+
+                        int stopCount = selectedStationIndex - vehicleStationIndex;
+
+                        // 找出距离选中站点最近的车辆
+                        if (stopCount >= 0 && stopCount < minStopCount) {
+                            minStopCount = stopCount;
+                            nearestVehicle = vehicle;
+                        }
+
+                        if (vehicleStationIndex <= selectedStationIndex) {
+                            int totalDistanceMeters = vehicle.distanceToNext;
+
+                            // 计算途经站点距离
+                            for (int stationIndex = vehicleStationIndex + 1; stationIndex < selectedStationIndex; stationIndex++) {
+                                if (stationIndex >= stationAdapter.getItemCount()) break;
+                                totalDistanceMeters += stationAdapter.getBusLineStation(stationIndex).lastDistance;
+                            }
+
+                            // 计算预计时间（分钟）
+                            int etaMinutes = realTimeManager.busAverageSpeed > 0 ?
+                                    Math.round((float) totalDistanceMeters / realTimeManager.busAverageSpeed) : 0;
+
+                            etaItems.add(new BusEtaItem(
+                                    stopCount,
+                                    etaMinutes,
+                                    totalDistanceMeters
+                            ));
+
+                            Log.d("BusInfo", "车辆 " + vehicle.plateNumber +
+                                    "\n站数:" + stopCount +
+                                    "\n总距离:" + totalDistanceMeters + "米" +
+                                    "\n预计时间:" + etaMinutes + "分钟");
+                        } else {
+                            Log.d("BusInfo", "车辆 " + vehicle.plateNumber + " 已过选中站点");
+                        }
+                    }
+                    // 播报最近车辆的下一站信息
+                    if (nearestVehicle != null && nearestVehicle.isArrived) {
+                        int nextStationIndex = nearestVehicle.currentStationOrder; // 当前车辆所在站点的order
+                        BusApiClient.BusLineStation nextStation = stationAdapter.getBusLineStation(nextStationIndex);
+                        TTSUtils.getInstance(this).speak("下一站：" + nextStation.stationName);
+                    }
+                    busEtaAdapter.notifyDataSetChanged();
+                }
             }
         });
     }

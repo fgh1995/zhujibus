@@ -1,6 +1,7 @@
 package org.zjfgh.zhujibus;
 
 import android.annotation.SuppressLint;
+import android.graphics.Color;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -18,9 +19,17 @@ public class StationAdapter extends RecyclerView.Adapter<StationAdapter.StationV
     private List<BusApiClient.BusLineStation> stationList;
     private int busAverageSpeed = 500; // 默认500米/分钟
     private final OnItemClickListener listener;
+    private int selectedPosition = -1;
 
     public interface OnItemClickListener {
-        void onItemClick(BusApiClient.BusLineStation station);
+        void onItemClick(BusApiClient.BusLineStation station, int position);
+    }
+
+    public void setSelectedPosition(int position) {
+        int oldSelected = selectedPosition;
+        selectedPosition = position;
+        if (oldSelected != -1) notifyItemChanged(oldSelected); // 恢复旧位置的颜色
+        notifyItemChanged(selectedPosition); // 更新新位置的颜色
     }
 
     public StationAdapter(List<BusApiClient.BusLineStation> stationList, OnItemClickListener listener) {
@@ -40,6 +49,15 @@ public class StationAdapter extends RecyclerView.Adapter<StationAdapter.StationV
     public void updateBusAverageSpeed(int speed) {
         this.busAverageSpeed = speed;
         notifyDataSetChanged();
+    }
+
+    public int getSelectedPosition() {
+
+        return this.selectedPosition;
+    }
+
+    public BusApiClient.BusLineStation getBusLineStation(int position) {
+        return stationList.get(position);
     }
 
     public void updateBusPositions(List<BusApiClient.BusPosition> positions) {
@@ -101,7 +119,7 @@ public class StationAdapter extends RecyclerView.Adapter<StationAdapter.StationV
         // 点击事件
         holder.itemView.setOnClickListener(v -> {
             if (listener != null) {
-                listener.onItemClick(station);
+                listener.onItemClick(station, position);
             }
         });
         // 重置所有视图状态
@@ -127,6 +145,21 @@ public class StationAdapter extends RecyclerView.Adapter<StationAdapter.StationV
                 holder.onWayContainer.setVisibility(View.INVISIBLE);
                 break;
         }
+        // 根据是否选中设置不同的背景颜色
+        if (position == selectedPosition) {
+            holder.stationOrder.setBackgroundResource(R.drawable.red_circle);
+            holder.stationName.setTextColor(Color.RED);
+        } else {
+            holder.stationOrder.setBackgroundResource(R.drawable.blue_circle); // 默认颜色
+            holder.stationName.setTextColor(Color.parseColor("#333333"));
+        }
+
+        holder.itemView.setOnClickListener(v -> {
+            if (listener != null) {
+                listener.onItemClick(station, position);
+                setSelectedPosition(position); // 更新选中位置
+            }
+        });
     }
 
     @Override

@@ -321,6 +321,19 @@
                     android:textColor="#FFFFFF" />
             </LinearLayout>
         </LinearLayout>
+
+        <View
+            android:id="@+id/view_"
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_margin="8dp"
+            android:background="#B8B8B8" />
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/rv_live_vehicles"
+            android:layout_gravity="center"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
     </LinearLayout>
 
     <!-- 站点列表 -->
