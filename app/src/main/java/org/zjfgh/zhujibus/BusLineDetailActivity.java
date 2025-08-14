@@ -260,30 +260,25 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
 
         if (lineDirection != null) {
             BusApiClient.BusLineDirection finalLineDirection = lineDirection;
-            scheduleButton.setOnClickListener(new View.OnClickListener() {
+            scheduleButton.setOnClickListener(v -> busApiClient.getBusLinePlanTime(finalLineDirection.id, new BusApiClient.ApiCallback<BusApiClient.BusLinePlanTimeResponse>() {
                 @Override
-                public void onClick(View v) {
-                    busApiClient.getBusLinePlanTime(finalLineDirection.id, new BusApiClient.ApiCallback<BusApiClient.BusLinePlanTimeResponse>() {
-                        @Override
-                        public void onSuccess(BusApiClient.BusLinePlanTimeResponse response) {
-                            if (response == null || response.data == null) {
-                                Log.e(TAG + "-BusInfo-", "时刻表-无数据");
-                                return;
-                            }
-                            if (!"200".equals(response.code)) {
-                                Log.e(TAG + "-BusInfo-", "时刻表-状态码错误：" + response.code);
-                                return;
-                            }
-                            runOnUiThread(() -> showScheduleDialog(response.data));
-                        }
-
-                        @Override
-                        public void onError(BusApiClient.BusApiException e) {
-                            Log.e(TAG + "-BusInfo-", "时刻表-请求失败：" + e.getMessage());
-                        }
-                    });
+                public void onSuccess(BusApiClient.BusLinePlanTimeResponse response) {
+                    if (response == null || response.data == null) {
+                        Log.e(TAG + "-BusInfo-", "时刻表-无数据");
+                        return;
+                    }
+                    if (!"200".equals(response.code)) {
+                        Log.e(TAG + "-BusInfo-", "时刻表-状态码错误：" + response.code);
+                        return;
+                    }
+                    runOnUiThread(() -> showScheduleDialog(response.data));
                 }
-            });
+
+                @Override
+                public void onError(BusApiClient.BusApiException e) {
+                    Log.e(TAG + "-BusInfo-", "时刻表-请求失败：" + e.getMessage());
+                }
+            }));
             //停止之前的实时数据刷新
             if (realTimeManager != null) {
                 realTimeManager.stopTracking();
@@ -326,6 +321,8 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                         false
                 );
                 rvLiveVehicles.setLayoutManager(rvLiveVehiclesLayoutManager);
+                busEtaAdapter = new BusEtaAdapter(etaItems, item -> {
+                });
                 rvLiveVehicles.setAdapter(busEtaAdapter);
             } else {
                 Log.w(TAG + "-BusInfo-", directionName + "方向无站点数据");
