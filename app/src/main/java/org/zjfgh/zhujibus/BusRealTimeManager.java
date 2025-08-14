@@ -73,18 +73,14 @@ public class BusRealTimeManager {
             position.lng = vehicle.lng;
             // 当前站始终是 vehicleOrder（无论是否到站）
             position.currentStationOrder = vehicle.vehicleOrder;
-            // 下一站：如果已到站，则下一站是 vehicleOrder + 1
-            // 如果未到站，也表示下一站是 vehicleOrder + 1（但UI上仍显示在 currentStationOrder 的指示线中间）
+            // 下一站是 vehicleOrder + 1
             position.nextStationOrder = vehicle.vehicleOrder + 1;
-
             // 确保不超出站点范围
             if (stationList != null) {
                 position.nextStationOrder = Math.min(position.nextStationOrder, stationList.size());
             }
-
             newPositions.add(position);
         }
-
         this.busPositions = newPositions;
         listener.onBusPositionsUpdated(newPositions);
     }

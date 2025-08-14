@@ -29,13 +29,6 @@
             android:layout_height="30dp"
             android:layout_gravity="end"
             android:src="@drawable/bus_icon" />
-
-        <TextView
-            android:id="@+id/tv_plate_number_is_arrive"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="浙浙D000000"
-            android:textSize="12sp" />
     </LinearLayout>
 
     <TextView
@@ -53,7 +46,7 @@
 
     <!-- 线路指示线 -->
     <View
-        android:id="@+id/line_top"
+        android:id="@+id/line_bottom"
         android:layout_width="2dp"
         android:layout_height="wrap_content"
         android:layout_marginStart="15dp"
@@ -72,26 +65,16 @@
         android:layout_marginEnd="20dp"
         android:gravity="center_horizontal"
         android:orientation="vertical"
-        app:layout_constraintBottom_toBottomOf="@id/line_top"
-        app:layout_constraintEnd_toStartOf="@id/line_top"
-        app:layout_constraintTop_toTopOf="@id/line_top"
+        app:layout_constraintBottom_toBottomOf="@id/line_bottom"
+        app:layout_constraintEnd_toStartOf="@id/line_bottom"
+        app:layout_constraintTop_toTopOf="@id/line_bottom"
         app:layout_constraintVertical_bias="0.5">
-
         <!-- 车辆途中指示图标 -->
         <ImageView
             android:id="@+id/bus_on_way_icon"
             android:layout_width="30dp"
             android:layout_height="30dp"
-            android:src="@drawable/bus_icon"
-            android:layout_gravity="end" />
-
-        <!-- 途中车牌号 -->
-        <TextView
-            android:id="@+id/tv_plate_number_not_arrive"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="浙浙D0000000"
-            android:textSize="12sp" />
+            android:src="@drawable/bus_icon" />
     </LinearLayout>
 
     <TextView

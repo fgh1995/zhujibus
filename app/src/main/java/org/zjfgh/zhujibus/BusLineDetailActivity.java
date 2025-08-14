@@ -237,8 +237,13 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             if (lineDirection.stationList != null) {
                 // 设置RecyclerView
                 stationListRecyclerView = findViewById(R.id.station_list);
-                stationListRecyclerView.setLayoutManager(new LinearLayoutManager(this));
-
+                LinearLayoutManager layoutManager = new LinearLayoutManager(this) {
+                    @Override
+                    public boolean supportsPredictiveItemAnimations() {
+                        return false;
+                    }
+                };
+                stationListRecyclerView.setLayoutManager(layoutManager);
                 // 创建并设置适配器
                 stationAdapter = new StationAdapter(lineDirection.stationList, station -> {
                     // 处理站点点击事件
@@ -302,26 +307,10 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     public void onBusPositionsUpdated(List<BusApiClient.BusPosition> positions) {
         runOnUiThread(() -> {
             if (!positions.isEmpty()) {
-                // 更新UI显示车辆位置
-                BusApiClient.BusPosition firstBus = positions.get(0);
-
-                // 更新适配器中的车辆位置
                 stationAdapter.updateBusAverageSpeed(realTimeManager.busAverageSpeed);
                 stationAdapter.updateBusPositions(positions);
-
-                // 滚动到当前站
-                scrollToStation(firstBus.currentStationOrder);
             }
         });
-    }
-
-    private void scrollToStation(int stationOrder) {
-        for (int i = 0; i < stationAdapter.getItemCount(); i++) {
-            if (stationAdapter.getStationAt(i).stationOrder == stationOrder) {
-                stationListRecyclerView.smoothScrollToPosition(i);
-                break;
-            }
-        }
     }
 
     @Override
