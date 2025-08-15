@@ -9,11 +9,11 @@ import android.view.ViewGroup;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
-import androidx.viewpager.widget.PagerAdapter;
+import androidx.recyclerview.widget.RecyclerView;
 
 import java.util.List;
 
-public class DirectionPagerAdapter extends PagerAdapter {
+public class DirectionPagerAdapter extends RecyclerView.Adapter<DirectionPagerAdapter.DirectionViewHolder> {
     private final Context context;
     private List<BusApiClient.LineDirection> directions;
 
@@ -22,53 +22,55 @@ public class DirectionPagerAdapter extends PagerAdapter {
         this.directions = directions;
     }
 
+    @NonNull
     @Override
-    public int getCount() {
+    public DirectionViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
+        View view = LayoutInflater.from(context).inflate(R.layout.item_bus_direction_station, parent, false);
+        return new DirectionViewHolder(view);
+    }
+
+    @Override
+    public void onBindViewHolder(@NonNull DirectionViewHolder holder, int position) {
+        holder.bindData(directions.get(position));
+    }
+
+    @Override
+    public int getItemCount() {
         return directions.size();
     }
 
-    @Override
-    public int getItemPosition(@NonNull Object object) {
-        // 强制每次数据变化时都重新创建所有页面
-        return POSITION_NONE;
-    }
+    // ViewHolder 类
+    static class DirectionViewHolder extends RecyclerView.ViewHolder {
+        private final TextView busStations;
+        private final TextView busRouteName;
+        private final TextView departureTime;
+        private final TextView collectTime;
+        private final TextView nextBusTime;
+        private final TextView nextBusLabel;
+        private final TextView busdistance;
 
-    @Override
-    public boolean isViewFromObject(@NonNull View view, @NonNull Object object) {
-        return view == object;
-    }
-
-    @NonNull
-    @Override
-    public Object instantiateItem(@NonNull ViewGroup container, int position) {
-        View view = LayoutInflater.from(context).inflate(R.layout.item_bus_direction_station, container, false);
-        Log.d("DirectionPagerAdapter", "Creating view for position: " + position + "view" + view);
-        bindData(view, directions.get(position));
-        container.addView(view);
-        return view;
-    }
-
-    @Override
-    public void destroyItem(@NonNull ViewGroup container, int position, @NonNull Object object) {
-        container.removeView((View) object);
-    }
-
-    @SuppressLint("SetTextI18n")
-    private void bindData(View view, BusApiClient.LineDirection direction) {
-        TextView busStations = view.findViewById(R.id.bus_stations);
-        TextView busRouteName = view.findViewById(R.id.bus_route_name);
-        if (direction != null) {
-            Log.w("busStations", busStations + "|" + direction.startStation + " - " + direction.endStation);
-            busRouteName.setText(direction.lineName);
-            busStations.setText(direction.startStation + " - " + direction.endStation);
+        public DirectionViewHolder(@NonNull View itemView) {
+            super(itemView);
+            busStations = itemView.findViewById(R.id.bus_stations);
+            busRouteName = itemView.findViewById(R.id.bus_route_name);
+            departureTime = itemView.findViewById(R.id.first_bus_time);
+            collectTime = itemView.findViewById(R.id.last_bus_time);
+            nextBusTime = itemView.findViewById(R.id.next_bus_time);
+            nextBusTime.setVisibility(View.INVISIBLE);
+            nextBusLabel = itemView.findViewById(R.id.next_bus_label);
+            busdistance = itemView.findViewById(R.id.bus_distance);
+            busdistance.setVisibility(View.GONE);
         }
 
-        //tvPrice.setText(String.format(Locale.getDefault(), "¥%.1f", direction.price));
-    }
-
-    // 添加更新数据的方法
-    public void updateDirections(List<BusApiClient.LineDirection> newDirections) {
-        this.directions = newDirections;
-        notifyDataSetChanged();
+        @SuppressLint("SetTextI18n")
+        public void bindData(BusApiClient.LineDirection direction) {
+            if (direction != null) {
+                Log.w("busStations", busStations + "|" + direction.startStation + " - " + direction.endStation);
+                busRouteName.setText(direction.lineName);
+                busStations.setText(direction.startStation + " - " + direction.endStation);
+                departureTime.setText(direction.departureTime);
+                collectTime.setText(direction.collectTime);
+            }
+        }
     }
 }

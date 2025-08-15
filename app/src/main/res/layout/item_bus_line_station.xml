@@ -4,17 +4,19 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
-    android:padding="8dp">
+    android:paddingTop="6dp"
+    android:background="?attr/colorSurfaceContainerLow">
 
     <RelativeLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         tools:ignore="UselessParent">
 
-        <androidx.viewpager.widget.ViewPager
+        <androidx.viewpager2.widget.ViewPager2
             android:id="@+id/view_pager"
             android:layout_width="match_parent"
-            android:layout_height="100dp" />
+            android:layout_height="wrap_content"
+            android:background="@color/white" />
 
         <LinearLayout
             android:id="@+id/indicator_container"

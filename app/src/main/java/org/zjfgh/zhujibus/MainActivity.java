@@ -92,7 +92,7 @@ public class MainActivity extends AppCompatActivity {
                     adapter.setOnItemClickListener(new StationRouteAdapter.OnItemClickListener() {
                         @Override
                         public void onStationClick(StationItem station) {
-                            queryStationDetails(station.getStationName());
+                            showStationDetailsDialog(station.getStationName());
                         }
 
                         @Override
@@ -110,56 +110,10 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    // 查询站点详情
-    private void queryStationDetails(String stationName) {
-        client.queryStationInfo(stationName, new BusApiClient.ApiCallback<>() {
-            @Override
-            public void onSuccess(BusApiClient.StationInfoResponse response) {
-                if ("200".equals(response.code)) {
-                    // 处理站点详情数据
-                    showStationDetailsDialog(stationName, response.data);
-                } else {
-                    Toast.makeText(MainActivity.this, "查询站点详情失败: " + response.msg, Toast.LENGTH_SHORT).show();
-                }
-            }
-
-            @Override
-            public void onError(BusApiClient.BusApiException e) {
-                Toast.makeText(MainActivity.this, "查询站点详情失败: " + e.getMessage(), Toast.LENGTH_SHORT).show();
-            }
-        });
-    }
-
     // 显示站点详情对话框
-    private void showStationDetailsDialog(String stationName, List<BusApiClient.StationLineInfo> lines) {
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        StationDetailsFragment stationDetailsFragment = new StationDetailsFragment();
+    private void showStationDetailsDialog(String stationName) {
+        StationDetailsFragment stationDetailsFragment = new StationDetailsFragment(stationName);
         stationDetailsFragment.show(getSupportFragmentManager(), "dialog_tag");
-//        builder.setTitle(stationName + " - 经过线路");
-//
-//        // 构建线路信息字符串
-//        StringBuilder sb = new StringBuilder();
-//        for (BusApiClient.StationLineInfo line : lines) {
-//            sb.append("线路: ").append(line.lineName).append("\n");
-//
-//            if (line.up != null) {
-//                sb.append("上行: ").append(line.up.startStation)
-//                        .append(" → ").append(line.up.endStation)
-//                        .append(" (").append(line.up.departureTime).append("-").append(line.up.collectTime).append(")\n");
-//            }
-//
-//            if (line.down != null) {
-//                sb.append("下行: ").append(line.down.startStation)
-//                        .append(" → ").append(line.down.endStation)
-//                        .append(" (").append(line.down.departureTime).append("-").append(line.down.collectTime).append(")\n");
-//            }
-//
-//            sb.append("\n");
-//        }
-//
-//        builder.setMessage(sb.toString());
-//        builder.setPositiveButton("确定", null);
-//        builder.show();
     }
 
     private void loadAnnouncements() {

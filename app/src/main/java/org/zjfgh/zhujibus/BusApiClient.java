@@ -626,4 +626,56 @@ public class BusApiClient {
         public String lineTypeName;  // 线路类型名称("城市")
         public String stationId;     // 站点ID(如"33068111213")
     }
+
+    /**
+     * 查询公交站点车辆动态信息
+     *
+     * @param lineIds    线路ID列表，多个用逗号分隔(如"330681112,330681111")
+     * @param stationIds 站点ID列表，多个用逗号分隔(如"33068111213,33068111124")
+     * @param callback   回调接口
+     */
+    public void queryStationVehicleDynamic(String lineIds,
+                                           String stationIds,
+                                           ApiCallback<StationVehicleDynamicResponse> callback) {
+        StationVehicleDynamicRequest request = new StationVehicleDynamicRequest(lineIds, stationIds);
+        callApiAsync("/gzcx-busServer/client/bus/vehicle/dynamic/station/details",
+                request, StationVehicleDynamicResponse.class, callback);
+    }
+    // ==================== 站点车辆动态请求和响应模型 ====================
+
+    /**
+     * 站点车辆动态请求模型
+     */
+    public static class StationVehicleDynamicRequest {
+        public String lineIds;    // 线路ID列表(逗号分隔)
+        public String stationIds; // 站点ID列表(逗号分隔)
+
+        public StationVehicleDynamicRequest(String lineIds, String stationIds) {
+            this.lineIds = lineIds;
+            this.stationIds = stationIds;
+        }
+    }
+
+    /**
+     * 站点车辆动态响应模型
+     */
+    public static class StationVehicleDynamicResponse {
+        public String returnFlag;  // 返回标志("200"表示成功)
+        public String returnInfo;  // 返回信息("成功")
+        public String code;       // 状态码("200")
+        public String msg;        // 消息("成功")
+        public List<StationVehicleInfo> data; // 车辆动态数据列表
+    }
+
+    /**
+     * 站点车辆动态信息模型
+     */
+    public static class StationVehicleInfo {
+        public int nextNumber;      // 下一站序号
+        public int distance;        // 距本站距离(米)
+        public String lineId;       // 线路ID
+        public String gpsTime;      // GPS时间(格式: "yyyy-MM-dd HH:mm:ss")
+        public int isArriveStation; // 是否到站(0:未到站,1:已到站)
+        public String stationId;    // 站点ID
+    }
 }

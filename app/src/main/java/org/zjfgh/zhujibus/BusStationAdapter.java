@@ -11,6 +11,7 @@ import android.widget.TextView;
 import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
 import androidx.viewpager.widget.ViewPager;
+import androidx.viewpager2.widget.ViewPager2;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -42,9 +43,10 @@ public class BusStationAdapter extends RecyclerView.Adapter<BusStationAdapter.Bu
         Log.w("-BusInfo-", "" + busLineItems.size());
         return busLineItems.size();
     }
+    
 
     static class BusLineViewHolder extends RecyclerView.ViewHolder {
-        private ViewPager directionViewPager;
+        private ViewPager2 directionViewPager;
         private LinearLayout indicatorContainer;
 
         public BusLineViewHolder(@NonNull View itemView) {
@@ -54,12 +56,20 @@ public class BusStationAdapter extends RecyclerView.Adapter<BusStationAdapter.Bu
 
         }
 
+
         public void bind(BusApiClient.StationLineInfo busLineItem) {
             // 设置指示器
             setupIndicators(busLineItem.getDirections().size());
             // 提前创建adapter
             adapter = new DirectionPagerAdapter(itemView.getContext(), busLineItem.getDirections());
             directionViewPager.setAdapter(adapter);
+            directionViewPager.registerOnPageChangeCallback(new ViewPager2.OnPageChangeCallback() {
+                @Override
+                public void onPageSelected(int position) {
+                    super.onPageSelected(position);
+                    updateIndicators(position);
+                }
+            });
         }
 
         private void setupIndicators(int count) {
