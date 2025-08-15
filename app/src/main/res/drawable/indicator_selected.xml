@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <!-- 实心圆形 -->
+    <solid android:color="@color/text_primary" /> <!-- 使用你的主题色 -->
+    <!-- 大小 -->
+    <size
+        android:width="8dp"
+        android:height="8dp" />
+    <!-- 可选：边框 -->
+    <stroke
+        android:width="0.5dp"
+        android:color="#FFFFFF" />
+</shape>

@@ -15,6 +15,13 @@ public class StationRouteAdapter extends RecyclerView.Adapter<BaseViewHolder> {
     private static final int TYPE_ROUTE = 1;
 
     private List<Object> flattenedList;
+    private OnItemClickListener onItemClickListener;
+
+    public interface OnItemClickListener {
+        void onStationClick(StationItem station);
+
+        void onRouteClick(RouteItem route);
+    }
 
     public StationRouteAdapter(List<StationItem> stationList) {
         this.flattenedList = flattenData(stationList);
@@ -50,11 +57,33 @@ public class StationRouteAdapter extends RecyclerView.Adapter<BaseViewHolder> {
 
     @Override
     public void onBindViewHolder(@NonNull BaseViewHolder holder, int position) {
-        holder.bind(flattenedList.get(position));
+        Object item = flattenedList.get(position);
+        holder.bind(item);
+
+        // 设置点击事件
+        holder.itemView.setOnClickListener(v -> {
+            if (onItemClickListener != null) {
+                if (item instanceof StationItem) {
+                    onItemClickListener.onStationClick((StationItem) item);
+                } else if (item instanceof RouteItem) {
+                    onItemClickListener.onRouteClick((RouteItem) item);
+                }
+            }
+        });
     }
 
     @Override
     public int getItemCount() {
         return flattenedList.size();
+    }
+
+    public void setOnItemClickListener(OnItemClickListener listener) {
+        this.onItemClickListener = listener;
+    }
+
+    // 更新数据方法
+    public void updateData(List<StationItem> newStationList) {
+        this.flattenedList = flattenData(newStationList);
+        notifyDataSetChanged();
     }
 }

@@ -32,18 +32,18 @@
                 android:textColor="@color/white"
                 android:textSize="14sp"
                 android:textStyle="bold"
-                tools:text="13"/>
+                tools:text="13" />
 
             <!-- 线路名称 -->
             <TextView
-                android:id="@+id/tv_line_name"
+                android:id="@+id/tv_line_name_station"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="12dp"
                 android:textColor="@color/text_primary"
                 android:textSize="18sp"
                 android:textStyle="bold"
-                tools:text="13路"/>
+                tools:text="13路" />
         </LinearLayout>
 
         <!-- 起点终点信息 -->
@@ -66,7 +66,7 @@
                     android:layout_height="wrap_content"
                     android:text="@string/start_station"
                     android:textColor="@color/text_secondary"
-                    android:textSize="12sp"/>
+                    android:textSize="12sp" />
 
                 <TextView
                     android:id="@+id/tv_start_station"
@@ -77,7 +77,7 @@
                     android:maxLines="1"
                     android:textColor="@color/text_primary"
                     android:textSize="14sp"
-                    tools:text="公交东站"/>
+                    tools:text="公交东站" />
             </LinearLayout>
 
             <!-- 箭头图标 -->
@@ -100,7 +100,7 @@
                     android:layout_height="wrap_content"
                     android:text="@string/end_station"
                     android:textColor="@color/text_secondary"
-                    android:textSize="12sp"/>
+                    android:textSize="12sp" />
 
                 <TextView
                     android:id="@+id/tv_end_station"
@@ -111,7 +111,7 @@
                     android:maxLines="1"
                     android:textColor="@color/text_primary"
                     android:textSize="14sp"
-                    tools:text="红联社区"/>
+                    tools:text="红联社区" />
             </LinearLayout>
         </LinearLayout>
     </LinearLayout>

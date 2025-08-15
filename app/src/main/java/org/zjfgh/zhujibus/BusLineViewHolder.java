@@ -15,7 +15,7 @@ public class BusLineViewHolder extends RecyclerView.ViewHolder {
     public BusLineViewHolder(@NonNull View itemView) {
         super(itemView);
         tvLineBadge = itemView.findViewById(R.id.tv_line_badge);
-        tvLineName = itemView.findViewById(R.id.tv_line_name);
+        tvLineName = itemView.findViewById(R.id.tv_line_name_station);
         tvStartStation = itemView.findViewById(R.id.tv_start_station);
         tvEndStation = itemView.findViewById(R.id.tv_end_station);
     }

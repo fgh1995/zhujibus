@@ -447,4 +447,183 @@ public class BusApiClient {
         public String msg;        // 消息
         public List<String> data; // 发车时间列表
     }
+    // ==================== 公交公告信息查询接口 ====================
+
+    /**
+     * 获取最新公交公告信息
+     *
+     * @param page     页码(从1开始)
+     * @param size     每页数量
+     * @param callback 回调接口
+     */
+    public void getBusAnnouncements(int page, int size,
+                                    ApiCallback<BusAnnouncementResponse> callback) {
+        // 构建请求URL
+        String url = host + "/gzcx-spaceServer/index/information/getNewestTitleV2" +
+                "?page=" + page + "&size=" + size;
+
+        // 添加自定义请求头
+        Map<String, String> customHeaders = new HashMap<>();
+        customHeaders.put("custom-params", "{\"appCode\":\"330681\",\"codeValue\":\"330681\"}");
+
+        // 创建请求
+        Request request = new Request.Builder()
+                .url(url)
+                .headers(Headers.of(mergeHeaders(commonHeaders, customHeaders)))
+                .get()
+                .build();
+
+        // 异步执行请求
+        executorService.execute(() -> {
+            try (Response response = httpClient.newCall(request).execute()) {
+                if (!response.isSuccessful()) {
+                    throw new BusApiException("HTTP错误: " + response.code());
+                }
+
+                String responseBody = response.body().string();
+                BusAnnouncementResponse result = objectMapper.readValue(
+                        responseBody, BusAnnouncementResponse.class);
+                notifySuccess(callback, result);
+            } catch (Exception e) {
+                notifyError(callback, new BusApiException("获取公告信息失败", e));
+            }
+        });
+    }
+
+    // 合并请求头方法
+    private Map<String, String> mergeHeaders(Map<String, String> baseHeaders,
+                                             Map<String, String> additionalHeaders) {
+        Map<String, String> merged = new HashMap<>(baseHeaders);
+        merged.putAll(additionalHeaders);
+        return merged;
+    }
+
+// ==================== 公告信息数据模型 ====================
+
+    /**
+     * 公交公告响应模型
+     */
+    public static class BusAnnouncementResponse {
+        public String returnFlag;  // 返回标志
+        public String returnInfo;  // 返回信息
+        public String code;       // 状态码
+        public String msg;        // 消息
+        public List<BusAnnouncement> data; // 公告列表
+    }
+
+    /**
+     * 单个公交公告信息
+     */
+    public static class BusAnnouncement {
+        public long id;             // 公告ID
+        public String createDate;   // 创建日期
+        public String createUser;   // 创建用户
+        public String updateDate;   // 更新日期
+        public String updateUser;   // 更新用户
+        public String removed;      // 是否删除
+        public String title;        // 公告标题
+        public String publishUnit;  // 发布单位
+        public String abstracts;    // 摘要
+        public String publishContent; // 发布内容
+        public String publishDate;  // 发布日期
+        public String url;          // 详情URL
+        public int readingNum;      // 阅读量
+        public String pictureId;    // 图片ID
+        public String status;       // 状态
+        public String type;         // 类型
+        public String publishUser;  // 发布用户
+        public String appCode;      // 应用代码
+        public String dateType;     // 日期类型
+        public String areaCode;     // 区域代码
+        public int noticeType;      // 通知类型
+        public String analysisLink; // 分析链接
+        public String firstStage;   // 一级分类
+        public String secondStage;  // 二级分类
+
+        // 获取格式化后的发布时间
+        public String getFormattedPublishDate() {
+            // 这里可以添加日期格式化逻辑
+            return publishDate;
+        }
+    }
+    // ==================== 公交站点查询接口 ====================
+
+    /**
+     * 查询公交站点信息
+     *
+     * @param stationName 站点名称(如"财税大楼")
+     * @param callback    回调接口
+     */
+    public void queryStationInfo(String stationName,
+                                 ApiCallback<StationInfoResponse> callback) {
+        StationQueryRequest request = new StationQueryRequest(stationName);
+        callApiAsync("/gzcx-busServer/client/station/queryStation",
+                request, StationInfoResponse.class, callback);
+    }
+
+// ==================== 站点查询请求和响应模型 ====================
+
+    /**
+     * 站点查询请求模型
+     */
+    public static class StationQueryRequest {
+        public String stationName;  // 站点名称
+
+        public StationQueryRequest(String stationName) {
+            this.stationName = stationName;
+        }
+    }
+
+    /**
+     * 站点查询响应模型
+     */
+    public static class StationInfoResponse {
+        public String returnFlag;  // 返回标志("200"表示成功)
+        public String returnInfo;  // 返回信息("成功")
+        public String code;       // 状态码("200")
+        public String msg;        // 消息("成功")
+        public List<StationLineInfo> data; // 站点线路数据
+    }
+
+    /**
+     * 站点线路信息模型
+     */
+    public static class StationLineInfo {
+        public String lineName;   // 线路名称(如"1路")
+        public LineDirection up;   // 上行方向信息
+        public LineDirection down; // 下行方向信息
+        List<LineDirection> directions = new ArrayList<>();
+
+        public List<LineDirection> getDirections() {
+            directions.clear();
+            // 设置上行方向的lineName
+            if (up != null) {
+                up.lineName = this.lineName;
+                directions.add(up);
+            }
+
+            // 设置下行方向的lineName
+            if (down != null) {
+                down.lineName = this.lineName;
+                directions.add(down);
+            }
+            return directions;
+        }
+    }
+
+    /**
+     * 线路方向信息模型
+     */
+    public static class LineDirection {
+        public String lineName;
+        public String departureTime;  // 发车时间(如"06:00")
+        public String collectTime;    // 收车时间(如"18:00")
+        public String endStation;     // 终点站名称
+        public double price;         // 票价(如1.0)
+        public int lineType;         // 线路类型(1表示城市公交)
+        public String lineId;        // 线路ID(如"330681112")
+        public String startStation;  // 起点站名称
+        public String lineTypeName;  // 线路类型名称("城市")
+        public String stationId;     // 站点ID(如"33068111213")
+    }
 }

@@ -70,6 +70,7 @@
                 android:padding="8dp"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:layout_gravity="center_vertical"
                 app:layout_constraintStart_toStartOf="parent"
                 app:layout_constraintTop_toBottomOf="@+id/ll_search">
 
@@ -81,12 +82,15 @@
                     android:layout_marginRight="8dp"
                     android:text="通知\n公告" />
 
-                <TextView
-                    android:textColor="#262224"
-                    android:layout_width="0dp"
+                <ViewFlipper
+                    android:id="@+id/view_flipper"
+                    android:layout_gravity="center_vertical"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="关于35路,28路恢复原线路行驶"
-                    android:layout_weight="1" />
+                    android:autoStart="true"
+                    android:flipInterval="3000"
+                    android:inAnimation="@anim/slide_in_bottom"
+                    android:outAnimation="@anim/slide_out_top" />
             </LinearLayout>
 
             <LinearLayout

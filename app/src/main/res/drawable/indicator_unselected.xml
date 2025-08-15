@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <!-- 半透明灰色 -->
+    <solid android:color="#80CCCCCC" /> <!-- 80表示50%透明度 -->
+    <!-- 大小（与选中状态保持一致） -->
+    <size
+        android:width="8dp"
+        android:height="8dp" />
+    <!-- 可选：边框 -->
+    <stroke
+        android:width="0.5dp"
+        android:color="#FFFFFF" />
+</shape>
