@@ -109,6 +109,7 @@ public class StationDetailsFragment extends DialogFragment {
                             Log.w("-BusInfo-", response.data.get(i).lineId);
                             Log.w("-BusInfo-", response.data.get(i).stationId);
                             Log.w("-BusInfo-", response.data.get(i).distance + "");
+                            Log.w("-BusInfo-", adapter.getBusLineItem(response.data.get(i).lineId));
                         }
                     }
 

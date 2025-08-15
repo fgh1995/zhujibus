@@ -40,10 +40,19 @@ public class BusStationAdapter extends RecyclerView.Adapter<BusStationAdapter.Bu
 
     @Override
     public int getItemCount() {
-        Log.w("-BusInfo-", "" + busLineItems.size());
         return busLineItems.size();
     }
-    
+
+    public String getBusLineItem(String lineId) {
+        for (int i = 0; i < busLineItems.size(); i++) {
+            if (lineId.equals(busLineItems.get(i).up.lineId)) {
+                return "在索引" + i + "上" + busLineItems.get(i).up.startStation;
+            } else if (lineId.equals(busLineItems.get(i).down.lineId)) {
+                return "在索引" + i + "下" + busLineItems.get(i).down.startStation;
+            }
+        }
+        return "找不到";
+    }
 
     static class BusLineViewHolder extends RecyclerView.ViewHolder {
         private ViewPager2 directionViewPager;
@@ -53,9 +62,7 @@ public class BusStationAdapter extends RecyclerView.Adapter<BusStationAdapter.Bu
             super(itemView);
             directionViewPager = itemView.findViewById(R.id.view_pager);
             indicatorContainer = itemView.findViewById(R.id.indicator_container);
-
         }
-
 
         public void bind(BusApiClient.StationLineInfo busLineItem) {
             // 设置指示器
