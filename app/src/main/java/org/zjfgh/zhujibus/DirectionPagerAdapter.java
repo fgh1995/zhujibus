@@ -2,10 +2,11 @@ package org.zjfgh.zhujibus;
 
 import android.annotation.SuppressLint;
 import android.content.Context;
-import android.util.Log;
+import android.content.Intent;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
@@ -45,6 +46,7 @@ public class DirectionPagerAdapter extends RecyclerView.Adapter<DirectionPagerAd
     }
 
     static class DirectionViewHolder extends RecyclerView.ViewHolder {
+        private LinearLayout busInfoContainer;
         private TextView busRouteName;
         private TextView busDistance;
         private TextView busStations;
@@ -55,6 +57,7 @@ public class DirectionPagerAdapter extends RecyclerView.Adapter<DirectionPagerAd
 
         public DirectionViewHolder(@NonNull View itemView) {
             super(itemView);
+            busInfoContainer = itemView.findViewById(R.id.bus_info_container);
             busRouteName = itemView.findViewById(R.id.bus_route_name);
             busDistance = itemView.findViewById(R.id.bus_distance);
             busDistance.setText("");
@@ -100,6 +103,19 @@ public class DirectionPagerAdapter extends RecyclerView.Adapter<DirectionPagerAd
                     nextBusTime.setText(direction.planTime);
                 }
             }
+            busInfoContainer.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View view) {
+                    // 实现跳转到线路详情页的逻辑
+                    Intent intent = new Intent(itemView.getContext(), BusLineDetailActivity.class);
+                    intent.putExtra("line_id", direction.lineId);
+                    intent.putExtra("line_name", direction.lineName);
+                    intent.putExtra("start_station", direction.startStation);
+                    intent.putExtra("end_station", direction.endStation);
+                    intent.putExtra("station_id", direction.stationId); // 添加要跳转的站点ID
+                    itemView.getContext().startActivity(intent);
+                }
+            });
         }
 
         private String formatGpsTime(String gpsTime) {

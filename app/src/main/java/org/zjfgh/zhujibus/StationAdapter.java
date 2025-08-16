@@ -42,7 +42,12 @@ public class StationAdapter extends RecyclerView.Adapter<StationAdapter.StationV
     public StationViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
         View view = LayoutInflater.from(parent.getContext())
                 .inflate(R.layout.item_station_details, parent, false);
+
         return new StationViewHolder(view);
+    }
+
+    public List<BusApiClient.BusLineStation> getStationList() {
+        return stationList;
     }
 
     @SuppressLint("NotifyDataSetChanged")

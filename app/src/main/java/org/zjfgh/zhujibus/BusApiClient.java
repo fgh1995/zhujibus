@@ -288,7 +288,6 @@ public class BusApiClient {
         public int stationOrder;      // 站点顺序
         public int lastDistance;      // 与上一站距离(米)
         public double poiOriginLat;    // 站点纬度
-        public int stationId; // 站点ID
         public double lat;    // 纬度
         public double lng;    // 经度
         public int distanceToNext; // 到下一站距离(米)
@@ -725,6 +724,74 @@ public class BusApiClient {
     public static class BusPlanTime {
         public String lineId;     // 线路ID
         public String startTime; // 计划发车时间(格式"HH:mm")
+    }
+    // ==================== 公交站点搜索接口 ====================
+
+    /**
+     * 搜索公交站点
+     *
+     * @param stationName 要搜索的站点名称(如"客运")
+     * @param page        页码(从1开始)
+     * @param offset      每页数量
+     * @param callback    回调接口
+     */
+    public void searchStations(String stationName,
+                               int page,
+                               int offset,
+                               ApiCallback<StationSearchResponse> callback) {
+        StationSearchRequest request = new StationSearchRequest(stationName, page, offset);
+        callApiAsync("/gzcx-busServer/client/station/searchStation",
+                request, StationSearchResponse.class, callback);
+    }
+
+// ==================== 站点搜索请求和响应模型 ====================
+
+    /**
+     * 站点搜索请求模型
+     */
+    public static class StationSearchRequest {
+        public String stationName;  // 站点名称
+        public int page;           // 页码(从1开始)
+        public int offset;         // 每页数量
+
+        public StationSearchRequest(String stationName, int page, int offset) {
+            this.stationName = stationName;
+            this.page = page;
+            this.offset = offset;
+        }
+    }
+
+    /**
+     * 站点搜索响应模型
+     */
+    public static class StationSearchResponse {
+        public String returnFlag;  // 返回标志("200"表示成功)
+        public String returnInfo;  // 返回信息("成功")
+        public String code;       // 状态码("200")
+        public String msg;        // 消息("成功")
+        public StationSearchResult data; // 搜索结果数据
+    }
+
+    /**
+     * 站点搜索结果分页数据
+     */
+    public static class StationSearchResult {
+        public int pageNum;          // 当前页码
+        public int pageSize;         // 每页数量
+        public int currentPageSize;  // 当前页实际数量
+        public int total;           // 总记录数
+        public int pages;           // 总页数
+        public List<StationSimpleInfo> list; // 站点列表
+        public boolean lastPage;     // 是否最后一页
+        public boolean firstPage;    // 是否第一页
+    }
+
+    /**
+     * 简化版站点信息(用于搜索结果)
+     */
+    public static class StationSimpleInfo {
+        public String stationName;  // 站点名称
+        // 可根据实际返回数据添加更多字段
     }
 }
 

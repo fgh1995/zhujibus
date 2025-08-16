@@ -1,5 +1,6 @@
 package org.zjfgh.zhujibus;
 
+import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -77,11 +78,18 @@ public class BusEtaAdapter extends RecyclerView.Adapter<BusEtaAdapter.BusEtaView
 
         public void bind(BusEtaItem item) {
             if (item.getStopCount() == 0) {
-                tvIsArrive.setVisibility(View.VISIBLE);
+                if (item.isArriveStation) {
+                    tvIsArrive.setVisibility(View.VISIBLE);
+                    tvIsArrive.setText("已到站");
+                } else {
+                    tvIsArrive.setVisibility(View.VISIBLE);
+                    tvIsArrive.setText("已过站");
+                }
+
                 ll_bus_info.setVisibility(View.GONE);
                 return;
             } else if (item.getStopCount() == 1) {
-                tvStopCount.setText("下一站");
+                tvStopCount.setText("即将到站");
             } else {
                 tvStopCount.setText(item.getStopCount() + "站后");
             }

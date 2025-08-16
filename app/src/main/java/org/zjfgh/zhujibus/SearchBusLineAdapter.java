@@ -11,7 +11,7 @@ import androidx.recyclerview.widget.RecyclerView;
 import java.util.ArrayList;
 import java.util.List;
 
-public class BusLineAdapter extends RecyclerView.Adapter<BusLineViewHolder> {
+public class SearchBusLineAdapter extends RecyclerView.Adapter<BusLineViewHolder> {
     private final List<BusApiClient.BusLineInfo> busLines = new ArrayList<>();
     private OnItemClickListener listener;
 
@@ -34,7 +34,7 @@ public class BusLineAdapter extends RecyclerView.Adapter<BusLineViewHolder> {
     @Override
     public BusLineViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
         View view = LayoutInflater.from(parent.getContext())
-                .inflate(R.layout.item_bus_line, parent, false);
+                .inflate(R.layout.item_search_bus_line, parent, false);
         return new BusLineViewHolder(view);
     }
 

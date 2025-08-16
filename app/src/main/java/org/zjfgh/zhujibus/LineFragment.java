@@ -12,7 +12,6 @@ import android.view.ViewGroup;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.fragment.app.Fragment;
-import androidx.recyclerview.widget.DividerItemDecoration;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
@@ -20,8 +19,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class LineFragment extends Fragment {
-    private final List<BusApiClient.BusLineInfo> busLineInfo = new ArrayList<>();
-    private BusLineAdapter busLineAdapter;
+    private SearchBusLineAdapter searchBusLineAdapter;
     private RecyclerView recyclerView;
     BusApiClient client;
 
@@ -41,11 +39,10 @@ public class LineFragment extends Fragment {
     private void initViews(View view) {
         recyclerView = view.findViewById(R.id.rv_bus_line_results);
         recyclerView.setLayoutManager(new LinearLayoutManager(getContext()));
-        busLineAdapter = new BusLineAdapter();
-        recyclerView.setAdapter(busLineAdapter);
-
+        searchBusLineAdapter = new SearchBusLineAdapter();
+        recyclerView.setAdapter(searchBusLineAdapter);
         // 设置点击监听
-        busLineAdapter.setOnItemClickListener(line -> {
+        searchBusLineAdapter.setOnItemClickListener(line -> {
             // 处理线路点击事件，例如跳转到详情页
             showBusLineDetails(line);
         });
@@ -53,7 +50,7 @@ public class LineFragment extends Fragment {
 
     public void searchLines(String keyword) {
         if (keyword.isEmpty()) {
-            busLineAdapter.setData(Collections.emptyList());
+            searchBusLineAdapter.setData(Collections.emptyList());
             return;
         }
 
@@ -64,7 +61,7 @@ public class LineFragment extends Fragment {
                 if ("200".equals(response.code)) {
                     // 更新UI必须在主线程
                     requireActivity().runOnUiThread(() -> {
-                        busLineAdapter.setData(response.data.list);
+                        searchBusLineAdapter.setData(response.data.list);
                         if (response.data.list.isEmpty()) {
                             showEmptyView();
                         }
@@ -82,6 +79,7 @@ public class LineFragment extends Fragment {
             }
         });
     }
+
     private void showBusLineDetails(BusApiClient.BusLineInfo line) {
         // 实现跳转到线路详情页的逻辑
         Intent intent = new Intent(getActivity(), BusLineDetailActivity.class);
@@ -97,7 +95,7 @@ public class LineFragment extends Fragment {
 
         // 隐藏列表和加载状态
         recyclerView.setVisibility(View.GONE);
-        
+
     }
 
     private void showErrorView(String message) {

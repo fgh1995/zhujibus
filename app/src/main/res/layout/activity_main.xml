@@ -15,7 +15,8 @@
             android:layout_width="0dp"
             android:layout_height="180dp"
             android:contentDescription="@string/todo"
-            android:src="@color/black"
+            android:src="@drawable/banner_icon"
+            android:scaleType="centerCrop"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toTopOf="parent" />

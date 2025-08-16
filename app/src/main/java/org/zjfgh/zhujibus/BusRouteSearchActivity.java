@@ -10,19 +10,13 @@ import android.widget.EditText;
 import androidx.appcompat.app.AppCompatActivity;
 
 import androidx.fragment.app.Fragment;
-import androidx.navigation.NavController;
-import androidx.navigation.Navigation;
-import androidx.navigation.ui.AppBarConfiguration;
-import androidx.navigation.ui.NavigationUI;
 import androidx.viewpager2.widget.ViewPager2;
 
 import com.google.android.material.tabs.TabLayout;
 import com.google.android.material.tabs.TabLayoutMediator;
 
-import org.zjfgh.zhujibus.databinding.ActivityBusRouteSearchBinding;
-
-public class  BusRouteSearchActivity extends AppCompatActivity {
-    private EditText edSearchBus;
+public class BusRouteSearchActivity extends AppCompatActivity {
+    private EditText edSearchBusLine;
     private ViewPager2 viewPager;
     private SearchPagerAdapter adapter;
     private Handler handler = new Handler(Looper.getMainLooper());
@@ -35,7 +29,7 @@ public class  BusRouteSearchActivity extends AppCompatActivity {
         setContentView(R.layout.activity_bus_route_search);
 
         // 初始化视图
-        edSearchBus = findViewById(R.id.ed_search_bus);
+        edSearchBusLine = findViewById(R.id.ed_search_bus);
         viewPager = findViewById(R.id.viewPager);
         TabLayout tabLayout = findViewById(R.id.tabLayout);
 
@@ -67,12 +61,12 @@ public class  BusRouteSearchActivity extends AppCompatActivity {
             @Override
             public void onPageSelected(int position) {
                 super.onPageSelected(position);
-                performSearchWithDebounce(edSearchBus.getText().toString().trim());
+                performSearchWithDebounce(edSearchBusLine.getText().toString().trim());
             }
         });
 
         // 设置文本变化监听器
-        edSearchBus.addTextChangedListener(new TextWatcher() {
+        edSearchBusLine.addTextChangedListener(new TextWatcher() {
             @Override
             public void beforeTextChanged(CharSequence s, int start, int count, int after) {
                 // 不做处理
