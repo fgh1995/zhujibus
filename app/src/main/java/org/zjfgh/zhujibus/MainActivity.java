@@ -40,12 +40,9 @@ public class MainActivity extends AppCompatActivity {
         tv_search_line = findViewById(R.id.tv_search_line);
         viewFlipper = findViewById(R.id.view_flipper);
         client = new BusApiClient();
-
         // 首次加载数据
         loadNearbyStations();
-
         TTSUtils.getInstance(this);
-
         tv_search_line.setOnClickListener(v -> {
             Intent intent = new Intent(MainActivity.this, BusRouteSearchActivity.class);
             startActivity(intent);

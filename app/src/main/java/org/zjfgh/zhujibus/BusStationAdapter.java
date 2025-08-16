@@ -18,7 +18,6 @@ import java.util.List;
 
 public class BusStationAdapter extends RecyclerView.Adapter<BusStationAdapter.BusLineViewHolder> {
     private List<BusApiClient.StationLineInfo> busLineItems = new ArrayList<>();
-    private static DirectionPagerAdapter adapter;
 
     public void setData(List<BusApiClient.StationLineInfo> busLineItems) {
         this.busLineItems = busLineItems;
@@ -43,17 +42,6 @@ public class BusStationAdapter extends RecyclerView.Adapter<BusStationAdapter.Bu
         return busLineItems.size();
     }
 
-    public String getBusLineItem(String lineId) {
-        for (int i = 0; i < busLineItems.size(); i++) {
-            if (lineId.equals(busLineItems.get(i).up.lineId)) {
-                return "在索引" + i + "上" + busLineItems.get(i).up.startStation;
-            } else if (lineId.equals(busLineItems.get(i).down.lineId)) {
-                return "在索引" + i + "下" + busLineItems.get(i).down.startStation;
-            }
-        }
-        return "找不到";
-    }
-
     static class BusLineViewHolder extends RecyclerView.ViewHolder {
         private ViewPager2 directionViewPager;
         private LinearLayout indicatorContainer;
@@ -67,8 +55,13 @@ public class BusStationAdapter extends RecyclerView.Adapter<BusStationAdapter.Bu
         public void bind(BusApiClient.StationLineInfo busLineItem) {
             // 设置指示器
             setupIndicators(busLineItem.getDirections().size());
-            // 提前创建adapter
-            adapter = new DirectionPagerAdapter(itemView.getContext(), busLineItem.getDirections());
+
+            // 创建adapter并传入数据
+            DirectionPagerAdapter adapter = new DirectionPagerAdapter(
+                    itemView.getContext(),
+                    busLineItem.getDirections()
+            );
+
             directionViewPager.setAdapter(adapter);
             directionViewPager.registerOnPageChangeCallback(new ViewPager2.OnPageChangeCallback() {
                 @Override

@@ -11,10 +11,14 @@ import android.widget.TextView;
 import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
 
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 
 public class DirectionPagerAdapter extends RecyclerView.Adapter<DirectionPagerAdapter.DirectionViewHolder> {
-    private final Context context;
+    private Context context;
     private List<BusApiClient.LineDirection> directions;
 
     public DirectionPagerAdapter(Context context, List<BusApiClient.LineDirection> directions) {
@@ -31,7 +35,8 @@ public class DirectionPagerAdapter extends RecyclerView.Adapter<DirectionPagerAd
 
     @Override
     public void onBindViewHolder(@NonNull DirectionViewHolder holder, int position) {
-        holder.bindData(directions.get(position));
+        BusApiClient.LineDirection direction = directions.get(position);
+        holder.bind(direction);
     }
 
     @Override
@@ -39,37 +44,72 @@ public class DirectionPagerAdapter extends RecyclerView.Adapter<DirectionPagerAd
         return directions.size();
     }
 
-    // ViewHolder 类
     static class DirectionViewHolder extends RecyclerView.ViewHolder {
-        private final TextView busStations;
-        private final TextView busRouteName;
-        private final TextView departureTime;
-        private final TextView collectTime;
-        private final TextView nextBusTime;
-        private final TextView nextBusLabel;
-        private final TextView busdistance;
+        private TextView busRouteName;
+        private TextView busDistance;
+        private TextView busStations;
+        private TextView nextBusTime;
+        private TextView nextBusLabel;
+        private TextView firstBusTime;
+        private TextView lastBusTime;
 
         public DirectionViewHolder(@NonNull View itemView) {
             super(itemView);
-            busStations = itemView.findViewById(R.id.bus_stations);
             busRouteName = itemView.findViewById(R.id.bus_route_name);
-            departureTime = itemView.findViewById(R.id.first_bus_time);
-            collectTime = itemView.findViewById(R.id.last_bus_time);
+            busDistance = itemView.findViewById(R.id.bus_distance);
+            busDistance.setText("");
+            busStations = itemView.findViewById(R.id.bus_stations);
             nextBusTime = itemView.findViewById(R.id.next_bus_time);
-            nextBusTime.setVisibility(View.INVISIBLE);
+            nextBusTime.setText("");
             nextBusLabel = itemView.findViewById(R.id.next_bus_label);
-            busdistance = itemView.findViewById(R.id.bus_distance);
-            busdistance.setVisibility(View.GONE);
+            nextBusLabel.setText("");
+            firstBusTime = itemView.findViewById(R.id.first_bus_time);
+            lastBusTime = itemView.findViewById(R.id.last_bus_time);
         }
 
         @SuppressLint("SetTextI18n")
-        public void bindData(BusApiClient.LineDirection direction) {
-            if (direction != null) {
-                Log.w("busStations", busStations + "|" + direction.startStation + " - " + direction.endStation);
-                busRouteName.setText(direction.lineName);
-                busStations.setText(direction.startStation + " - " + direction.endStation);
-                departureTime.setText(direction.departureTime);
-                collectTime.setText(direction.collectTime);
+        public void bind(BusApiClient.LineDirection direction) {
+            // 设置线路名称和类型
+            busRouteName.setText(String.format("%s(%s公交)", direction.lineName, direction.lineTypeName));
+
+            // 设置起点和终点站
+            busStations.setText(String.format("%s-%s", direction.startStation, direction.endStation));
+
+            // 设置首末班车时间
+            firstBusTime.setText(direction.departureTime);
+            lastBusTime.setText(direction.collectTime);
+
+            // 设置车辆动态信息
+            if (direction.vehicleInfo != null) {
+                nextBusLabel.setText("最近一班");
+                // 显示距离信息
+                if (direction.vehicleInfo.distance > 1000) {
+                    double distanceKm = direction.vehicleInfo.distance / 1000.0;
+                    String distance = String.format("约%.1f公里", distanceKm);
+                    busDistance.setText("距离查询站点" + direction.vehicleInfo.nextNumber + "站（" + distance + ")");
+                } else {
+                    String distance = String.format("约%d米", direction.vehicleInfo.distance);
+                    busDistance.setText("距离查询站点" + direction.vehicleInfo.nextNumber + "站（" + distance + ")");
+                }
+                nextBusTime.setText("");
+            } else {
+                nextBusLabel.setText("下一班发车时间");
+                busDistance.setText("");
+                // 显示下一班车时间
+                if (direction.planTime != null && !direction.planTime.isEmpty()) {
+                    nextBusTime.setText(direction.planTime);
+                }
+            }
+        }
+
+        private String formatGpsTime(String gpsTime) {
+            try {
+                SimpleDateFormat inputFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault());
+                SimpleDateFormat outputFormat = new SimpleDateFormat("HH:mm", Locale.getDefault());
+                Date date = inputFormat.parse(gpsTime);
+                return outputFormat.format(date);
+            } catch (ParseException e) {
+                return gpsTime.length() > 5 ? gpsTime.substring(11, 16) : gpsTime;
             }
         }
     }

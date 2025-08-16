@@ -68,8 +68,8 @@
                     android:id="@+id/next_bus_time"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:textColor="@color/black"
-                    android:text="09:40" />
+                    android:text="09:40"
+                    android:textColor="@color/black" />
 
                 <TextView
                     android:id="@+id/next_bus_label"

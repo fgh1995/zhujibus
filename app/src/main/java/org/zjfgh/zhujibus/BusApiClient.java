@@ -624,7 +624,9 @@ public class BusApiClient {
         public String lineId;        // 线路ID(如"330681112")
         public String startStation;  // 起点站名称
         public String lineTypeName;  // 线路类型名称("城市")
-        public String stationId;     // 站点ID(如"33068111213")
+        public String stationId;     // 站点ID
+        public StationVehicleInfo vehicleInfo;
+        public String planTime;
     }
 
     /**
@@ -678,4 +680,51 @@ public class BusApiClient {
         public int isArriveStation; // 是否到站(0:未到站,1:已到站)
         public String stationId;    // 站点ID
     }
+    // ==================== 公交线路计划发车时间批量查询接口 ====================
+
+    /**
+     * 批量查询多条公交线路的计划发车时间
+     *
+     * @param lineIds  线路ID列表(多个用英文逗号分隔，如"330681112,3306811211")
+     * @param callback 回调接口
+     */
+    public void queryBusVehiclePlan(String lineIds,
+                                    ApiCallback<BusVehiclePlanResponse> callback) {
+        BusVehiclePlanRequest request = new BusVehiclePlanRequest(lineIds);
+        callApiAsync("/gzcx-busServer/client/bus/vehicle/plan",
+                request, BusVehiclePlanResponse.class, callback);
+    }
+
+// ==================== 计划发车时间请求和响应模型 ====================
+
+    /**
+     * 公交车辆计划请求模型
+     */
+    public static class BusVehiclePlanRequest {
+        public String lineIds;  // 线路ID列表(多个用英文逗号分隔)
+
+        public BusVehiclePlanRequest(String lineIds) {
+            this.lineIds = lineIds;
+        }
+    }
+
+    /**
+     * 公交车辆计划响应模型
+     */
+    public static class BusVehiclePlanResponse {
+        public String returnFlag;  // 返回标志("200"表示成功)
+        public String returnInfo;  // 返回信息
+        public String code;       // 状态码
+        public String msg;        // 消息
+        public List<BusPlanTime> data; // 计划时间列表
+    }
+
+    /**
+     * 单个线路计划时间信息
+     */
+    public static class BusPlanTime {
+        public String lineId;     // 线路ID
+        public String startTime; // 计划发车时间(格式"HH:mm")
+    }
 }
+
