@@ -1,6 +1,5 @@
 package org.zjfgh.zhujibus;
 
-import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -64,6 +63,7 @@ public class BusEtaAdapter extends RecyclerView.Adapter<BusEtaAdapter.BusEtaView
         private final TextView tvDistance;
         private final TextView tvIsArrive;
         private final View view_;
+        private final TextView tvPlateNumber;
 
         public BusEtaViewHolder(@NonNull View itemView) {
             super(itemView);
@@ -74,6 +74,7 @@ public class BusEtaAdapter extends RecyclerView.Adapter<BusEtaAdapter.BusEtaView
             tvIsArrive = itemView.findViewById(R.id.tv_is_arrive);
             tvIsArrive.setVisibility(View.GONE);
             view_ = itemView.findViewById(R.id.view_);
+            tvPlateNumber = itemView.findViewById(R.id.tv_plateNumber);
         }
 
         public void bind(BusEtaItem item) {
@@ -103,6 +104,7 @@ public class BusEtaAdapter extends RecyclerView.Adapter<BusEtaAdapter.BusEtaView
                 distanceDisplay = String.format(Locale.getDefault(), "%.1f公里", item.getDistance() / 1000f);
             }
             tvDistance.setText("约" + distanceDisplay);
+            tvPlateNumber.setText(item.getPlateNumber());
         }
     }
 }

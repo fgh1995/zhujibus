@@ -6,71 +6,100 @@
     <LinearLayout
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_gravity="center"
-        android:gravity="center_vertical"
-        android:padding="16dp">
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
 
         <LinearLayout
-            android:id="@+id/ll_bus_info"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:orientation="vertical">
-            <!-- 第一行：站点数和预计时间 -->
+
             <LinearLayout
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:layout_gravity="center_vertical"
-                android:gravity="center_vertical">
+                android:layout_gravity="center"
+                android:gravity="center_vertical"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:paddingTop="16dp"
+                android:paddingBottom="5dp">
 
-                <!-- 左侧站点数 -->
+                <LinearLayout
+                    android:id="@+id/ll_bus_info"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+                    <!-- 第一行：站点数和预计时间 -->
+                    <LinearLayout
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:layout_gravity="center_vertical"
+                        android:gravity="center_vertical">
+
+                        <!-- 左侧站点数 -->
+                        <TextView
+                            android:id="@+id/tv_stop_count"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textSize="16sp"
+                            android:textStyle="bold"
+                            android:text="12站后" />
+
+                        <!-- 中间间距 -->
+                        <View
+                            android:layout_width="8dp"
+                            android:layout_height="1dp" />
+
+                        <!-- 右侧预计时间 -->
+                        <TextView
+                            android:id="@+id/tv_eta_time"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textSize="16sp"
+                            android:text="预计26分钟" />
+                    </LinearLayout>
+
+                    <!-- 第二行：距离信息 -->
+                    <TextView
+                        android:id="@+id/tv_distance"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:textSize="14sp"
+                        android:layout_gravity="center"
+                        android:text="约6公里" />
+                </LinearLayout>
+
                 <TextView
-                    android:id="@+id/tv_stop_count"
+                    android:id="@+id/tv_is_arrive"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:textSize="16sp"
                     android:textStyle="bold"
-                    android:text="12站后" />
+                    android:textColor="#FF0000"
+                    android:text="已到站" />
 
-                <!-- 中间间距 -->
-                <View
-                    android:layout_width="8dp"
-                    android:layout_height="1dp" />
 
-                <!-- 右侧预计时间 -->
-                <TextView
-                    android:id="@+id/tv_eta_time"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:textSize="16sp"
-                    android:text="预计26分钟" />
             </LinearLayout>
 
-            <!-- 第二行：距离信息 -->
             <TextView
-                android:id="@+id/tv_distance"
+                android:id="@+id/tv_plateNumber"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:textSize="14sp"
                 android:layout_gravity="center"
-                android:text="约6公里" />
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:textColor="#2196F3"
+                android:text="浙D00000000" />
         </LinearLayout>
-
-        <TextView
-            android:id="@+id/tv_is_arrive"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textSize="16sp"
-            android:textStyle="bold"
-            android:textColor="#FF0000"
-            android:text="已到站" />
 
         <View
             android:id="@+id/view_"
             android:layout_width="1dp"
-            android:layout_height="40dp"
+            android:layout_height="80dp"
             android:layout_marginStart="8dp"
             android:background="#A4A4A4" />
     </LinearLayout>
+
 </FrameLayout>

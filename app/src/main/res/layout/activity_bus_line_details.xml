@@ -329,6 +329,12 @@
             android:layout_margin="8dp"
             android:background="#B8B8B8" />
 
+        <TextView
+            android:id="@+id/refresh_time"
+            android:gravity="end"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
         <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/rv_live_vehicles"
             android:layout_gravity="center"

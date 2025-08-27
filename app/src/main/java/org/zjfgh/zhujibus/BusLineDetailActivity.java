@@ -6,6 +6,7 @@ import android.annotation.SuppressLint;
 import android.content.Intent;
 import android.graphics.Rect;
 import android.graphics.Typeface;
+import android.os.Build;
 import android.os.Bundle;
 
 import androidx.appcompat.app.AlertDialog;
@@ -30,8 +31,12 @@ import androidx.recyclerview.widget.DividerItemDecoration;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import java.text.SimpleDateFormat;
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 
@@ -60,6 +65,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private BusEtaAdapter busEtaAdapter;
     private TextView scheduleButton;
     private static final String TAG = "BusLineDetailActivity";
+    TextView refreshTime;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -116,6 +122,12 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
 
         accessibilityTag = findViewById(R.id.accessibility_tag);
         accessibilityTag.setVisibility(View.GONE);
+        refreshTime = findViewById(R.id.refresh_time);
+        // 创建格式化器，指定格式为 00:00:00
+        SimpleDateFormat formatter = new SimpleDateFormat("HH:mm:ss", Locale.getDefault());
+        // 获取当前时间
+        Date currentDate = new Date();
+        refreshTime.setText("刷新时间：" + formatter.format(currentDate));
     }
 
     private void setupListeners() {
@@ -484,17 +496,19 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             if (vehicleStationIndex < 0 || vehicleStationIndex >= stationAdapter.getItemCount()) {
                 continue;
             }
-
-            if (vehicleStationIndex <= selectedStationIndex) {
+            Log.w(TAG, vehicleStationIndex + "/" + selectedStationIndex);
+            if (vehicleStationIndex < selectedStationIndex) {
                 int totalDistanceMeters = vehicle.distanceToNext;
-                for (int stationIndex = vehicleStationIndex + 1; stationIndex < selectedStationIndex; stationIndex++) {
+                for (int stationIndex = vehicleStationIndex + 1; stationIndex < selectedStationIndex + 1; stationIndex++) {
                     if (stationIndex < stationAdapter.getItemCount()) {
                         totalDistanceMeters += stationAdapter.getBusLineStation(stationIndex).lastDistance;
+
                     }
                 }
                 int etaMinutes = realTimeManager.busAverageSpeed > 0 ?
                         Math.round((float) totalDistanceMeters / realTimeManager.busAverageSpeed) : 0;
-                tempList.add(new BusEtaItem(selectedStationIndex - vehicleStationIndex, etaMinutes, totalDistanceMeters, vehicle.isArrived));
+
+                tempList.add(new BusEtaItem(selectedStationIndex - vehicleStationIndex, etaMinutes, totalDistanceMeters, vehicle.isArrived, vehicle.plateNumber));
             }
         }
 
@@ -503,16 +517,28 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         busEtaAdapter.notifyDataSetChanged();
     }
 
+    @SuppressLint("SetTextI18n")
     private void checkAndAnnounceArrival(List<BusApiClient.BusPosition> positions, int selectedStationIndex) {
+        // 创建格式化器，指定格式为 00:00:00
+        SimpleDateFormat formatter = new SimpleDateFormat("HH:mm:ss", Locale.getDefault());
+        // 获取当前时间
+        Date currentDate = new Date();
+        refreshTime.setText("刷新时间：" + formatter.format(currentDate));
         BusApiClient.BusPosition nearestVehicle = null;
+        String hasSkippedStationStr = "";
         for (BusApiClient.BusPosition vehicle : positions) {
             if (selectedStationIndex >= vehicle.currentStationOrder) {
                 nearestVehicle = vehicle;
             }
         }
+        if (nearestVehicle != null && lastVoiceStationOrder > 0 && (nearestVehicle.currentStationOrder - lastVoiceStationOrder) > 2) {
+            nearestVehicle.isArrived = true;
+            hasSkippedStationStr = "请注意收听广播站台名称是否已过站。";
+
+        }
         if (nearestVehicle != null && nearestVehicle.isArrived && lastVoiceStationOrder != nearestVehicle.currentStationOrder) {
             BusApiClient.BusLineStation nextStation = stationAdapter.getBusLineStation(nearestVehicle.currentStationOrder);
-            String announcement = "开往" + endStation + "方向的" + lineName +
+            String announcement = hasSkippedStationStr + "开往" + endStation + "方向的" + lineName +
                     "公交车，即将到达：" + nextStation.stationName;
             TTSUtils.getInstance(this).speak(announcement);
             lastVoiceStationOrder = nearestVehicle.currentStationOrder;

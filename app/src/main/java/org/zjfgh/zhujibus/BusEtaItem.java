@@ -5,14 +5,15 @@ public class BusEtaItem {
     private int etaMinutes;
     private float distance; // 单位：公里
     public int position;
-
+    private String plateNumber;
     public boolean isArriveStation;
 
-    public BusEtaItem(int stopCount, int etaMinutes, float distance, boolean isArriveStation) {
+    public BusEtaItem(int stopCount, int etaMinutes, float distance, boolean isArriveStation, String plateNumber) {
         this.stopCount = stopCount;
         this.etaMinutes = etaMinutes;
         this.distance = distance;
         this.isArriveStation = isArriveStation;
+        this.plateNumber = plateNumber;
     }
 
     // Getter 方法
@@ -42,5 +43,9 @@ public class BusEtaItem {
 
     public void setIsArriveStation(boolean isArriveStation) {
         this.isArriveStation = isArriveStation;
+    }
+
+    public String getPlateNumber() {
+        return plateNumber;
     }
 }
