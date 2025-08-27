@@ -505,32 +505,22 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
 
     private void checkAndAnnounceArrival(List<BusApiClient.BusPosition> positions, int selectedStationIndex) {
         BusApiClient.BusPosition nearestVehicle = null;
-        int minStopCount = Integer.MAX_VALUE;
-
         for (BusApiClient.BusPosition vehicle : positions) {
-            int vehicleStationIndex = vehicle.currentStationOrder - 1;
-            int stopCount = selectedStationIndex - vehicleStationIndex;
-
-            if (stopCount >= 0 && stopCount <= minStopCount) {
-                minStopCount = stopCount;
+            if (selectedStationIndex >= vehicle.currentStationOrder) {
                 nearestVehicle = vehicle;
             }
         }
-
-
-        if (nearestVehicle != null && nearestVehicle.isArrived && lastSelectedStationIndex != selectedStationIndex) {
-            int nextStationIndex = nearestVehicle.currentStationOrder;
-            if (nextStationIndex < stationAdapter.getItemCount()) {
-                BusApiClient.BusLineStation nextStation = stationAdapter.getBusLineStation(nextStationIndex);
-                String announcement = "开往" + endStation + "方向的" + lineName +
-                        "公交车，即将到达：" + nextStation.stationName;
-                TTSUtils.getInstance(this).speak(announcement);
-                lastSelectedStationIndex = selectedStationIndex;
-            }
+        if (nearestVehicle != null && nearestVehicle.isArrived && lastVoiceStationOrder != nearestVehicle.currentStationOrder) {
+            BusApiClient.BusLineStation nextStation = stationAdapter.getBusLineStation(nearestVehicle.currentStationOrder);
+            String announcement = "开往" + endStation + "方向的" + lineName +
+                    "公交车，即将到达：" + nextStation.stationName;
+            TTSUtils.getInstance(this).speak(announcement);
+            lastVoiceStationOrder = nearestVehicle.currentStationOrder;
         }
+
     }
 
-    int lastSelectedStationIndex;
+    int lastVoiceStationOrder;
 
     @Override
     public void onError(String message) {
