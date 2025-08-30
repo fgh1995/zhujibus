@@ -567,7 +567,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     protected void onPause() {
         super.onPause();
         if (realTimeManager != null) {
-            realTimeManager.stopTracking();
+            //realTimeManager.stopTracking();
         }
     }
 
