@@ -571,6 +571,13 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         }
     }
 
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        realTimeManager.stopTracking();
+        realTimeManager = null;
+    }
+
     private String getCurrentDirectionId() {
         BusApiClient.BusLineDirection direction = getCurrentDirectionData();
         return direction != null ? direction.id : "";

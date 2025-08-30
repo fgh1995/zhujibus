@@ -101,6 +101,8 @@ public class DirectionPagerAdapter extends RecyclerView.Adapter<DirectionPagerAd
                 // 显示下一班车时间
                 if (direction.planTime != null && !direction.planTime.isEmpty()) {
                     nextBusTime.setText(direction.planTime);
+                }else {
+                    nextBusLabel.setText("暂无车辆信息");
                 }
             }
             busInfoContainer.setOnClickListener(new View.OnClickListener() {
