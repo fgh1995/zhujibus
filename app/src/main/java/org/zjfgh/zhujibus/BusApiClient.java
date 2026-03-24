@@ -11,10 +11,16 @@ import okhttp3.*;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 public class BusApiClient {
     private static final String host = "https://zjcx.zhuji.gov.cn:9443";
     private static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
+    private static final int CONNECT_TIMEOUT = 15;
+    private static final int READ_TIMEOUT = 20;
+    private static final int WRITE_TIMEOUT = 15;
+    private static final int MAX_RETRY_COUNT = 3;
+    private static final long RETRY_DELAY_MS = 1000;
 
     private final OkHttpClient httpClient;
     private final ObjectMapper objectMapper;
@@ -23,7 +29,12 @@ public class BusApiClient {
     private final Handler mainHandler;
 
     public BusApiClient() {
-        this.httpClient = new OkHttpClient();
+        this.httpClient = new OkHttpClient.Builder()
+                .connectTimeout(CONNECT_TIMEOUT, TimeUnit.SECONDS)
+                .readTimeout(READ_TIMEOUT, TimeUnit.SECONDS)
+                .writeTimeout(WRITE_TIMEOUT, TimeUnit.SECONDS)
+                .retryOnConnectionFailure(true)
+                .build();
         this.objectMapper = new ObjectMapper();
         this.commonHeaders = new HashMap<>();
         this.executorService = Executors.newFixedThreadPool(4);
@@ -46,9 +57,16 @@ public class BusApiClient {
                                  Object requestBody,
                                  Class<T> responseType,
                                  ApiCallback<T> callback) {
+        callApiAsyncWithRetry(endpoint, requestBody, responseType, callback, 0);
+    }
+
+    private <T> void callApiAsyncWithRetry(String endpoint,
+                                           Object requestBody,
+                                           Class<T> responseType,
+                                           ApiCallback<T> callback,
+                                           int retryCount) {
         executorService.execute(() -> {
             try {
-
                 ApiRequestWrapper wrapper = new ApiRequestWrapper();
                 wrapper.h = commonHeaders;
                 wrapper.b = requestBody;
@@ -60,7 +78,6 @@ public class BusApiClient {
                         .build();
 
                 try (Response response = httpClient.newCall(request).execute()) {
-
                     if (!response.isSuccessful()) {
                         throw new BusApiException("HTTP错误: " + response.code());
                     }
@@ -70,10 +87,35 @@ public class BusApiClient {
                     notifySuccess(callback, result);
                 }
             } catch (Exception e) {
-                Log.e("busbusbus", "API调用失败" + e);
-                notifyError(callback, new BusApiException("API调用失败", e));
+                Log.e("busbusbus", "API调用失败(重试次数:" + retryCount + "): " + e.getMessage());
+                
+                if (retryCount < MAX_RETRY_COUNT && shouldRetry(e)) {
+                    Log.d("busbusbus", "准备重试API调用...");
+                    try {
+                        Thread.sleep(RETRY_DELAY_MS);
+                        callApiAsyncWithRetry(endpoint, requestBody, responseType, callback, retryCount + 1);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        notifyError(callback, new BusApiException("API调用被中断", ie));
+                    }
+                } else {
+                    notifyError(callback, new BusApiException("API调用失败", e));
+                }
             }
         });
+    }
+
+    private boolean shouldRetry(Exception e) {
+        if (e instanceof java.net.SocketTimeoutException) {
+            return true;
+        }
+        if (e instanceof java.net.UnknownHostException) {
+            return true;
+        }
+        if (e instanceof java.io.IOException) {
+            return true;
+        }
+        return false;
     }
 
     private <T> void notifySuccess(ApiCallback<T> callback, T result) {
@@ -457,22 +499,24 @@ public class BusApiClient {
      */
     public void getBusAnnouncements(int page, int size,
                                     ApiCallback<BusAnnouncementResponse> callback) {
-        // 构建请求URL
+        getBusAnnouncementsWithRetry(page, size, callback, 0);
+    }
+
+    private void getBusAnnouncementsWithRetry(int page, int size,
+                                              ApiCallback<BusAnnouncementResponse> callback,
+                                              int retryCount) {
         String url = host + "/gzcx-spaceServer/index/information/getNewestTitleV2" +
                 "?page=" + page + "&size=" + size;
 
-        // 添加自定义请求头
         Map<String, String> customHeaders = new HashMap<>();
         customHeaders.put("custom-params", "{\"appCode\":\"330681\",\"codeValue\":\"330681\"}");
 
-        // 创建请求
         Request request = new Request.Builder()
                 .url(url)
                 .headers(Headers.of(mergeHeaders(commonHeaders, customHeaders)))
                 .get()
                 .build();
 
-        // 异步执行请求
         executorService.execute(() -> {
             try (Response response = httpClient.newCall(request).execute()) {
                 if (!response.isSuccessful()) {
@@ -484,7 +528,20 @@ public class BusApiClient {
                         responseBody, BusAnnouncementResponse.class);
                 notifySuccess(callback, result);
             } catch (Exception e) {
-                notifyError(callback, new BusApiException("获取公告信息失败", e));
+                Log.e("busbusbus", "获取公告失败(重试次数:" + retryCount + "): " + e.getMessage());
+                
+                if (retryCount < MAX_RETRY_COUNT && shouldRetry(e)) {
+                    Log.d("busbusbus", "准备重试获取公告...");
+                    try {
+                        Thread.sleep(RETRY_DELAY_MS);
+                        getBusAnnouncementsWithRetry(page, size, callback, retryCount + 1);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        notifyError(callback, new BusApiException("获取公告被中断", ie));
+                    }
+                } else {
+                    notifyError(callback, new BusApiException("获取公告信息失败", e));
+                }
             }
         });
     }

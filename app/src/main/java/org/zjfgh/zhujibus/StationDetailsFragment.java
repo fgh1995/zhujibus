@@ -112,34 +112,46 @@ public class StationDetailsFragment extends DialogFragment {
     }
 
     public void loadStationData() {
-        busApiClient.queryStationInfo(currentStationName, new BusApiClient.ApiCallback<>() {
-            @Override
-            public void onSuccess(BusApiClient.StationInfoResponse response) {
-                List<BusApiClient.StationLineInfo> busLineItems = response.data;
-                adapter.setData(busLineItems);
+        try {
+            busApiClient.queryStationInfo(currentStationName, new BusApiClient.ApiCallback<>() {
+                @Override
+                public void onSuccess(BusApiClient.StationInfoResponse response) {
+                    try {
+                        if (response == null || response.data == null) {
+                            Log.e("-BusInfo-", "站点信息为空");
+                            return;
+                        }
+                        List<BusApiClient.StationLineInfo> busLineItems = response.data;
+                        adapter.setData(busLineItems);
 
-                StringBuilder lineIdsBuilder = new StringBuilder();
-                StringBuilder stationIdsBuilder = new StringBuilder();
+                        StringBuilder lineIdsBuilder = new StringBuilder();
+                        StringBuilder stationIdsBuilder = new StringBuilder();
 
-                for (BusApiClient.StationLineInfo item : busLineItems) {
-                    if (item.up != null) {
-                        appendIds(lineIdsBuilder, stationIdsBuilder, item.up.lineId, item.up.stationId);
-                    }
-                    if (item.down != null) {
-                        appendIds(lineIdsBuilder, stationIdsBuilder, item.down.lineId, item.down.stationId);
+                        for (BusApiClient.StationLineInfo item : busLineItems) {
+                            if (item.up != null) {
+                                appendIds(lineIdsBuilder, stationIdsBuilder, item.up.lineId, item.up.stationId);
+                            }
+                            if (item.down != null) {
+                                appendIds(lineIdsBuilder, stationIdsBuilder, item.down.lineId, item.down.stationId);
+                            }
+                        }
+
+                        if (lineIdsBuilder.length() > 0) {
+                            fetchVehicleDynamicData(lineIdsBuilder.toString(), stationIdsBuilder.toString(), busLineItems);
+                        }
+                    } catch (Exception e) {
+                        Log.e("-BusInfo-", "处理站点数据失败", e);
                     }
                 }
 
-                if (lineIdsBuilder.length() > 0) {
-                    fetchVehicleDynamicData(lineIdsBuilder.toString(), stationIdsBuilder.toString(), busLineItems);
+                @Override
+                public void onError(BusApiClient.BusApiException e) {
+                    Log.e("-BusInfo-", "查询站点信息失败: " + e.getMessage(), e);
                 }
-            }
-
-            @Override
-            public void onError(BusApiClient.BusApiException e) {
-                Log.e("-BusInfo-", Objects.requireNonNull(e.getMessage()));
-            }
-        });
+            });
+        } catch (Exception e) {
+            Log.e("-BusInfo-", "加载站点数据异常", e);
+        }
     }
 
     private void appendIds(StringBuilder lineIds, StringBuilder stationIds, String lineId, String stationId) {
@@ -152,82 +164,96 @@ public class StationDetailsFragment extends DialogFragment {
     }
 
     private void fetchVehicleDynamicData(String lineIds, String stationIds, List<BusApiClient.StationLineInfo> busLineItems) {
-        busApiClient.queryStationVehicleDynamic(lineIds, stationIds, new BusApiClient.ApiCallback<>() {
-            @Override
-            public void onSuccess(BusApiClient.StationVehicleDynamicResponse response) {
-                // 将车辆动态数据与线路信息匹配
-                for (BusApiClient.StationVehicleInfo vehicleInfo : response.data) {
-                    for (BusApiClient.StationLineInfo lineInfo : busLineItems) {
-                        // 检查上行方向
-                        if (lineInfo.up != null && lineInfo.up.lineId.equals(vehicleInfo.lineId)) {
-                            lineInfo.up.vehicleInfo = vehicleInfo;
-                        }
-                        // 检查下行方向
-                        if (lineInfo.down != null && lineInfo.down.lineId.equals(vehicleInfo.lineId)) {
-                            lineInfo.down.vehicleInfo = vehicleInfo;
-                        }
-                    }
-                }
-
-                // 查询没有车辆信息的线路的计划发车时间
-                fetchPlanTimeForEmptyLines(busLineItems);
-            }
-
-            @Override
-            public void onError(BusApiClient.BusApiException e) {
-                Log.e("-BusInfo-", "获取车辆动态数据失败: " + e.getMessage());
-                // 即使动态数据获取失败，也尝试获取计划时间
-                fetchPlanTimeForEmptyLines(busLineItems);
-            }
-        });
-    }
-
-    private void fetchPlanTimeForEmptyLines(List<BusApiClient.StationLineInfo> busLineItems) {
-        // 收集没有车辆信息的线路ID
-        Set<String> lineIdsWithoutVehicle = new HashSet<>();
-        for (BusApiClient.StationLineInfo lineInfo : busLineItems) {
-            // 检查上行方向
-            if (lineInfo.up != null && lineInfo.up.vehicleInfo == null) {
-                lineIdsWithoutVehicle.add(lineInfo.up.lineId);
-            }
-            // 检查下行方向
-            if (lineInfo.down != null && lineInfo.down.vehicleInfo == null) {
-                lineIdsWithoutVehicle.add(lineInfo.down.lineId);
-            }
-        }
-
-        if (!lineIdsWithoutVehicle.isEmpty()) {
-            // 将Set转换为逗号分隔的字符串
-            String lineIdsStr = String.join(",", lineIdsWithoutVehicle);
-
-            busApiClient.queryBusVehiclePlan(lineIdsStr, new BusApiClient.ApiCallback<>() {
+        try {
+            busApiClient.queryStationVehicleDynamic(lineIds, stationIds, new BusApiClient.ApiCallback<>() {
                 @Override
-                public void onSuccess(BusApiClient.BusVehiclePlanResponse response) {
-                    // 将计划时间与线路匹配
-                    for (BusApiClient.BusPlanTime planTime : response.data) {
-                        for (BusApiClient.StationLineInfo lineInfo : busLineItems) {
-                            // 更新上行方向
-                            if (lineInfo.up != null && lineInfo.up.lineId.equals(planTime.lineId)) {
-                                lineInfo.up.planTime = planTime.startTime;
-                            }
-                            // 更新下行方向
-                            if (lineInfo.down != null && lineInfo.down.lineId.equals(planTime.lineId)) {
-                                lineInfo.down.planTime = planTime.startTime;
+                public void onSuccess(BusApiClient.StationVehicleDynamicResponse response) {
+                    try {
+                        if (response == null || response.data == null) {
+                            Log.w("-BusInfo-", "车辆动态数据为空");
+                            fetchPlanTimeForEmptyLines(busLineItems);
+                            return;
+                        }
+                        for (BusApiClient.StationVehicleInfo vehicleInfo : response.data) {
+                            if (vehicleInfo == null) continue;
+                            for (BusApiClient.StationLineInfo lineInfo : busLineItems) {
+                                if (lineInfo.up != null && lineInfo.up.lineId.equals(vehicleInfo.lineId)) {
+                                    lineInfo.up.vehicleInfo = vehicleInfo;
+                                }
+                                if (lineInfo.down != null && lineInfo.down.lineId.equals(vehicleInfo.lineId)) {
+                                    lineInfo.down.vehicleInfo = vehicleInfo;
+                                }
                             }
                         }
+                        fetchPlanTimeForEmptyLines(busLineItems);
+                    } catch (Exception e) {
+                        Log.e("-BusInfo-", "处理车辆动态数据失败", e);
+                        fetchPlanTimeForEmptyLines(busLineItems);
                     }
-                    // 更新适配器数据
-                    adapter.setData(busLineItems);
                 }
 
                 @Override
                 public void onError(BusApiClient.BusApiException e) {
-                    Log.e("-BusInfo-", "获取计划发车时间失败: " + e.getMessage());
+                    Log.e("-BusInfo-", "获取车辆动态数据失败: " + e.getMessage(), e);
+                    fetchPlanTimeForEmptyLines(busLineItems);
                 }
             });
-        } else {
-            // 如果没有需要查询的线路，直接更新UI
-            adapter.setData(busLineItems);
+        } catch (Exception e) {
+            Log.e("-BusInfo-", "请求车辆动态数据异常", e);
+            fetchPlanTimeForEmptyLines(busLineItems);
+        }
+    }
+
+    private void fetchPlanTimeForEmptyLines(List<BusApiClient.StationLineInfo> busLineItems) {
+        try {
+            Set<String> lineIdsWithoutVehicle = new HashSet<>();
+            for (BusApiClient.StationLineInfo lineInfo : busLineItems) {
+                if (lineInfo.up != null && lineInfo.up.vehicleInfo == null) {
+                    lineIdsWithoutVehicle.add(lineInfo.up.lineId);
+                }
+                if (lineInfo.down != null && lineInfo.down.vehicleInfo == null) {
+                    lineIdsWithoutVehicle.add(lineInfo.down.lineId);
+                }
+            }
+
+            if (!lineIdsWithoutVehicle.isEmpty()) {
+                String lineIdsStr = String.join(",", lineIdsWithoutVehicle);
+
+                busApiClient.queryBusVehiclePlan(lineIdsStr, new BusApiClient.ApiCallback<>() {
+                    @Override
+                    public void onSuccess(BusApiClient.BusVehiclePlanResponse response) {
+                        try {
+                            if (response == null || response.data == null) {
+                                Log.w("-BusInfo-", "计划发车时间数据为空");
+                                return;
+                            }
+                            for (BusApiClient.BusPlanTime planTime : response.data) {
+                                if (planTime == null) continue;
+                                for (BusApiClient.StationLineInfo lineInfo : busLineItems) {
+                                    if (lineInfo.up != null && lineInfo.up.lineId.equals(planTime.lineId)) {
+                                        lineInfo.up.planTime = planTime.startTime;
+                                    }
+                                    if (lineInfo.down != null && lineInfo.down.lineId.equals(planTime.lineId)) {
+                                        lineInfo.down.planTime = planTime.startTime;
+                                    }
+                                }
+                            }
+                            adapter.setData(busLineItems);
+                        } catch (Exception e) {
+                            Log.e("-BusInfo-", "处理计划发车时间失败", e);
+                        }
+                    }
+
+                    @Override
+                    public void onError(BusApiClient.BusApiException e) {
+                        Log.e("-BusInfo-", "获取计划发车时间失败: " + e.getMessage(), e);
+                    }
+                });
+            } else {
+                adapter.setData(busLineItems);
+            }
+        } catch (Exception e) {
+            Log.e("-BusInfo-", "查询计划发车时间异常", e);
         }
     }
 }

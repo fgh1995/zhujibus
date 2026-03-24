@@ -8,6 +8,7 @@ import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.TextView;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -37,6 +38,9 @@ public class LineFragment extends Fragment {
 
     // 在onCreateView或onCreate中初始化
     private void initViews(View view) {
+        TextView title = view.findViewById(R.id.title);
+        title.setText("线路");
+        
         recyclerView = view.findViewById(R.id.rv_bus_line_results);
         recyclerView.setLayoutManager(new LinearLayoutManager(getContext()));
         searchBusLineAdapter = new SearchBusLineAdapter();
@@ -49,35 +53,52 @@ public class LineFragment extends Fragment {
     }
 
     public void searchLines(String keyword) {
-        if (keyword.isEmpty()) {
-            searchBusLineAdapter.setData(Collections.emptyList());
-            return;
-        }
+        try {
+            if (keyword.isEmpty()) {
+                searchBusLineAdapter.setData(Collections.emptyList());
+                return;
+            }
 
-        Log.e("ZhuJiBus", "搜索线路" + keyword);
-        client.searchBusLines(keyword, 123, new BusApiClient.ApiCallback<>() {
-            @Override
-            public void onSuccess(BusApiClient.BusLineSearchResponse response) {
-                if ("200".equals(response.code)) {
-                    // 更新UI必须在主线程
-                    requireActivity().runOnUiThread(() -> {
-                        searchBusLineAdapter.setData(response.data.list);
-                        if (response.data.list.isEmpty()) {
-                            showEmptyView();
+            Log.e("ZhuJiBus", "搜索线路" + keyword);
+            client.searchBusLines(keyword, 123, new BusApiClient.ApiCallback<>() {
+                @Override
+                public void onSuccess(BusApiClient.BusLineSearchResponse response) {
+                    try {
+                        if (response == null || response.data == null) {
+                            Log.e("BusLine", "搜索结果为空");
+                            return;
                         }
-                    });
-                } else {
-                    Log.e("BusLine", "搜索失败: " + response.msg);
-                    showErrorView(response.msg);
+                        if ("200".equals(response.code)) {
+                            requireActivity().runOnUiThread(() -> {
+                                try {
+                                    searchBusLineAdapter.setData(response.data.list);
+                                    recyclerView.setVisibility(View.VISIBLE);
+                                    if (response.data.list.isEmpty()) {
+                                        showEmptyView();
+                                    }
+                                } catch (Exception e) {
+                                    Log.e("BusLine", "更新搜索结果失败", e);
+                                }
+                            });
+                        } else {
+                            Log.e("BusLine", "搜索失败: " + response.msg);
+                            showErrorView(response.msg);
+                        }
+                    } catch (Exception e) {
+                        Log.e("BusLine", "处理搜索结果失败", e);
+                    }
                 }
-            }
 
-            @Override
-            public void onError(BusApiClient.BusApiException e) {
-                Log.e("BusLine", "API调用错误", e);
-                showErrorView(e.getMessage());
-            }
-        });
+                @Override
+                public void onError(BusApiClient.BusApiException e) {
+                    Log.e("BusLine", "API调用错误: " + e.getMessage(), e);
+                    showErrorView(e.getMessage());
+                }
+            });
+        } catch (Exception e) {
+            Log.e("LineFragment", "搜索线路异常", e);
+            showErrorView("搜索失败");
+        }
     }
 
     private void showBusLineDetails(BusApiClient.BusLineInfo line) {
@@ -90,12 +111,8 @@ public class LineFragment extends Fragment {
     }
 
     private void showEmptyView() {
-        // 显示无数据视图
         if (getView() == null) return;
-
-        // 隐藏列表和加载状态
-        recyclerView.setVisibility(View.GONE);
-
+        Log.d("BusLine", "显示空视图");
     }
 
     private void showErrorView(String message) {

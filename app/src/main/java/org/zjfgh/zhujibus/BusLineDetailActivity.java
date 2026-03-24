@@ -145,77 +145,106 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     }
 
     private void queryLineNotification() {
-        busApiClient.queryLineNotification(lineName, new BusApiClient.ApiCallback<>() {
-            @Override
-            public void onSuccess(BusApiClient.LineNotificationResponse response) {
-                if (response == null || response.data == null) {
-                    Log.e(TAG + "-BusInfo-", "公告-无数据");
-                    return;
+        try {
+            busApiClient.queryLineNotification(lineName, new BusApiClient.ApiCallback<>() {
+                @Override
+                public void onSuccess(BusApiClient.LineNotificationResponse response) {
+                    try {
+                        if (response == null || response.data == null) {
+                            Log.e(TAG + "-BusInfo-", "公告-无数据");
+                            return;
+                        }
+                        if (!"200".equals(response.code)) {
+                            Log.e(TAG + "-BusInfo-", "公告-状态码错误：" + response.code);
+                            return;
+                        }
+                        if (response.data.hasNotification) {
+                            runOnUiThread(() -> {
+                                try {
+                                    LinearLayout noticeBar = findViewById(R.id.notice_bar);
+                                    noticeBar.setVisibility(View.VISIBLE);
+                                    noticeText.setText(HtmlParser.htmlToFormattedText(response.data.text));
+                                    noticeBar.setOnClickListener(v -> {
+                                        try {
+                                            showFullNoticeDialog(response.data.text);
+                                        } catch (Exception e) {
+                                            Log.e(TAG, "显示公告详情失败", e);
+                                        }
+                                    });
+                                } catch (Exception e) {
+                                    Log.e(TAG, "更新公告UI失败", e);
+                                }
+                            });
+                        }
+                    } catch (Exception e) {
+                        Log.e(TAG + "-BusInfo-", "处理公告数据失败", e);
+                    }
                 }
-                if (!"200".equals(response.code)) {
-                    Log.e(TAG + "-BusInfo-", "公告-状态码错误：" + response.code);
-                    return;
-                }
-                if (response.data.hasNotification) {
-                    runOnUiThread(() -> {
-                        LinearLayout noticeBar = findViewById(R.id.notice_bar);
-                        noticeBar.setVisibility(View.VISIBLE);
-                        noticeText.setText(HtmlParser.htmlToFormattedText(response.data.text));
-                        noticeBar.setOnClickListener(v -> showFullNoticeDialog(response.data.text));
-                    });
-                }
-            }
 
-            @Override
-            public void onError(BusApiClient.BusApiException e) {
-                Log.e(TAG + "-BusInfo-", "公告-网络请求失败：" + e.getMessage());
-            }
-        });
+                @Override
+                public void onError(BusApiClient.BusApiException e) {
+                    Log.e(TAG + "-BusInfo-", "公告-网络请求失败：" + e.getMessage(), e);
+                }
+            });
+        } catch (Exception e) {
+            Log.e(TAG, "查询线路通知异常", e);
+        }
     }
 
     private void queryBusLineDetail() {
-        busApiClient.queryBusLineDetail(lineName, 1, new BusApiClient.ApiCallback<>() {
-            @Override
-            public void onSuccess(BusApiClient.BusLineDetailResponse response) {
-                cachedResponse = response;
+        try {
+            busApiClient.queryBusLineDetail(lineName, 1, new BusApiClient.ApiCallback<>() {
+                @Override
+                public void onSuccess(BusApiClient.BusLineDetailResponse response) {
+                    try {
+                        cachedResponse = response;
 
-                if (response == null || response.data == null) {
-                    Log.e(TAG + "-BusInfo-", "公交线路-无数据");
-                    return;
-                }
-                if (!"200".equals(response.code)) {
-                    Log.e(TAG + "-BusInfo-", "公交线路-状态码错误：" + response.code);
-                    return;
-                }
+                        if (response == null || response.data == null) {
+                            Log.e(TAG + "-BusInfo-", "公交线路-无数据");
+                            return;
+                        }
+                        if (!"200".equals(response.code)) {
+                            Log.e(TAG + "-BusInfo-", "公交线路-状态码错误：" + response.code);
+                            return;
+                        }
 
-                isTwoWayLine = (response.data.up != null && response.data.down != null);
+                        isTwoWayLine = (response.data.up != null && response.data.down != null);
 
-                // 根据lineID确定默认方向
-                if (lineID != null) {
-                    if (response.data.up != null && lineID.equals(response.data.up.id)) {
-                        currentDirection = 1;
-                    } else if (response.data.down != null && lineID.equals(response.data.down.id)) {
-                        currentDirection = 2;
+                        if (lineID != null) {
+                            if (response.data.up != null && lineID.equals(response.data.up.id)) {
+                                currentDirection = 1;
+                            } else if (response.data.down != null && lineID.equals(response.data.down.id)) {
+                                currentDirection = 2;
+                            }
+                        }
+
+                        runOnUiThread(() -> {
+                            try {
+                                if (isTwoWayLine) {
+                                    swapOrientation.setVisibility(View.VISIBLE);
+                                } else {
+                                    LinearLayout loopLineTag = findViewById(R.id.loop_line_tag);
+                                    loopLineTag.setVisibility(View.VISIBLE);
+                                }
+
+                                showDirection();
+                            } catch (Exception e) {
+                                Log.e(TAG, "更新线路详情UI失败", e);
+                            }
+                        });
+                    } catch (Exception e) {
+                        Log.e(TAG + "-BusInfo-", "处理公交线路数据失败", e);
                     }
                 }
 
-                runOnUiThread(() -> {
-                    if (isTwoWayLine) {
-                        swapOrientation.setVisibility(View.VISIBLE);
-                    } else {
-                        LinearLayout loopLineTag = findViewById(R.id.loop_line_tag);
-                        loopLineTag.setVisibility(View.VISIBLE);
-                    }
-
-                    showDirection();
-                });
-            }
-
-            @Override
-            public void onError(BusApiClient.BusApiException e) {
-                Log.e(TAG + "-BusInfo-", "获取公交线路失败");
-            }
-        });
+                @Override
+                public void onError(BusApiClient.BusApiException e) {
+                    Log.e(TAG + "-BusInfo-", "获取公交线路失败: " + e.getMessage(), e);
+                }
+            });
+        } catch (Exception e) {
+            Log.e(TAG, "查询公交线路详情异常", e);
+        }
     }
 
     private void swapDirection() {
@@ -277,25 +306,39 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     }
 
     private void showScheduleForDirection(BusApiClient.BusLineDirection lineDirection) {
-        busApiClient.getBusLinePlanTime(lineDirection.id, new BusApiClient.ApiCallback<BusApiClient.BusLinePlanTimeResponse>() {
-            @Override
-            public void onSuccess(BusApiClient.BusLinePlanTimeResponse response) {
-                if (response == null || response.data == null) {
-                    Log.e(TAG + "-BusInfo-", "时刻表-无数据");
-                    return;
+        try {
+            busApiClient.getBusLinePlanTime(lineDirection.id, new BusApiClient.ApiCallback<BusApiClient.BusLinePlanTimeResponse>() {
+                @Override
+                public void onSuccess(BusApiClient.BusLinePlanTimeResponse response) {
+                    try {
+                        if (response == null || response.data == null) {
+                            Log.e(TAG + "-BusInfo-", "时刻表-无数据");
+                            return;
+                        }
+                        if (!"200".equals(response.code)) {
+                            Log.e(TAG + "-BusInfo-", "时刻表-状态码错误：" + response.code);
+                            return;
+                        }
+                        runOnUiThread(() -> {
+                            try {
+                                showScheduleDialog(response.data);
+                            } catch (Exception e) {
+                                Log.e(TAG, "显示时刻表失败", e);
+                            }
+                        });
+                    } catch (Exception e) {
+                        Log.e(TAG + "-BusInfo-", "处理时刻表数据失败", e);
+                    }
                 }
-                if (!"200".equals(response.code)) {
-                    Log.e(TAG + "-BusInfo-", "时刻表-状态码错误：" + response.code);
-                    return;
-                }
-                runOnUiThread(() -> showScheduleDialog(response.data));
-            }
 
-            @Override
-            public void onError(BusApiClient.BusApiException e) {
-                Log.e(TAG + "-BusInfo-", "时刻表-请求失败：" + e.getMessage());
-            }
-        });
+                @Override
+                public void onError(BusApiClient.BusApiException e) {
+                    Log.e(TAG + "-BusInfo-", "时刻表-请求失败：" + e.getMessage(), e);
+                }
+            });
+        } catch (Exception e) {
+            Log.e(TAG, "获取时刻表异常", e);
+        }
     }
 
     private void updateAccessibilityTag(BusApiClient.BusLineDirection lineDirection) {

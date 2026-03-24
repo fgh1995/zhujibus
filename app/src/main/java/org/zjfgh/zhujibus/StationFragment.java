@@ -59,24 +59,40 @@ public class StationFragment extends Fragment {
     }
 
     public void searchStations(String keyword) {
-        client = new BusApiClient();
-        client.searchStations(keyword, 1, 10, new BusApiClient.ApiCallback<>() {
-            @Override
-            public void onSuccess(BusApiClient.StationSearchResponse response) {
-                if ("200".equals(response.returnFlag)) {
-                    requireActivity().runOnUiThread(() -> {
-                        searchBusStationAdapter.setData(response.data.list);
-                    });
-                } else {
-                    Log.e("BusInfo", "搜索站点失败-状态码错误： " + response.code);
+        try {
+            client = new BusApiClient();
+            client.searchStations(keyword, 1, 10, new BusApiClient.ApiCallback<>() {
+                @Override
+                public void onSuccess(BusApiClient.StationSearchResponse response) {
+                    try {
+                        if (response == null || response.data == null) {
+                            Log.e("BusInfo", "搜索站点结果为空");
+                            return;
+                        }
+                        if ("200".equals(response.returnFlag)) {
+                            requireActivity().runOnUiThread(() -> {
+                                try {
+                                    searchBusStationAdapter.setData(response.data.list);
+                                } catch (Exception e) {
+                                    Log.e("BusInfo", "更新站点列表失败", e);
+                                }
+                            });
+                        } else {
+                            Log.e("BusInfo", "搜索站点失败-状态码错误： " + response.code);
+                        }
+                    } catch (Exception e) {
+                        Log.e("BusInfo", "处理站点搜索结果失败", e);
+                    }
                 }
-            }
 
-            @Override
-            public void onError(BusApiClient.BusApiException e) {
-                Log.e("BusInfo", "搜索站点失败-请求异常： " + e.getMessage());
-            }
-        });
+                @Override
+                public void onError(BusApiClient.BusApiException e) {
+                    Log.e("BusInfo", "搜索站点失败-请求异常： " + e.getMessage(), e);
+                }
+            });
+        } catch (Exception e) {
+            Log.e("StationFragment", "搜索站点异常", e);
+        }
     }
 }
 

@@ -5,6 +5,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.text.Editable;
 import android.text.TextWatcher;
+import android.util.Log;
 import android.widget.EditText;
 
 import androidx.appcompat.app.AppCompatActivity;
@@ -26,62 +27,58 @@ public class BusRouteSearchActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_bus_route_search);
+        try {
+            setContentView(R.layout.activity_bus_route_search);
 
-        // 初始化视图
-        edSearchBusLine = findViewById(R.id.ed_search_bus);
-        viewPager = findViewById(R.id.viewPager);
-        TabLayout tabLayout = findViewById(R.id.tabLayout);
+            edSearchBusLine = findViewById(R.id.ed_search_bus);
+            viewPager = findViewById(R.id.viewPager);
+            TabLayout tabLayout = findViewById(R.id.tabLayout);
 
-        // 设置适配器
-        adapter = new SearchPagerAdapter(this);
-        viewPager.setAdapter(adapter);
-        viewPager.setUserInputEnabled(false);
+            adapter = new SearchPagerAdapter(this);
+            viewPager.setAdapter(adapter);
+            viewPager.setUserInputEnabled(false);
 
-        // 绑定 TabLayout 和 ViewPager2
-        new TabLayoutMediator(tabLayout, viewPager, (tab, position) -> {
-            switch (position) {
-                case 0:
-                    tab.setText("线路");
-                    break;
-                case 1:
-                    tab.setText("站点");
-                    break;
-                case 2:
-                    tab.setText("地点");
-                    break;
-            }
-        }).attach();
+            new TabLayoutMediator(tabLayout, viewPager, (tab, position) -> {
+                switch (position) {
+                    case 0:
+                        tab.setText("线路");
+                        break;
+                    case 1:
+                        tab.setText("站点");
+                        break;
+                    case 2:
+                        tab.setText("地点");
+                        break;
+                }
+            }).attach();
 
-        // 可选：设置预加载页面数
-        viewPager.setOffscreenPageLimit(2);
+            viewPager.setOffscreenPageLimit(2);
 
-        // 监听页面切换事件
-        viewPager.registerOnPageChangeCallback(new ViewPager2.OnPageChangeCallback() {
-            @Override
-            public void onPageSelected(int position) {
-                super.onPageSelected(position);
-                performSearchWithDebounce(edSearchBusLine.getText().toString().trim());
-            }
-        });
+            viewPager.registerOnPageChangeCallback(new ViewPager2.OnPageChangeCallback() {
+                @Override
+                public void onPageSelected(int position) {
+                    super.onPageSelected(position);
+                    performSearchWithDebounce(edSearchBusLine.getText().toString().trim());
+                }
+            });
 
-        // 设置文本变化监听器
-        edSearchBusLine.addTextChangedListener(new TextWatcher() {
-            @Override
-            public void beforeTextChanged(CharSequence s, int start, int count, int after) {
-                // 不做处理
-            }
+            edSearchBusLine.addTextChangedListener(new TextWatcher() {
+                @Override
+                public void beforeTextChanged(CharSequence s, int start, int count, int after) {
+                }
 
-            @Override
-            public void onTextChanged(CharSequence s, int start, int before, int count) {
-                // 不做处理
-            }
+                @Override
+                public void onTextChanged(CharSequence s, int start, int before, int count) {
+                }
 
-            @Override
-            public void afterTextChanged(Editable s) {
-                performSearchWithDebounce(s.toString().trim());
-            }
-        });
+                @Override
+                public void afterTextChanged(Editable s) {
+                    performSearchWithDebounce(s.toString().trim());
+                }
+            });
+        } catch (Exception e) {
+            Log.e("BusRouteSearchActivity", "初始化失败", e);
+        }
     }
 
     /**
