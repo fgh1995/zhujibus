@@ -1,12 +1,15 @@
 package org.zjfgh.zhujibus;
 
+import android.content.Intent;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.util.Log;
+import android.view.View;
 import android.widget.EditText;
+import android.widget.TextView;
 
 import androidx.appcompat.app.AppCompatActivity;
 
@@ -23,6 +26,7 @@ public class BusRouteSearchActivity extends AppCompatActivity {
     private Handler handler = new Handler(Looper.getMainLooper());
     private Runnable searchRunnable;
     private static final long DEBOUNCE_DELAY = 500; // 防抖延迟时间，单位毫秒
+    private TextView tvTest;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -33,6 +37,7 @@ public class BusRouteSearchActivity extends AppCompatActivity {
             edSearchBusLine = findViewById(R.id.ed_search_bus);
             viewPager = findViewById(R.id.viewPager);
             TabLayout tabLayout = findViewById(R.id.tabLayout);
+            tvTest = findViewById(R.id.tv_test);
 
             adapter = new SearchPagerAdapter(this);
             viewPager.setAdapter(adapter);
@@ -74,6 +79,13 @@ public class BusRouteSearchActivity extends AppCompatActivity {
                 @Override
                 public void afterTextChanged(Editable s) {
                     performSearchWithDebounce(s.toString().trim());
+                }
+            });
+
+            tvTest.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    startTestActivity();
                 }
             });
         } catch (Exception e) {
@@ -132,6 +144,19 @@ public class BusRouteSearchActivity extends AppCompatActivity {
                 }
                 break;
         }
+    }
+
+    /**
+     * 启动测试活动
+     */
+    private void startTestActivity() {
+        Intent intent = new Intent(this, BusLineDetailActivity.class);
+        intent.putExtra("line_id", "test_line_001");
+        intent.putExtra("line_name", "测试线路");
+        intent.putExtra("start_station", "测试起点站");
+        intent.putExtra("end_station", "测试终点站");
+        intent.putExtra("station_id", "test_station_005");
+        startActivity(intent);
     }
 
     @Override

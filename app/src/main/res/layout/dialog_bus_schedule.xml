@@ -30,7 +30,7 @@
                 android:id="@+id/schedule_text"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textSize="17sp"
+                android:textSize="22sp"
                 android:text="ssss"
                 android:lineSpacingExtra="8dp"
                 android:padding="8dp" />

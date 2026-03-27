@@ -329,11 +329,30 @@
             android:layout_margin="8dp"
             android:background="#B8B8B8" />
 
-        <TextView
-            android:id="@+id/refresh_time"
-            android:gravity="end"
+        <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
+            android:layout_height="wrap_content"
+            android:gravity="end|center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/error_indicator"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:layout_marginEnd="8dp"
+                android:background="@drawable/red_circle"
+                android:gravity="center"
+                android:text="!"
+                android:textColor="@color/white"
+                android:textSize="24sp"
+                android:textStyle="bold"
+                android:visibility="gone" />
+
+            <TextView
+                android:id="@+id/refresh_time"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content" />
+        </LinearLayout>
 
         <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/rv_live_vehicles"
@@ -343,10 +362,17 @@
     </LinearLayout>
 
     <!-- 站点列表 -->
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/station_list"
+    <ScrollView
+        android:id="@+id/station_scroll_view"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="match_parent"
         android:layout_marginStart="5dp"
-        android:layout_marginEnd="5dp" />
+        android:layout_marginEnd="5dp">
+
+        <org.zjfgh.zhujibus.BusLineView
+            android:id="@+id/bus_line_view"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="#FFFFFF" />
+    </ScrollView>
 </LinearLayout>

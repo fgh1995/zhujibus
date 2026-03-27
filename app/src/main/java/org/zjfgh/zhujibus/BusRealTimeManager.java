@@ -25,6 +25,10 @@ public class BusRealTimeManager {
         this.stationList = stationList;
     }
 
+    public List<BusApiClient.BusLineStation> getStationList() {
+        return stationList;
+    }
+
     public void startTracking(String lineId, RealTimeUpdateListener listener) {
         this.currentLineId = lineId;
         fetchData(listener);
@@ -61,6 +65,9 @@ public class BusRealTimeManager {
     private void processResponse(BusApiClient.BusVehicleDynamicData data,
                                  RealTimeUpdateListener listener) {
         List<BusApiClient.BusPosition> newPositions = new ArrayList<>();
+        
+        resetAllStations();
+        
         for (BusApiClient.VehicleDynamicInfo vehicle : data.list) {
             BusApiClient.BusPosition position = new BusApiClient.BusPosition();
             position.plateNumber = vehicle.plateNumber;
@@ -76,10 +83,30 @@ public class BusRealTimeManager {
             // 确保不超出站点范围
             if (stationList != null) {
                 position.nextStationOrder = Math.min(position.nextStationOrder, stationList.size());
+                
+                if (vehicle.vehicleOrder > 0 && vehicle.vehicleOrder <= stationList.size()) {
+                    BusApiClient.BusLineStation currentStation = stationList.get(vehicle.vehicleOrder - 1);
+                    if (vehicle.isArriveStation == 1) {
+                        currentStation.status = BusApiClient.BusLineStation.StationStatus.CURRENT;
+                    } else {
+                        currentStation.status = BusApiClient.BusLineStation.StationStatus.NEXT_STATION;
+                    }
+                    currentStation.plateNumber = vehicle.plateNumber;
+                }
             }
             newPositions.add(position);
         }
         this.busPositions = newPositions;
         listener.onBusPositionsUpdated(newPositions);
+    }
+
+    private void resetAllStations() {
+        if (stationList == null) {
+            return;
+        }
+        for (BusApiClient.BusLineStation station : stationList) {
+            station.status = BusApiClient.BusLineStation.StationStatus.NORMAL;
+            station.plateNumber = null;
+        }
     }
 }

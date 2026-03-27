@@ -9,12 +9,18 @@ import android.graphics.Typeface;
 import android.os.Build;
 import android.os.Bundle;
 
+import androidx.annotation.NonNull;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 
+import android.animation.ValueAnimator;
 import android.os.Handler;
 import android.text.Html;
 import android.text.Spanned;
+import android.text.SpannableStringBuilder;
+import android.text.style.ForegroundColorSpan;
+import android.text.style.RelativeSizeSpan;
+import android.text.style.StyleSpan;
 import android.util.Log;
 import android.view.Gravity;
 import android.view.LayoutInflater;
@@ -23,6 +29,7 @@ import android.view.Window;
 import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -39,6 +46,8 @@ import java.util.Collections;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+
+import android.graphics.Color;
 
 public class BusLineDetailActivity extends AppCompatActivity implements BusRealTimeManager.RealTimeUpdateListener {
     private String lineID;
@@ -61,11 +70,15 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private Handler handler = new Handler();
     private RecyclerView stationListRecyclerView;
     private StationAdapter stationAdapter;
+    private BusLineView busLineView;
+    private ScrollView stationScrollView;
     private List<BusEtaItem> etaItems = new ArrayList<>();
     private BusEtaAdapter busEtaAdapter;
     private TextView scheduleButton;
     private static final String TAG = "BusLineDetailActivity";
     TextView refreshTime;
+    TextView errorIndicator;
+    private ValueAnimator errorBlinkAnimator;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -89,10 +102,9 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     }
 
     private int findStationPositionById(String stationId) {
-        if (stationAdapter != null && stationAdapter.getStationList() != null) {
-            List<BusApiClient.BusLineStation> stations = stationAdapter.getStationList();
-            for (int i = 0; i < stations.size(); i++) {
-                if (stationId.equals(String.valueOf(stations.get(i).id))) {
+        if (realTimeManager != null && realTimeManager.getStationList() != null) {
+            for (int i = 0; i < realTimeManager.getStationList().size(); i++) {
+                if (stationId.equals(String.valueOf(realTimeManager.getStationList().get(i).id))) {
                     return i;
                 }
             }
@@ -123,6 +135,10 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         accessibilityTag = findViewById(R.id.accessibility_tag);
         accessibilityTag.setVisibility(View.GONE);
         refreshTime = findViewById(R.id.refresh_time);
+        errorIndicator = findViewById(R.id.error_indicator);
+        
+        startErrorBlinkAnimation();
+        
         // 创建格式化器，指定格式为 00:00:00
         SimpleDateFormat formatter = new SimpleDateFormat("HH:mm:ss", Locale.getDefault());
         // 获取当前时间
@@ -193,6 +209,11 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
 
     private void queryBusLineDetail() {
         try {
+            if (lineID != null && lineID.startsWith("test_line_")) {
+                loadTestData();
+                return;
+            }
+            
             busApiClient.queryBusLineDetail(lineName, 1, new BusApiClient.ApiCallback<>() {
                 @Override
                 public void onSuccess(BusApiClient.BusLineDetailResponse response) {
@@ -313,10 +334,12 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                     try {
                         if (response == null || response.data == null) {
                             Log.e(TAG + "-BusInfo-", "时刻表-无数据");
+                            runOnUiThread(() -> Toast.makeText(BusLineDetailActivity.this, "时刻表数据为空", Toast.LENGTH_SHORT).show());
                             return;
                         }
                         if (!"200".equals(response.code)) {
                             Log.e(TAG + "-BusInfo-", "时刻表-状态码错误：" + response.code);
+                            runOnUiThread(() -> Toast.makeText(BusLineDetailActivity.this, "时刻表获取失败：" + response.code, Toast.LENGTH_SHORT).show());
                             return;
                         }
                         runOnUiThread(() -> {
@@ -324,16 +347,19 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                                 showScheduleDialog(response.data);
                             } catch (Exception e) {
                                 Log.e(TAG, "显示时刻表失败", e);
+                                Toast.makeText(BusLineDetailActivity.this, "显示时刻表失败", Toast.LENGTH_SHORT).show();
                             }
                         });
                     } catch (Exception e) {
                         Log.e(TAG + "-BusInfo-", "处理时刻表数据失败", e);
+                        runOnUiThread(() -> Toast.makeText(BusLineDetailActivity.this, "处理时刻表数据失败", Toast.LENGTH_SHORT).show());
                     }
                 }
 
                 @Override
                 public void onError(BusApiClient.BusApiException e) {
                     Log.e(TAG + "-BusInfo-", "时刻表-请求失败：" + e.getMessage(), e);
+                    runOnUiThread(() -> Toast.makeText(BusLineDetailActivity.this, "时刻表请求失败：" + e.getMessage(), Toast.LENGTH_SHORT).show());
                 }
             });
         } catch (Exception e) {
@@ -374,54 +400,31 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         }
 
         runOnUiThread(() -> {
-            stationListRecyclerView = findViewById(R.id.station_list);
-            stationListRecyclerView.setLayoutManager(new LinearLayoutManager(BusLineDetailActivity.this) {
-                @Override
-                public boolean supportsPredictiveItemAnimations() {
-                    return false;
+            try {
+                busLineView = findViewById(R.id.bus_line_view);
+                stationScrollView = findViewById(R.id.station_scroll_view);
+                
+                busLineView.setStations(lineDirection.stationList);
+                busLineView.setOnStationClickListener(this::showStationDetails);
+                
+                realTimeManager = new BusRealTimeManager(handler, lineDirection.stationList);
+                realTimeManager.startTracking(lineDirection.id, BusLineDetailActivity.this);
+                
+                String stationId = getIntent().getStringExtra("station_id");
+                if (stationId != null && !stationId.isEmpty()) {
+                    int position = findStationPositionById(stationId);
+                    if (position != -1) {
+                        busLineView.setSelectedPosition(position);
+                        busLineView.post(() -> {
+                            int stationHeight = 120;
+                            int scrollY = position * stationHeight - busLineView.getHeight() / 2;
+                            stationScrollView.smoothScrollTo(0, scrollY);
+                        });
+                    }
                 }
-            });
-            stationAdapter = new StationAdapter(lineDirection.stationList, BusLineDetailActivity.this::showStationDetails);
-            stationListRecyclerView.setAdapter(stationAdapter);
-            realTimeManager = new BusRealTimeManager(handler, lineDirection.stationList);
-            realTimeManager.startTracking(lineDirection.id, BusLineDetailActivity.this);
-            // 获取传递过来的站点ID
-            String stationId = getIntent().getStringExtra("station_id");
-            if (stationId != null && !stationId.isEmpty()) {
-                int position = findStationPositionById(stationId);
-                if (position != -1) {
-                    stationAdapter.setSelectedPosition(position);
-                    // 获取RecyclerView的LayoutManager
-                    LinearLayoutManager layoutManager = (LinearLayoutManager) stationListRecyclerView.getLayoutManager();
-                    // 使用平滑滚动并居中
-                    stationListRecyclerView.post(new Runnable() {
-                        @Override
-                        public void run() {
-                            // 获取目标View的位置
-                            View targetView = null;
-                            if (layoutManager != null) {
-                                targetView = layoutManager.findViewByPosition(position);
-                            }
-                            if (targetView != null) {
-                                // 计算居中需要的偏移量
-                                int top = targetView.getTop();
-                                int height = targetView.getHeight();
-                                int screenHeight = stationListRecyclerView.getHeight();
-                                int offset = top - (screenHeight / 2 - height / 2);
-
-                                // 平滑滚动到计算出的位置
-                                stationListRecyclerView.smoothScrollBy(0, offset);
-                            } else {
-                                // 如果View还未加载，先滚动到附近位置
-                                layoutManager.scrollToPosition(position);
-                                // 然后再次尝试居中
-                                stationListRecyclerView.post(this);
-                            }
-                        }
-                    });
-                }
+            } catch (Exception e) {
+                Log.e(TAG, "设置站点列表失败", e);
             }
-            setupEtaList();
         });
     }
 
@@ -473,27 +476,94 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         TextView scheduleText = dialogView.findViewById(R.id.schedule_text);
         scheduleText.setTypeface(Typeface.MONOSPACE);
 
-        StringBuilder formattedSchedule = new StringBuilder();
-        int itemsPerRow = 5;
+        SimpleDateFormat timeFormat = new SimpleDateFormat("HH:mm", Locale.getDefault());
+        Date currentTime = new Date();
+        int currentHour = currentTime.getHours();
+        int currentMinute = currentTime.getMinutes();
+        int currentTimeInMinutes = currentHour * 60 + currentMinute;
 
-        for (int i = 0; i < scheduleTimes.size(); i++) {
-            if ((i + 1) % itemsPerRow == 0 || i == scheduleTimes.size() - 1) {
-                formattedSchedule.append(scheduleTimes.get(i));
-            } else {
-                formattedSchedule.append(String.format("%-6s", scheduleTimes.get(i)));
-            }
-
-            if ((i + 1) % itemsPerRow == 0 && i != scheduleTimes.size() - 1) {
-                formattedSchedule.append("\n\n");
+        int lastBusTimeInMinutes = -1;
+        if (!scheduleTimes.isEmpty()) {
+            try {
+                String lastBusTime = scheduleTimes.get(scheduleTimes.size() - 1);
+                String[] parts = lastBusTime.split(":");
+                if (parts.length == 2) {
+                    lastBusTimeInMinutes = Integer.parseInt(parts[0]) * 60 + Integer.parseInt(parts[1]);
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "解析末班车时间失败", e);
             }
         }
 
-        scheduleText.setText(formattedSchedule.toString());
+        boolean isAfterLastBus = lastBusTimeInMinutes != -1 && currentTimeInMinutes > lastBusTimeInMinutes;
+
+        int itemsPerRow = 3;
+        String timePadding = "   ";
+        
+        SpannableStringBuilder spannableBuilder = new SpannableStringBuilder();
+        int itemsInCurrentRow = 0;
+        boolean nextBusFound = false;
+        int nextBusIndex = -1;
+
+        for (int i = 0; i < scheduleTimes.size(); i++) {
+            String timeStr = scheduleTimes.get(i);
+            int startIndex = spannableBuilder.length();
+            spannableBuilder.append(timeStr);
+
+            if (!isAfterLastBus) {
+                try {
+                    String[] parts = timeStr.split(":");
+                    if (parts.length == 2) {
+                        int busTimeInMinutes = Integer.parseInt(parts[0]) * 60 + Integer.parseInt(parts[1]);
+                        if (busTimeInMinutes < currentTimeInMinutes) {
+                            spannableBuilder.setSpan(
+                                new ForegroundColorSpan(Color.GRAY),
+                                startIndex,
+                                spannableBuilder.length(),
+                                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+                            );
+                        } else if (!nextBusFound) {
+                            nextBusFound = true;
+                            nextBusIndex = i;
+                            spannableBuilder.setSpan(
+                                new ForegroundColorSpan(Color.RED),
+                                startIndex,
+                                spannableBuilder.length(),
+                                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+                            );
+                            spannableBuilder.setSpan(
+                                new StyleSpan(Typeface.BOLD),
+                                startIndex,
+                                spannableBuilder.length(),
+                                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+                            );
+                        }
+                    }
+                } catch (Exception e) {
+                    Log.e(TAG, "解析时间失败", e);
+                }
+            }
+
+            itemsInCurrentRow++;
+
+            if (itemsInCurrentRow < itemsPerRow && i < scheduleTimes.size() - 1) {
+                spannableBuilder.append(timePadding);
+            }
+
+            if (itemsInCurrentRow == itemsPerRow && i < scheduleTimes.size() - 1) {
+                spannableBuilder.append("\n");
+                itemsInCurrentRow = 0;
+            }
+        }
+
+        scheduleText.setText(spannableBuilder);
         dialog.show();
     }
 
     private void showStationDetails(BusApiClient.BusLineStation station, int position) {
-        stationAdapter.setSelectedPosition(position);
+        if (busLineView != null) {
+            busLineView.setSelectedPosition(position);
+        }
     }
 
     @SuppressLint("DefaultLocale")
@@ -516,11 +586,14 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     @Override
     public void onBusPositionsUpdated(List<BusApiClient.BusPosition> positions) {
         runOnUiThread(() -> {
+            hideErrorIndicator();
+            
             if (!positions.isEmpty()) {
-                stationAdapter.updateBusAverageSpeed(realTimeManager.busAverageSpeed);
-                stationAdapter.updateBusPositions(positions);
+                if (busLineView != null) {
+                    busLineView.updateBusPositions(positions);
+                }
 
-                int selectedStationIndex = stationAdapter.getSelectedPosition();
+                int selectedStationIndex = busLineView != null ? busLineView.getSelectedPosition() : -1;
                 if (selectedStationIndex != -1) {
                     updateEtaItems(positions, selectedStationIndex);
                     checkAndAnnounceArrival(positions, selectedStationIndex);
@@ -530,22 +603,25 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     }
 
     private void updateEtaItems(List<BusApiClient.BusPosition> positions, int selectedStationIndex) {
+        if (busEtaAdapter == null) {
+            return;
+        }
+        
         etaItems.clear();
         List<BusEtaItem> tempList = new ArrayList<>();
 
         for (BusApiClient.BusPosition vehicle : positions) {
             int vehicleStationIndex = vehicle.currentStationOrder - 1;
 
-            if (vehicleStationIndex < 0 || vehicleStationIndex >= stationAdapter.getItemCount()) {
+            if (vehicleStationIndex < 0 || vehicleStationIndex >= realTimeManager.getStationList().size()) {
                 continue;
             }
             Log.w(TAG, vehicleStationIndex + "/" + selectedStationIndex);
             if (vehicleStationIndex < selectedStationIndex) {
                 int totalDistanceMeters = vehicle.distanceToNext;
                 for (int stationIndex = vehicleStationIndex + 1; stationIndex < selectedStationIndex + 1; stationIndex++) {
-                    if (stationIndex < stationAdapter.getItemCount()) {
-                        totalDistanceMeters += stationAdapter.getBusLineStation(stationIndex).lastDistance;
-
+                    if (stationIndex < realTimeManager.getStationList().size()) {
+                        totalDistanceMeters += realTimeManager.getStationList().get(stationIndex).lastDistance;
                     }
                 }
                 int etaMinutes = realTimeManager.busAverageSpeed > 0 ?
@@ -568,34 +644,148 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         Date currentDate = new Date();
         refreshTime.setText("刷新时间：" + formatter.format(currentDate));
         BusApiClient.BusPosition nearestVehicle = null;
-        String hasSkippedStationStr = "";
         for (BusApiClient.BusPosition vehicle : positions) {
             if (selectedStationIndex >= vehicle.currentStationOrder) {
                 nearestVehicle = vehicle;
             }
         }
-        if (nearestVehicle != null && lastVoiceStationOrder > 0 && (nearestVehicle.currentStationOrder - lastVoiceStationOrder) > 2) {
-            nearestVehicle.isArrived = true;
-            hasSkippedStationStr = "请注意收听广播站台名称是否已过站。";
-
+        if (nearestVehicle != null && lastVoiceStationOrder > 0 && (nearestVehicle.currentStationOrder - lastVoiceStationOrder) > 1) {
+            boolean shouldAnnounceSkip = false;
+            
+            if (lastVehicleWasArrived && !nearestVehicle.isArrived) {
+                shouldAnnounceSkip = true;
+            }
+            
+            if (shouldAnnounceSkip) {
+                String skipStationCn = "因网络延迟导致站点更新跳站，请注意确认车辆位置。";
+                String skipStationEn = "Due to network delay, station updates may skip. Please verify vehicle location.";
+                String skipStationCombined = skipStationCn + " " + skipStationEn;
+                
+                TTSUtils tts = TTSUtils.getInstance(this);
+                tts.speak(skipStationCombined, "skip_announcement");
+            }
         }
+        
+        if (nearestVehicle != null) {
+            lastVehicleWasArrived = nearestVehicle.isArrived;
+        }
+        
         if (nearestVehicle != null && nearestVehicle.isArrived && lastVoiceStationOrder != nearestVehicle.currentStationOrder) {
-            BusApiClient.BusLineStation nextStation = stationAdapter.getBusLineStation(nearestVehicle.currentStationOrder);
-            String announcement = hasSkippedStationStr + "开往" + endStation + "方向的" + lineName +
-                    "公交车，即将到达：" + nextStation.stationName;
-            TTSUtils.getInstance(this).speak(announcement);
-            lastVoiceStationOrder = nearestVehicle.currentStationOrder;
+            int nextStationIndex = nearestVehicle.currentStationOrder + 1;
+            if (nextStationIndex > 0 && nextStationIndex <= realTimeManager.getStationList().size()) {
+                String announcementCombined = getAnnouncementCombined(nextStationIndex);
+
+                TTSUtils tts = TTSUtils.getInstance(this);
+                tts.speak(announcementCombined, "bus_arrival_announcement");
+                
+                lastVoiceStationOrder = nearestVehicle.currentStationOrder;
+            }
         }
 
     }
 
+    @NonNull
+    private String getAnnouncementCombined(int nextStationIndex) {
+        BusApiClient.BusLineStation nextStation = realTimeManager.getStationList().get(nextStationIndex - 1);
+        String lineNameEn = lineName.replace("路", "");
+        String announcementCn = "开往" + endStation + "方向的" + lineName +
+                "公交车，即将到达：" + nextStation.stationName;
+        String announcementEn = "The ，" + lineNameEn + "， bus heading to ，" + endStation +
+                "， is arriving at，" + nextStation.stationName;
+        return announcementCn + "，，" + announcementEn;
+    }
+
     int lastVoiceStationOrder;
+    boolean lastVehicleWasArrived = false;
+
+    private void startErrorBlinkAnimation() {
+        errorBlinkAnimator = ValueAnimator.ofFloat(0f, 1f);
+        errorBlinkAnimator.setDuration(1000);
+        errorBlinkAnimator.setRepeatCount(ValueAnimator.INFINITE);
+        errorBlinkAnimator.setRepeatMode(ValueAnimator.RESTART);
+        errorBlinkAnimator.addUpdateListener(animation -> {
+            float progress = (float) animation.getAnimatedValue();
+            if (errorIndicator.getVisibility() == View.VISIBLE) {
+                float alpha = progress < 0.5f ? 1f : 0f;
+                errorIndicator.setAlpha(alpha);
+            }
+        });
+        errorBlinkAnimator.start();
+    }
+
+    private void showErrorIndicator() {
+        if (errorIndicator != null) {
+            errorIndicator.setVisibility(View.VISIBLE);
+            errorIndicator.setAlpha(1f);
+        }
+    }
+
+    private void hideErrorIndicator() {
+        if (errorIndicator != null) {
+            errorIndicator.setVisibility(View.GONE);
+        }
+    }
 
     @Override
     public void onError(String message) {
         runOnUiThread(() -> {
-            Toast.makeText(this, "车辆实时位置更新失败: " + message, Toast.LENGTH_SHORT).show();
+            showErrorIndicator();
         });
+    }
+
+    private void loadTestData() {
+        try {
+            List<BusApiClient.BusLineStation> testStations = new ArrayList<>();
+            for (int i = 1; i <= 20; i++) {
+                BusApiClient.BusLineStation station = new BusApiClient.BusLineStation();
+                station.id = "test_station_" + String.format("%03d", i);
+                station.stationName = "测试站点" + i + "号";
+                station.stationOrder = i;
+                station.lastDistance = 500;
+                
+                if (i == 4) {
+                    station.status = BusApiClient.BusLineStation.StationStatus.NEXT_STATION;
+                    station.plateNumber = "京A12345";
+                } else if (i < 4) {
+                    station.status = BusApiClient.BusLineStation.StationStatus.PASSED;
+                } else {
+                    station.status = BusApiClient.BusLineStation.StationStatus.NORMAL;
+                }
+                
+                testStations.add(station);
+            }
+
+            runOnUiThread(() -> {
+                try {
+                    routeNumber.setText(lineName);
+                    TextView startStationName = findViewById(R.id.start_station_name);
+                    startStationName.setText(startStation);
+                    TextView endStationName = findViewById(R.id.end_station_name);
+                    endStationName.setText(endStation);
+
+                    busLineView = findViewById(R.id.bus_line_view);
+                    stationScrollView = findViewById(R.id.station_scroll_view);
+                    
+                    busLineView.setStations(testStations);
+                    busLineView.setOnStationClickListener(this::showStationDetails);
+
+                    realTimeManager = new BusRealTimeManager(handler, testStations);
+                    realTimeManager.startTracking("test_line_001", BusLineDetailActivity.this);
+
+                    String stationId = getIntent().getStringExtra("station_id");
+                    if (stationId != null && !stationId.isEmpty()) {
+                        int position = 4;
+                        busLineView.setSelectedPosition(position);
+                    }
+
+                    setupEtaList();
+                } catch (Exception e) {
+                    Log.e(TAG, "加载测试数据失败", e);
+                }
+            });
+        } catch (Exception e) {
+            Log.e(TAG, "创建测试数据失败", e);
+        }
     }
 
     @Override
@@ -617,6 +807,10 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        if (errorBlinkAnimator != null) {
+            errorBlinkAnimator.cancel();
+            errorBlinkAnimator = null;
+        }
         realTimeManager.stopTracking();
         realTimeManager = null;
     }

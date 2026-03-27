@@ -340,7 +340,8 @@ public class BusApiClient {
             NORMAL,       // 正常状态
             NEXT_STATION, // 下一站
             CURRENT,      // 当前站
-            DEFAULT, PASSED        // 已过站
+            PASSED,       // 已过站
+            DEFAULT       // 默认状态
         }
 
         public StationStatus status = StationStatus.NORMAL;
