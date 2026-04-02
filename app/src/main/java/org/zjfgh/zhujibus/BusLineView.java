@@ -373,7 +373,7 @@ public class BusLineView extends View {
         
         if (busInfo != null && busInfo.isBeforeUserSelected) {
             if (busInfo.status == BusApiClient.BusLineStation.StationStatus.NEXT_STATION) {
-                shouldDim = (index < busInfo.position);
+                shouldDim = (index <= busInfo.position);
                 if (index == busInfo.position + 1) {
                     isNextStation = true;
                 }

@@ -13,3 +13,5 @@
 .externalNativeBuild
 .cxx
 local.properties
+/rename_to_pinyin.py
+/诸暨公交语音合成

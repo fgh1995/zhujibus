@@ -237,6 +237,20 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                             } else if (response.data.down != null && lineID.equals(response.data.down.id)) {
                                 currentDirection = 2;
                             }
+                        } else if (isTwoWayLine && startStation != null && endStation != null) {
+                            if (response.data.up != null && startStation.equals(response.data.up.startStation) 
+                                    && endStation.equals(response.data.up.endStation)) {
+                                currentDirection = 1;
+                            } else if (response.data.down != null && startStation.equals(response.data.down.startStation) 
+                                    && endStation.equals(response.data.down.endStation)) {
+                                currentDirection = 2;
+                            }
+                        } else if (!isTwoWayLine) {
+                            if (response.data.up != null) {
+                                currentDirection = 1;
+                            } else if (response.data.down != null) {
+                                currentDirection = 2;
+                            }
                         }
 
                         runOnUiThread(() -> {
@@ -272,6 +286,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         if (!isTwoWayLine) return;
 
         currentDirection = (currentDirection == 1) ? 2 : 1;
+        trackedVehiclePlate = null;
         Log.e(TAG + "-BusInfo-", "切换方向到: " + (currentDirection == 1 ? "上行" : "下行"));
         updateStartEndStations();
         showDirection();
@@ -296,7 +311,9 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     }
 
     private BusApiClient.BusLineDirection getCurrentDirectionData() {
-        if (cachedResponse == null || cachedResponse.data == null) return null;
+        if (cachedResponse == null || cachedResponse.data == null) {
+            return null;
+        }
 
         if (currentDirection == 1 && cachedResponse.data.up != null) {
             return cachedResponse.data.up;
@@ -564,6 +581,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         if (busLineView != null) {
             busLineView.setSelectedPosition(position);
         }
+        trackedVehiclePlate = null;
     }
 
     @SuppressLint("DefaultLocale")
@@ -595,6 +613,27 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
 
                 int selectedStationIndex = busLineView != null ? busLineView.getSelectedPosition() : -1;
                 if (selectedStationIndex != -1) {
+                    if (trackedVehiclePlate == null) {
+                        for (BusApiClient.BusPosition vehicle : positions) {
+                            int vehicleStationIndex = vehicle.currentStationOrder - 1;
+                            if (vehicleStationIndex == selectedStationIndex) {
+                                trackedVehiclePlate = vehicle.plateNumber;
+                                break;
+                            }
+                        }
+                    }
+                    if (trackedVehiclePlate != null) {
+                        for (BusApiClient.BusPosition vehicle : positions) {
+                            if (trackedVehiclePlate.equals(vehicle.plateNumber)) {
+                                int vehicleStationIndex = vehicle.currentStationOrder - 1;
+                                if (vehicleStationIndex != selectedStationIndex) {
+                                    busLineView.setSelectedPosition(vehicleStationIndex);
+                                    selectedStationIndex = vehicleStationIndex;
+                                }
+                                break;
+                            }
+                        }
+                    }
                     updateEtaItems(positions, selectedStationIndex);
                     checkAndAnnounceArrival(positions, selectedStationIndex);
                 }
@@ -670,13 +709,13 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             lastVehicleWasArrived = nearestVehicle.isArrived;
         }
         
-        if (nearestVehicle != null && nearestVehicle.isArrived && lastVoiceStationOrder != nearestVehicle.currentStationOrder) {
+        if (nearestVehicle != null && lastVoiceStationOrder != nearestVehicle.currentStationOrder) {
             int nextStationIndex = nearestVehicle.currentStationOrder + 1;
             if (nextStationIndex > 0 && nextStationIndex <= realTimeManager.getStationList().size()) {
-                String announcementCombined = getAnnouncementCombined(nextStationIndex);
+                BusApiClient.BusLineStation nextStation = realTimeManager.getStationList().get(nextStationIndex - 1);
 
                 TTSUtils tts = TTSUtils.getInstance(this);
-                tts.speak(announcementCombined, "bus_arrival_announcement");
+                tts.playArrivalAnnouncement(lineName, startStation, endStation, nextStation.stationName);
                 
                 lastVoiceStationOrder = nearestVehicle.currentStationOrder;
             }
@@ -684,19 +723,9 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
 
     }
 
-    @NonNull
-    private String getAnnouncementCombined(int nextStationIndex) {
-        BusApiClient.BusLineStation nextStation = realTimeManager.getStationList().get(nextStationIndex - 1);
-        String lineNameEn = lineName.replace("路", "");
-        String announcementCn = "开往" + endStation + "方向的" + lineName +
-                "公交车，即将到达：" + nextStation.stationName;
-        String announcementEn = "The ，" + lineNameEn + "， bus heading to ，" + endStation +
-                "， is arriving at，" + nextStation.stationName;
-        return announcementCn + "，，" + announcementEn;
-    }
-
     int lastVoiceStationOrder;
     boolean lastVehicleWasArrived = false;
+    private String trackedVehiclePlate = null;
 
     private void startErrorBlinkAnimation() {
         errorBlinkAnimator = ValueAnimator.ofFloat(0f, 1f);
@@ -811,7 +840,9 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             errorBlinkAnimator.cancel();
             errorBlinkAnimator = null;
         }
-        realTimeManager.stopTracking();
+        if(realTimeManager != null){
+            realTimeManager.stopTracking();
+        }
         realTimeManager = null;
     }
 
