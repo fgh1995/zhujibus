@@ -12,6 +12,7 @@ constraintlayout = "2.1.4"
 okhttp = "4.9.1"
 navigationFragment = "2.6.0"
 navigationUi = "2.6.0"
+pinyin4j = "2.5.1"
 
 [libraries]
 jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "jacksonDatabind" }
@@ -26,6 +27,7 @@ constraintlayout = { group = "androidx.constraintlayout", name = "constraintlayo
 okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
 navigation-fragment = { group = "androidx.navigation", name = "navigation-fragment", version.ref = "navigationFragment" }
 navigation-ui = { group = "androidx.navigation", name = "navigation-ui", version.ref = "navigationUi" }
+pinyin4j = { module = "com.belerweb:pinyin4j", version.ref = "pinyin4j" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
