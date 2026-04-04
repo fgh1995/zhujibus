@@ -323,6 +323,7 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
         if (playbackQueue.isEmpty()) {
             isPlaying = false;
             currentUtteranceId = null;
+            abandonAudioFocus();
             return;
         }
 
