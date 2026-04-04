@@ -38,11 +38,7 @@ public class BusEtaAdapter extends RecyclerView.Adapter<BusEtaAdapter.BusEtaView
     public void onBindViewHolder(@NonNull BusEtaViewHolder holder, int position) {
         BusEtaItem item = etaItems.get(position);
         holder.bind(item);
-        if (position == getItemCount() - 1) {
-            holder.view_.setVisibility(View.GONE);
-        } else {
-            holder.view_.setVisibility(View.VISIBLE);
-        }
+        holder.view_.setVisibility(View.GONE);
         holder.itemView.setOnClickListener(v -> {
             if (listener != null) {
                 listener.onItemClick(item);
@@ -104,7 +100,13 @@ public class BusEtaAdapter extends RecyclerView.Adapter<BusEtaAdapter.BusEtaView
                 distanceDisplay = String.format(Locale.getDefault(), "%.1f公里", item.getDistance() / 1000f);
             }
             tvDistance.setText("约" + distanceDisplay);
-            tvPlateNumber.setText(item.getPlateNumber());
+            String plateNumber = item.getPlateNumber();
+            if (plateNumber != null && plateNumber.length() > 1) {
+                if (plateNumber.charAt(0) == plateNumber.charAt(1)) {
+                    plateNumber = plateNumber.substring(1);
+                }
+            }
+            tvPlateNumber.setText(plateNumber);
         }
     }
 }

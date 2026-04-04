@@ -439,6 +439,8 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                         });
                     }
                 }
+                
+                setupEtaList();
             } catch (Exception e) {
                 Log.e(TAG, "设置站点列表失败", e);
             }
@@ -452,6 +454,12 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 LinearLayoutManager.HORIZONTAL,
                 false
         ));
+        rvLiveVehicles.addItemDecoration(new RecyclerView.ItemDecoration() {
+            @Override
+            public void getItemOffsets(@NonNull Rect outRect, @NonNull View view, @NonNull RecyclerView parent, @NonNull RecyclerView.State state) {
+                outRect.right = 12;
+            }
+        });
         busEtaAdapter = new BusEtaAdapter(etaItems, item -> {
         });
         rvLiveVehicles.setAdapter(busEtaAdapter);
