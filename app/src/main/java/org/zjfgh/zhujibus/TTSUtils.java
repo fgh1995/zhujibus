@@ -298,7 +298,12 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
     public void playArrivalAnnouncement(String lineName, String startStation, String endStation, String nextStationName) {
         stopAll();
         playbackQueue.clear();
+        queueArrivalAnnouncement(lineName, startStation, endStation, nextStationName);
+        isPlaying = true;
+        playNext();
+    }
 
+    public void queueArrivalAnnouncement(String lineName, String startStation, String endStation, String nextStationName) {
         playbackQueue.add(new PlaybackItem(R.raw.cn_01_zhuji_bus_reminder));
         playbackQueue.add(new PlaybackItem(R.raw.cn_02_heading_to));
         addCnStationName(endStation);
@@ -314,9 +319,6 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
         addEnStationName(endStation);
         playbackQueue.add(new PlaybackItem(R.raw.en_03_is_arriving_at));
         addEnStationName(nextStationName);
-
-        isPlaying = true;
-        playNext();
     }
 
     private void playNext() {

@@ -684,6 +684,7 @@ public class BusApiClient {
         public String stationId;     // 站点ID
         public StationVehicleInfo vehicleInfo;
         public String planTime;
+        public boolean isPassed = false;
     }
 
     /**
