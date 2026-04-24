@@ -82,7 +82,12 @@ public class BusRealTimeManager {
             position.nextStationOrder = vehicle.vehicleOrder + 1;
             // 确保不超出站点范围
             if (stationList != null) {
-                position.nextStationOrder = Math.min(position.nextStationOrder, stationList.size());
+                if (vehicle.vehicleOrder > stationList.size()) {
+                    position.currentStationOrder = stationList.size();
+                    position.nextStationOrder = stationList.size();
+                } else {
+                    position.nextStationOrder = Math.min(position.nextStationOrder, stationList.size());
+                }
                 
                 if (vehicle.vehicleOrder > 0 && vehicle.vehicleOrder <= stationList.size()) {
                     BusApiClient.BusLineStation currentStation = stationList.get(vehicle.vehicleOrder - 1);

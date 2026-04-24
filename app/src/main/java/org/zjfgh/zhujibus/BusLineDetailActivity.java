@@ -723,7 +723,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 BusApiClient.BusLineStation nextStation = realTimeManager.getStationList().get(nextStationIndex - 1);
 
                 TTSUtils tts = TTSUtils.getInstance(this);
-                tts.playArrivalAnnouncement(lineName, startStation, endStation, nextStation.stationName);
+                tts.playLineDetailAnnouncement(lineName, startStation, endStation, nextStation.stationName);
                 
                 lastVoiceStationOrder = nearestVehicle.currentStationOrder;
             }

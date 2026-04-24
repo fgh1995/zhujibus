@@ -44,6 +44,7 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
     private List<PlaybackItem> playbackQueue = new ArrayList<>();
     private boolean isPlaying = false;
     private String currentUtteranceId;
+    private List<QueuedAnnouncement> pendingAnnouncements = new ArrayList<>();
 
     private AudioManager audioManager;
     private AudioFocusRequest audioFocusRequest;
@@ -73,6 +74,18 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
         PlaybackItem(int rawResId, Type type) {
             this.type = type;
             this.rawResId = rawResId;
+        }
+    }
+
+    private static class QueuedAnnouncement {
+        String lineName;
+        String endStation;
+        String nextStationName;
+
+        QueuedAnnouncement(String lineName, String endStation, String nextStationName) {
+            this.lineName = lineName;
+            this.endStation = endStation;
+            this.nextStationName = nextStationName;
         }
     }
 
@@ -198,7 +211,8 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
                 R.raw.en_num_80, R.raw.en_num_81, R.raw.en_num_82, R.raw.en_num_83, R.raw.en_num_84,
                 R.raw.en_num_85, R.raw.en_num_86, R.raw.en_num_87, R.raw.en_num_88, R.raw.en_num_89,
                 R.raw.en_num_90, R.raw.en_num_91, R.raw.en_num_92, R.raw.en_num_93, R.raw.en_num_94,
-                R.raw.en_num_95, R.raw.en_num_96, R.raw.en_num_97, R.raw.en_num_98, R.raw.en_num_99
+                R.raw.en_num_95, R.raw.en_num_96, R.raw.en_num_97, R.raw.en_num_98, R.raw.en_num_99,
+                R.raw.en_route
         };
         for (int resId : cnNumRes) {
             int soundId = soundPool.load(context, resId, 1);
@@ -296,14 +310,23 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
     }
 
     public void playArrivalAnnouncement(String lineName, String startStation, String endStation, String nextStationName) {
-        stopAll();
+        if (isPlaying) {
+            pendingAnnouncements.add(new QueuedAnnouncement(lineName, endStation, nextStationName));
+            return;
+        }
+        pendingAnnouncements.clear();
+        pendingAnnouncements.add(new QueuedAnnouncement(lineName, endStation, nextStationName));
         playbackQueue.clear();
-        queueArrivalAnnouncement(lineName, startStation, endStation, nextStationName);
+        queueArrivalAnnouncementWithDirection(lineName, endStation, nextStationName);
         isPlaying = true;
         playNext();
     }
 
     public void queueArrivalAnnouncement(String lineName, String startStation, String endStation, String nextStationName) {
+        pendingAnnouncements.add(new QueuedAnnouncement(lineName, endStation, nextStationName));
+    }
+
+    private void queueArrivalAnnouncementWithDirection(String lineName, String endStation, String nextStationName) {
         playbackQueue.add(new PlaybackItem(R.raw.cn_01_zhuji_bus_reminder));
         playbackQueue.add(new PlaybackItem(R.raw.cn_02_heading_to));
         addCnStationName(endStation);
@@ -321,8 +344,79 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
         addEnStationName(nextStationName);
     }
 
+    private void queueArrivalAnnouncement(String lineName, String nextStationName) {
+        playbackQueue.add(new PlaybackItem(R.raw.cn_01_zhuji_bus_reminder));
+        addCnLineNumber(lineName);
+        playbackQueue.add(new PlaybackItem(R.raw.cn_04_arriving));
+        addCnStationName(nextStationName);
+
+        String lineNameEn = lineName.replace("路", "");
+        playbackQueue.add(new PlaybackItem(R.raw.en_01_zhuji_bus_reminder));
+        addEnLineNumber(lineNameEn);
+        playbackQueue.add(new PlaybackItem(R.raw.en_03_is_arriving_at));
+        addEnStationName(nextStationName);
+    }
+
+    private void mergeAndPlayQueuedAnnouncements() {
+        playbackQueue.clear();
+        if (pendingAnnouncements.size() <= 1) {
+            pendingAnnouncements.clear();
+            isPlaying = false;
+            abandonAudioFocus();
+            return;
+        }
+
+        String firstNextStation = pendingAnnouncements.get(1).nextStationName;
+
+        playbackQueue.add(new PlaybackItem(R.raw.cn_01_zhuji_bus_reminder));
+        for (int i = 1; i < pendingAnnouncements.size(); i++) {
+            QueuedAnnouncement qa = pendingAnnouncements.get(i);
+            addCnLineNumber(qa.lineName);
+        }
+        playbackQueue.add(new PlaybackItem(R.raw.cn_04_arriving));
+        addCnStationName(firstNextStation);
+
+        playbackQueue.add(new PlaybackItem(R.raw.en_01_zhuji_bus_reminder));
+        for (int i = 1; i < pendingAnnouncements.size(); i++) {
+            QueuedAnnouncement qa = pendingAnnouncements.get(i);
+            addEnLineNumber(qa.lineName.replace("路", ""));
+        }
+        playbackQueue.add(new PlaybackItem(R.raw.en_03_is_arriving_at));
+        addEnStationName(firstNextStation);
+
+        pendingAnnouncements.clear();
+        playNext();
+    }
+
+    public void playLineDetailAnnouncement(String lineName, String startStation, String endStation, String nextStationName) {
+        stopAll();
+        playbackQueue.clear();
+        playbackQueue.add(new PlaybackItem(R.raw.cn_01_zhuji_bus_reminder));
+        playbackQueue.add(new PlaybackItem(R.raw.cn_02_heading_to));
+        addCnStationName(endStation);
+        playbackQueue.add(new PlaybackItem(R.raw.cn_03_direction));
+        addCnLineNumber(lineName);
+        playbackQueue.add(new PlaybackItem(R.raw.cn_04_arriving));
+        addCnStationName(nextStationName);
+
+        String lineNameEn = lineName.replace("路", "");
+        playbackQueue.add(new PlaybackItem(R.raw.en_01_zhuji_bus_reminder));
+        addEnLineNumber(lineNameEn);
+        playbackQueue.add(new PlaybackItem(R.raw.en_02_bound_for));
+        addEnStationName(endStation);
+        playbackQueue.add(new PlaybackItem(R.raw.en_03_is_arriving_at));
+        addEnStationName(nextStationName);
+
+        isPlaying = true;
+        playNext();
+    }
+
     private void playNext() {
         if (playbackQueue.isEmpty()) {
+            if (!pendingAnnouncements.isEmpty()) {
+                mergeAndPlayQueuedAnnouncements();
+                return;
+            }
             isPlaying = false;
             currentUtteranceId = null;
             abandonAudioFocus();
@@ -552,9 +646,16 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
     }
 
     private void addEnLineNumber(String lineNameEn) {
+        addEnLineNumber(lineNameEn, true);
+    }
+
+    private void addEnLineNumber(String lineNameEn, boolean withRoute) {
         String numStr = lineNameEn.trim();
         try {
             int num = Integer.parseInt(numStr);
+            if (withRoute) {
+                playbackQueue.add(new PlaybackItem(R.raw.en_route));
+            }
             if (num >= 0 && num <= 99) {
                 playbackQueue.add(new PlaybackItem(EN_NUM_RES[num]));
             } else if (num >= 100) {
@@ -567,6 +668,9 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
                 }
             }
         } catch (NumberFormatException e) {
+            if (withRoute) {
+                playbackQueue.add(new PlaybackItem(R.raw.en_route));
+            }
             playbackQueue.add(new PlaybackItem(lineNameEn, PlaybackItem.Type.TTS_EN));
         }
     }
@@ -644,6 +748,7 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
 
     public void stopAll() {
         playbackQueue.clear();
+        pendingAnnouncements.clear();
         isPlaying = false;
         currentUtteranceId = null;
         handler.removeCallbacksAndMessages(null);

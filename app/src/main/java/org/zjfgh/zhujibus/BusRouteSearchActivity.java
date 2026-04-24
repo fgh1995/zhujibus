@@ -85,7 +85,7 @@ public class BusRouteSearchActivity extends AppCompatActivity {
             tvTest.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
-                    startTestActivity();
+                    showTTSOptionsDialog();
                 }
             });
         } catch (Exception e) {
@@ -144,6 +144,39 @@ public class BusRouteSearchActivity extends AppCompatActivity {
                 }
                 break;
         }
+    }
+
+    private void showTTSOptionsDialog() {
+        String[] options = {
+                "1. 单车到站（完整）",
+                "2. 两车同时到（第二辆合并）",
+                "3. 三车同时到（第二三辆合并）",
+                "4. 线路详情播报（完整含方向）"
+        };
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("测试语音播报")
+                .setItems(options, (dialog, which) -> {
+                    TTSUtils tts = TTSUtils.getInstance(this);
+                    switch (which) {
+                        case 0:
+                            tts.playArrivalAnnouncement("1路", "测试起点站", "小商品市场", "白门下村");
+                            break;
+                        case 1:
+                            tts.playArrivalAnnouncement("1路", "测试起点站", "小商品市场", "白门下村");
+                            tts.queueArrivalAnnouncement("2路", "测试起点站", "小商品市场", "白门下村");
+                            break;
+                        case 2:
+                            tts.playArrivalAnnouncement("1路", "测试起点站", "小商品市场", "白门下村");
+                            tts.queueArrivalAnnouncement("2路", "测试起点站", "小商品市场", "白门下村");
+                            tts.queueArrivalAnnouncement("3路", "测试起点站", "小商品市场", "白门下村");
+                            break;
+                        case 3:
+                            tts.playLineDetailAnnouncement("1路", "测试起点站", "小商品市场", "白门下村");
+                            break;
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
     }
 
     /**
