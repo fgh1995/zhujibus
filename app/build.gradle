@@ -10,7 +10,7 @@ android {
         applicationId "org.zjfgh.zhujibus"
         minSdk 24
         targetSdk 35
-        versionCode 101030
+        versionCode 101031
         versionName "1.1.3"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"

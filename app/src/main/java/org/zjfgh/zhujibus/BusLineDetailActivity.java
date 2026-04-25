@@ -60,6 +60,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private LinearLayout swapOrientation;
     private DotMatrixView accessibilityIcon;
     private HorizontalScrollTextView nextStationInfo;
+    private TextView tips;
 
     // 当前显示的方向 (1:上行, 2:下行)
     private int currentDirection = 1;
@@ -81,6 +82,28 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     TextView errorIndicator;
     private ValueAnimator errorBlinkAnimator;
     private String lastErrorMessage = null;
+
+    private static final int TIPS_INTERVAL = 10000;
+    private static final String[] TIPS_TEXT = {"文明排队   上下有序", "严禁携带危险物品上车"};
+    private static final int[] TIPS_COLOR = {0xFFFFFF00, 0xFF00FFFF};
+    private Handler tipsHandler = new Handler();
+    private int tipsAnimationIndex = 0;
+
+    private final Runnable tipsRunnable = new Runnable() {
+        @Override
+        public void run() {
+            tipsAnimationIndex = (tipsAnimationIndex + 1) % TIPS_TEXT.length;
+            tips.setText(TIPS_TEXT[tipsAnimationIndex]);
+            tips.setTextColor(TIPS_COLOR[tipsAnimationIndex]);
+            tipsHandler.postDelayed(this, TIPS_INTERVAL);
+        }
+    };
+
+    private void startTipsAnimation() {
+        tips.setText(TIPS_TEXT[0]);
+        tips.setTextColor(TIPS_COLOR[0]);
+        tipsHandler.postDelayed(tipsRunnable, TIPS_INTERVAL);
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -129,8 +152,9 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         endStationName.setText(endStation);
         endStationName.setTypeface(dottedSongti);
         endStationName.setScrollSpeed(150f);
-        TextView tips = findViewById(R.id.tips);
+        tips = findViewById(R.id.tips);
         tips.setTypeface(dottedSongti);
+        startTipsAnimation();
         nextStationInfo = findViewById(R.id.next_station_info);
         nextStationInfo.setTypeface(dottedSongti);
         nextStationInfo.setTextColor(0xFFFF0000);
@@ -867,6 +891,9 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             realTimeManager.stopTracking();
         }
         realTimeManager = null;
+        if (tipsHandler != null) {
+            tipsHandler.removeCallbacksAndMessages(null);
+        }
     }
 
     private String getCurrentDirectionId() {

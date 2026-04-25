@@ -8,6 +8,7 @@ import android.media.MediaPlayer;
 import android.media.SoundPool;
 import android.os.Build;
 import android.os.Handler;
+import android.os.HandlerThread;
 import android.speech.tts.TextToSpeech;
 import android.speech.tts.UtteranceProgressListener;
 import android.util.Log;
@@ -19,6 +20,8 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.lang.reflect.Field;
 public class TTSUtils implements TextToSpeech.OnInitListener {
     private static final String TAG = "TTSUtils";
@@ -34,7 +37,9 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
     private SoundPool soundPool;
     private MediaPlayer durationMediaPlayer;
     private HashMap<Integer, Integer> soundMap = new HashMap<>();
-    private Handler handler = new Handler();
+    private Handler mainHandler = new Handler();
+    private Handler backgroundHandler;
+    private HandlerThread backgroundThread;
     private List<PlaybackItem> playbackQueue = new ArrayList<>();
     private boolean isPlaying = false;
     private String currentUtteranceId;
@@ -43,6 +48,9 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
     private AudioManager audioManager;
     private AudioFocusRequest audioFocusRequest;
     private boolean hasAudioFocus = false;
+
+    private final ConcurrentHashMap<String, Integer> stationResIdCache = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, String> md5Cache = new ConcurrentHashMap<>();
 
     private static final AudioAttributes UNIFIED_AUDIO_ATTRIBUTES = new AudioAttributes.Builder()
             .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
@@ -93,6 +101,9 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
     private TTSUtils(Context context) {
         this.context = context.getApplicationContext();
         audioManager = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
+        backgroundThread = new HandlerThread("TTSBackgroundThread");
+        backgroundThread.start();
+        backgroundHandler = new Handler(backgroundThread.getLooper());
         initAudioFocusRequest();
         initTTS();
         initSoundPool();
@@ -237,7 +248,7 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
             public void onDone(String utteranceId) {
                 Log.d(TAG, "TTS播放完成: " + utteranceId);
                 if (utteranceId != null && utteranceId.equals(currentUtteranceId)) {
-                    playNext();
+                    mainHandler.post(() -> playNext());
                 }
             }
 
@@ -245,7 +256,7 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
             public void onError(String utteranceId) {
                 Log.e(TAG, "TTS播放出错: " + utteranceId);
                 if (utteranceId != null && utteranceId.equals(currentUtteranceId)) {
-                    playNext();
+                    mainHandler.post(() -> playNext());
                 }
             }
         });
@@ -459,11 +470,11 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
                 durationMediaPlayer.prepare();
                 int duration = durationMediaPlayer.getDuration();
                 soundPool.play(soundId, 1.0f, 1.0f, 0, 0, 1.0f);
-                handler.postDelayed(this::playNext, duration);
+                mainHandler.postDelayed(this::playNext, duration);
             } catch (Exception e) {
                 Log.e(TAG, "获取音频时长失败", e);
                 soundPool.play(soundId, 1.0f, 1.0f, 0, 0, 1.0f);
-                handler.postDelayed(this::playNext, getSoundDuration(rawResId));
+                mainHandler.postDelayed(this::playNext, getSoundDuration(rawResId));
             }
         } else {
             playNext();
@@ -488,7 +499,7 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
             durationMediaPlayer.prepare();
             int duration = durationMediaPlayer.getDuration();
             durationMediaPlayer.start();
-            handler.postDelayed(this::playNext, duration);
+            mainHandler.postDelayed(this::playNext, duration);
         } catch (Exception e) {
             Log.e(TAG, "使用MediaPlayer播放站点音频失败", e);
             playNext();
@@ -653,29 +664,51 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
     }
 
     private void addCnStationName(String stationName) {
-        String normalized = normalizeStationName(stationName);
-        String md5Hash = toMd5(normalized);
-        if (md5Hash != null) {
-            Integer resId = getStationResIdByMd5(md5Hash, "cn_stations_");
-            if (resId != null) {
-                playbackQueue.add(new PlaybackItem(resId, PlaybackItem.Type.MEDIA_PLAYER_WAV));
-                return;
-            }
+        Integer resId = getCachedStationResId(stationName, "cn_stations_");
+        if (resId != null) {
+            playbackQueue.add(new PlaybackItem(resId, PlaybackItem.Type.MEDIA_PLAYER_WAV));
+        } else {
+            playbackQueue.add(new PlaybackItem(stationName, PlaybackItem.Type.TTS_CN));
         }
-        playbackQueue.add(new PlaybackItem(stationName, PlaybackItem.Type.TTS_CN));
     }
 
     private void addEnStationName(String stationName) {
-        String normalized = normalizeStationName(stationName);
-        String md5Hash = toMd5(normalized);
-        if (md5Hash != null) {
-            Integer resId = getStationResIdByMd5(md5Hash, "en_stations_");
-            if (resId != null) {
-                playbackQueue.add(new PlaybackItem(resId, PlaybackItem.Type.MEDIA_PLAYER_WAV));
-                return;
-            }
+        Integer resId = getCachedStationResId(stationName, "en_stations_");
+        if (resId != null) {
+            playbackQueue.add(new PlaybackItem(resId, PlaybackItem.Type.MEDIA_PLAYER_WAV));
+        } else {
+            playbackQueue.add(new PlaybackItem(stationName, PlaybackItem.Type.TTS_CN));
         }
-        playbackQueue.add(new PlaybackItem(stationName, PlaybackItem.Type.TTS_CN));
+    }
+
+    private Integer getCachedStationResId(String stationName, String prefix) {
+        String cacheKey = prefix + stationName;
+        Integer cached = stationResIdCache.get(cacheKey);
+        if (cached != null) {
+            return cached == -1 ? null : cached;
+        }
+
+        String normalized = normalizeStationName(stationName);
+        String md5Hash = getCachedMd5(normalized);
+        if (md5Hash != null) {
+            Integer resId = getStationResIdByMd5(md5Hash, prefix);
+            stationResIdCache.put(cacheKey, resId == null ? -1 : resId);
+            return resId;
+        }
+        stationResIdCache.put(cacheKey, -1);
+        return null;
+    }
+
+    private String getCachedMd5(String input) {
+        String cached = md5Cache.get(input);
+        if (cached != null) {
+            return cached;
+        }
+        String md5 = toMd5(input);
+        if (md5 != null) {
+            md5Cache.put(input, md5);
+        }
+        return md5;
     }
 
     private Integer getStationResIdByMd5(String md5Hash, String prefix) {
@@ -728,7 +761,7 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
         pendingAnnouncements.clear();
         isPlaying = false;
         currentUtteranceId = null;
-        handler.removeCallbacksAndMessages(null);
+        mainHandler.removeCallbacksAndMessages(null);
         releaseDurationMediaPlayer();
         abandonAudioFocus();
         if (isInitialized) {
@@ -754,6 +787,11 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
         if (soundPool != null) {
             soundPool.release();
             soundPool = null;
+        }
+        if (backgroundThread != null) {
+            backgroundThread.quitSafely();
+            backgroundThread = null;
+            backgroundHandler = null;
         }
         instance = null;
     }

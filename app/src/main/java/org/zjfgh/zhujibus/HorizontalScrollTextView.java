@@ -70,12 +70,16 @@ public class HorizontalScrollTextView extends View {
     }
 
     public void setText(String text) {
+        if (text == null) {
+            text = "";
+        }
         this.text = text;
         textWidth = textPaint.measureText(text);
         if (getWidth() > 0) {
             needScroll = textWidth > getWidth();
         }
         resetScroll();
+        invalidate();
         if (needScroll && autoStart) {
             startScrollAnimation();
         }
