@@ -82,22 +82,17 @@ public class BusRealTimeManager {
             position.nextStationOrder = vehicle.vehicleOrder + 1;
             // 确保不超出站点范围
             if (stationList != null) {
-                if (vehicle.vehicleOrder > stationList.size()) {
-                    position.currentStationOrder = stationList.size();
-                    position.nextStationOrder = stationList.size();
-                } else {
-                    position.nextStationOrder = Math.min(position.nextStationOrder, stationList.size());
+                if (vehicle.vehicleOrder <= 0 || vehicle.vehicleOrder > stationList.size()) {
+                    continue;
                 }
                 
-                if (vehicle.vehicleOrder > 0 && vehicle.vehicleOrder <= stationList.size()) {
-                    BusApiClient.BusLineStation currentStation = stationList.get(vehicle.vehicleOrder - 1);
-                    if (vehicle.isArriveStation == 1) {
-                        currentStation.status = BusApiClient.BusLineStation.StationStatus.CURRENT;
-                    } else {
-                        currentStation.status = BusApiClient.BusLineStation.StationStatus.NEXT_STATION;
-                    }
-                    currentStation.plateNumber = vehicle.plateNumber;
+                BusApiClient.BusLineStation currentStation = stationList.get(vehicle.vehicleOrder - 1);
+                if (vehicle.isArriveStation == 1) {
+                    currentStation.status = BusApiClient.BusLineStation.StationStatus.CURRENT;
+                } else {
+                    currentStation.status = BusApiClient.BusLineStation.StationStatus.NEXT_STATION;
                 }
+                currentStation.plateNumber = vehicle.plateNumber;
             }
             newPositions.add(position);
         }

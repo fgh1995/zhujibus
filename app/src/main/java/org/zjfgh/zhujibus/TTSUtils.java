@@ -20,12 +20,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.lang.reflect.Field;
-
-import net.sourceforge.pinyin4j.PinyinHelper;
-import net.sourceforge.pinyin4j.format.HanyuPinyinOutputFormat;
-import net.sourceforge.pinyin4j.format.HanyuPinyinToneType;
-import net.sourceforge.pinyin4j.format.exception.BadHanyuPinyinOutputFormatCombination;
-
 public class TTSUtils implements TextToSpeech.OnInitListener {
     private static final String TAG = "TTSUtils";
 
@@ -105,47 +99,54 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
     }
 
     private void initAudioFocusRequest() {
-        audioFocusRequest = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
-                .setAudioAttributes(UNIFIED_AUDIO_ATTRIBUTES)
-                .setOnAudioFocusChangeListener(new AudioManager.OnAudioFocusChangeListener() {
-                    @Override
-                    public void onAudioFocusChange(int focusChange) {
-                        switch (focusChange) {
-                            case AudioManager.AUDIOFOCUS_LOSS:
-                                Log.d(TAG, "AudioFocus: 失去焦点, 停止播放");
-                                stopAll();
-                                hasAudioFocus = false;
-                                break;
-                            case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT:
-                                Log.d(TAG, "AudioFocus: 暂时失去焦点");
-                                pausePlayback();
-                                break;
-                            case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK:
-                                Log.d(TAG, "AudioFocus: 暂时失去焦点, 降低音量");
-                                break;
-                            case AudioManager.AUDIOFOCUS_GAIN:
-                                Log.d(TAG, "AudioFocus: 获得焦点");
-                                hasAudioFocus = true;
-                                resumePlayback();
-                                break;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            audioFocusRequest = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                    .setAudioAttributes(UNIFIED_AUDIO_ATTRIBUTES)
+                    .setOnAudioFocusChangeListener(new AudioManager.OnAudioFocusChangeListener() {
+                        @Override
+                        public void onAudioFocusChange(int focusChange) {
+                            switch (focusChange) {
+                                case AudioManager.AUDIOFOCUS_LOSS:
+                                    Log.d(TAG, "AudioFocus: 失去焦点, 停止播放");
+                                    stopAll();
+                                    hasAudioFocus = false;
+                                    break;
+                                case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT:
+                                    Log.d(TAG, "AudioFocus: 暂时失去焦点");
+                                    pausePlayback();
+                                    break;
+                                case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK:
+                                    Log.d(TAG, "AudioFocus: 暂时失去焦点, 降低音量");
+                                    break;
+                                case AudioManager.AUDIOFOCUS_GAIN:
+                                    Log.d(TAG, "AudioFocus: 获得焦点");
+                                    hasAudioFocus = true;
+                                    resumePlayback();
+                                    break;
+                            }
                         }
-                    }
-                })
-                .build();
+                    })
+                    .build();
+        }
     }
 
     private boolean requestAudioFocus() {
         if (audioManager == null || audioFocusRequest == null) {
             return false;
         }
-        int result = audioManager.requestAudioFocus(audioFocusRequest);
+        int result = 0;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            result = audioManager.requestAudioFocus(audioFocusRequest);
+        }
         hasAudioFocus = (result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED);
         return hasAudioFocus;
     }
 
     private void abandonAudioFocus() {
         if (audioManager != null && audioFocusRequest != null) {
-            audioManager.abandonAudioFocusRequest(audioFocusRequest);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                audioManager.abandonAudioFocusRequest(audioFocusRequest);
+            }
             hasAudioFocus = false;
         }
     }
@@ -543,30 +544,6 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
         tts.setSpeechRate(speechRate);
         tts.setPitch(pitch);
         tts.speak(item.text, TextToSpeech.QUEUE_FLUSH, null, currentUtteranceId);
-    }
-
-    private String toPinyin(String chinese) {
-        if (chinese == null || chinese.isEmpty()) {
-            return "";
-        }
-        HanyuPinyinOutputFormat format = new HanyuPinyinOutputFormat();
-        format.setToneType(HanyuPinyinToneType.WITHOUT_TONE);
-        StringBuilder sb = new StringBuilder();
-        for (char c : chinese.toCharArray()) {
-            if (Character.toString(c).matches("[\\u4E00-\\u9FA5]")) {
-                try {
-                    String[] pinyinArray = PinyinHelper.toHanyuPinyinStringArray(c, format);
-                    if (pinyinArray != null && pinyinArray.length > 0) {
-                        sb.append(pinyinArray[0]);
-                    }
-                } catch (BadHanyuPinyinOutputFormatCombination e) {
-                    sb.append(c);
-                }
-            } else {
-                sb.append(c);
-            }
-        }
-        return sb.toString().toLowerCase();
     }
 
     private static final int[] CN_NUM_RES = {

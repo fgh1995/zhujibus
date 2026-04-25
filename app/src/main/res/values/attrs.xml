@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <declare-styleable name="DotMatrixView">
+        <attr name="dotMatrixPattern" format="enum">
+            <enum name="accessibility" value="0" />
+            <enum name="right_arrow" value="1" />
+        </attr>
+        <attr name="dotMatrixColor" format="color" />
+        <attr name="dotMatrixDotSize" format="dimension" />
+    </declare-styleable>
+    <declare-styleable name="HorizontalScrollTextView">
+        <attr name="hsText" format="string" />
+        <attr name="hsTextColor" format="color" />
+        <attr name="hsTextSize" format="dimension" />
+        <attr name="hsScrollSpeed" format="float" />
+        <attr name="hsAutoStart" format="boolean" />
+        <attr name="hsGravity" format="enum">
+            <enum name="start" value="0" />
+            <enum name="center" value="1" />
+            <enum name="end" value="2" />
+        </attr>
+    </declare-styleable>
+</resources>

@@ -58,7 +58,8 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private TextView routeNumber;
     private TextView noticeText;
     private LinearLayout swapOrientation;
-    private LinearLayout accessibilityTag;
+    private DotMatrixView accessibilityIcon;
+    private HorizontalScrollTextView nextStationInfo;
 
     // 当前显示的方向 (1:上行, 2:下行)
     private int currentDirection = 1;
@@ -79,6 +80,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     TextView refreshTime;
     TextView errorIndicator;
     private ValueAnimator errorBlinkAnimator;
+    private String lastErrorMessage = null;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -117,25 +119,43 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         routeNumber = findViewById(R.id.route_number);
         routeNumber.setText(lineName);
 
+        Typeface dottedSongti = Typeface.createFromAsset(getAssets(), "fonts/DottedSongtiSquareRegular.otf");
+        routeNumber.setTypeface(dottedSongti);
+
         LinearLayout noticeBar = findViewById(R.id.notice_bar);
         noticeText = findViewById(R.id.notice_text);
         noticeBar.setVisibility(View.GONE);
-
-        TextView startStationName = findViewById(R.id.start_station_name);
-        startStationName.setText(startStation);
-        TextView endStationName = findViewById(R.id.end_station_name);
+        HorizontalScrollTextView endStationName = findViewById(R.id.end_station_name);
         endStationName.setText(endStation);
-
+        endStationName.setTypeface(dottedSongti);
+        endStationName.setScrollSpeed(150f);
+        TextView tips = findViewById(R.id.tips);
+        tips.setTypeface(dottedSongti);
+        nextStationInfo = findViewById(R.id.next_station_info);
+        nextStationInfo.setTypeface(dottedSongti);
+        nextStationInfo.setTextColor(0xFFFF0000);
+        nextStationInfo.setTextSize(30f);
+        nextStationInfo.setText("欢迎乘坐" + lineName + "公交车");
+        nextStationInfo.setScrollSpeed(150f);
         swapOrientation = findViewById(R.id.swap_orientation);
         swapOrientation.setVisibility(View.GONE);
 
         LinearLayout loopLineTag = findViewById(R.id.loop_line_tag);
         loopLineTag.setVisibility(View.GONE);
 
-        accessibilityTag = findViewById(R.id.accessibility_tag);
-        accessibilityTag.setVisibility(View.GONE);
+        accessibilityIcon = findViewById(R.id.accessibility_icon);
+        accessibilityIcon.setVisibility(View.GONE);
         refreshTime = findViewById(R.id.refresh_time);
         errorIndicator = findViewById(R.id.error_indicator);
+        errorIndicator.setOnClickListener(v -> {
+            if (lastErrorMessage != null && !lastErrorMessage.isEmpty()) {
+                new AlertDialog.Builder(BusLineDetailActivity.this)
+                    .setTitle("错误详情")
+                    .setMessage(lastErrorMessage)
+                    .setPositiveButton("确定", null)
+                    .show();
+            }
+        });
         
         startErrorBlinkAnimation();
         
@@ -238,11 +258,9 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                                 currentDirection = 2;
                             }
                         } else if (isTwoWayLine && startStation != null && endStation != null) {
-                            if (response.data.up != null && startStation.equals(response.data.up.startStation) 
-                                    && endStation.equals(response.data.up.endStation)) {
+                            if (startStation.equals(response.data.up.startStation) && endStation.equals(response.data.up.endStation)) {
                                 currentDirection = 1;
-                            } else if (response.data.down != null && startStation.equals(response.data.down.startStation) 
-                                    && endStation.equals(response.data.down.endStation)) {
+                            } else if (startStation.equals(response.data.down.startStation) && endStation.equals(response.data.down.endStation)) {
                                 currentDirection = 2;
                             }
                         } else if (!isTwoWayLine) {
@@ -299,9 +317,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
 
         if (lineDirection != null) {
             runOnUiThread(() -> {
-                TextView startStationName = findViewById(R.id.start_station_name);
-                TextView endStationName = findViewById(R.id.end_station_name);
-                startStationName.setText(lineDirection.startStation);
+                HorizontalScrollTextView endStationName = findViewById(R.id.end_station_name);
                 endStationName.setText(lineDirection.endStation);
 
                 startStation = lineDirection.startStation;
@@ -387,9 +403,9 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private void updateAccessibilityTag(BusApiClient.BusLineDirection lineDirection) {
         runOnUiThread(() -> {
             if (lineDirection.hasCj == 1) {
-                accessibilityTag.setVisibility(View.VISIBLE);
+                accessibilityIcon.setVisibility(View.VISIBLE);
             } else {
-                accessibilityTag.setVisibility(View.GONE);
+                accessibilityIcon.setVisibility(View.GONE);
             }
         });
     }
@@ -500,7 +516,6 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
 
         TextView scheduleText = dialogView.findViewById(R.id.schedule_text);
         scheduleText.setTypeface(Typeface.MONOSPACE);
-
         SimpleDateFormat timeFormat = new SimpleDateFormat("HH:mm", Locale.getDefault());
         Date currentTime = new Date();
         int currentHour = currentTime.getHours();
@@ -724,7 +739,8 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
 
                 TTSUtils tts = TTSUtils.getInstance(this);
                 tts.playLineDetailAnnouncement(lineName, startStation, endStation, nextStation.stationName);
-                
+                nextStationInfo.setText("下一站：" + nextStation.stationName + "，下车请按铃  Next Station:" + nextStation.stationName + ",Press the bell to get off");
+
                 lastVoiceStationOrder = nearestVehicle.currentStationOrder;
             }
         }
@@ -766,6 +782,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     @Override
     public void onError(String message) {
         runOnUiThread(() -> {
+            lastErrorMessage = message;
             showErrorIndicator();
         });
     }
@@ -795,9 +812,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             runOnUiThread(() -> {
                 try {
                     routeNumber.setText(lineName);
-                    TextView startStationName = findViewById(R.id.start_station_name);
-                    startStationName.setText(startStation);
-                    TextView endStationName = findViewById(R.id.end_station_name);
+                    HorizontalScrollTextView endStationName = findViewById(R.id.end_station_name);
                     endStationName.setText(endStation);
 
                     busLineView = findViewById(R.id.bus_line_view);
