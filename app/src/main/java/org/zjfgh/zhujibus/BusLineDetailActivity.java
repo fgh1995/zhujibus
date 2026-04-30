@@ -3,11 +3,15 @@ package org.zjfgh.zhujibus;
 import static com.google.android.material.internal.ViewUtils.dpToPx;
 
 import android.annotation.SuppressLint;
+import android.content.Context;
 import android.content.Intent;
 import android.graphics.Rect;
 import android.graphics.Typeface;
-import android.os.Build;
+import android.location.Location;
+import android.location.LocationListener;
+import android.location.LocationManager;
 import android.os.Bundle;
+import android.os.Looper;
 
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AlertDialog;
@@ -31,6 +35,8 @@ import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
+
+import com.google.android.material.slider.Slider;
 import android.widget.Toast;
 
 import androidx.navigation.ui.AppBarConfiguration;
@@ -49,18 +55,21 @@ import java.util.Locale;
 
 import android.graphics.Color;
 
+import io.sgr.geometry.utils.GeometryUtils;
+import io.sgr.geometry.utils.RouteGeometryUtils;
+
 public class BusLineDetailActivity extends AppCompatActivity implements BusRealTimeManager.RealTimeUpdateListener {
     private String lineID;
     private String lineName;
     private String startStation;
     private String endStation;
     private BusApiClient busApiClient;
-    private TextView routeNumber;
+    private HorizontalScrollTextView routeNumber;
     private TextView noticeText;
     private LinearLayout swapOrientation;
     private DotMatrixView accessibilityIcon;
     private HorizontalScrollTextView nextStationInfo;
-    private TextView tips;
+    private HorizontalScrollTextView tips;
 
     // 当前显示的方向 (1:上行, 2:下行)
     private int currentDirection = 1;
@@ -80,29 +89,393 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private static final String TAG = "BusLineDetailActivity";
     TextView refreshTime;
     TextView errorIndicator;
+    TextView announceMode;
+    TextView gpsLocationInfo;
+    TextView gpsNearestStationInfo;
+    TextView gpsStatusInfo;
+    TextView distanceModeInfo;
+    TextView gpsSpeedInfo;
+    LinearLayout gpsDebugInfo;
     private ValueAnimator errorBlinkAnimator;
     private String lastErrorMessage = null;
 
-    private static final int TIPS_INTERVAL = 10000;
-    private static final String[] TIPS_TEXT = {"文明排队   上下有序", "严禁携带危险物品上车"};
-    private static final int[] TIPS_COLOR = {0xFFFFFF00, 0xFF00FFFF};
+    public enum AnnounceMode {
+        NETWORK,
+        GPS
+    }
+    private AnnounceMode currentAnnounceMode = AnnounceMode.NETWORK;
+
+    private int lastAnnouncedStationIndex = -1;
+    private boolean isInsideStationRadius = false;
+    private int lastInsideStationIndex = -1;
+
+    private double currentGpsLat = 0;
+    private double currentGpsLon = 0;
+    private String nearestStationName = "";
+    private double nearestStationDistance = -1;
+    private double nearestStationLat = 0;
+    private double nearestStationLon = 0;
+    private double nearestStationDirectDistance = -1;
+    private boolean isInsideRadius = false;
+    private static final double DEFAULT_STATION_RADIUS = 50.0;
+    private double stationRadius = DEFAULT_STATION_RADIUS;
+    private Slider radiusSlider;
+    private List<io.sgr.geometry.Coordinate> routePoints;
+
+    public enum DistanceMode {
+        ALONG_ROUTE("沿线距离"),
+        STRAIGHT_LINE("直线距离");
+
+        private final String displayName;
+        DistanceMode(String displayName) {
+            this.displayName = displayName;
+        }
+        public String getDisplayName() {
+            return displayName;
+        }
+    }
+    private DistanceMode currentDistanceMode = DistanceMode.STRAIGHT_LINE;
+
+    private static final int TIPS_INTERVAL = 3000;
+    private static final String[] TIPS_TEXT_BASE = {"文明排队   上下有序", "严禁携带危险物品上车"};
+    private static final int[] TIPS_COLOR_BASE = {0xFFFFFF00, 0xFF00FFFF};
+    private static final int TIPS_COLOR_PURPLE = 0xFFAA00FF;
+    private String[] currentTipsText = TIPS_TEXT_BASE;
+    private int[] currentTipsColor = TIPS_COLOR_BASE;
     private Handler tipsHandler = new Handler();
     private int tipsAnimationIndex = 0;
 
     private final Runnable tipsRunnable = new Runnable() {
         @Override
         public void run() {
-            tipsAnimationIndex = (tipsAnimationIndex + 1) % TIPS_TEXT.length;
-            tips.setText(TIPS_TEXT[tipsAnimationIndex]);
-            tips.setTextColor(TIPS_COLOR[tipsAnimationIndex]);
+            tipsAnimationIndex = (tipsAnimationIndex + 1) % currentTipsText.length;
+            tips.setText(currentTipsText[tipsAnimationIndex]);
+            tips.setTextColor(currentTipsColor[tipsAnimationIndex]);
             tipsHandler.postDelayed(this, TIPS_INTERVAL);
         }
     };
 
     private void startTipsAnimation() {
-        tips.setText(TIPS_TEXT[0]);
-        tips.setTextColor(TIPS_COLOR[0]);
+        tipsHandler.removeCallbacksAndMessages(null);
+        tipsAnimationIndex = 0;
+        tips.setText(currentTipsText[0]);
+        tips.setTextColor(currentTipsColor[0]);
         tipsHandler.postDelayed(tipsRunnable, TIPS_INTERVAL);
+    }
+
+    private void showAnnounceModeDialog() {
+        String[] modes = {"网络模式", "GPS模式"};
+        int selectedIndex = currentAnnounceMode == AnnounceMode.NETWORK ? 0 : 1;
+        new AlertDialog.Builder(this)
+                .setTitle("选择报站模式")
+                .setSingleChoiceItems(modes, selectedIndex, (dialog, which) -> {
+                    AnnounceMode newMode = (which == 0) ? AnnounceMode.NETWORK : AnnounceMode.GPS;
+                    if (newMode != currentAnnounceMode) {
+                        currentAnnounceMode = newMode;
+                        updateAnnounceModeState();
+                    }
+                    dialog.dismiss();
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void showDistanceModeDialog() {
+        String[] modes = {DistanceMode.STRAIGHT_LINE.getDisplayName(), DistanceMode.ALONG_ROUTE.getDisplayName()};
+        int selectedIndex = currentDistanceMode == DistanceMode.STRAIGHT_LINE ? 0 : 1;
+        new AlertDialog.Builder(this)
+                .setTitle("选择距离计算方式")
+                .setSingleChoiceItems(modes, selectedIndex, (dialog, which) -> {
+                    DistanceMode newMode = (which == 0) ? DistanceMode.STRAIGHT_LINE : DistanceMode.ALONG_ROUTE;
+                    if (newMode != currentDistanceMode) {
+                        currentDistanceMode = newMode;
+                        updateDistanceModeState();
+                    }
+                    dialog.dismiss();
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void updateDistanceModeState() {
+        String modeText = currentDistanceMode == DistanceMode.STRAIGHT_LINE ? "直线" : "沿线";
+        Log.d(TAG, "距离模式已切换为: " + modeText);
+        updateDistanceModeDisplay();
+    }
+
+    private void updateDistanceModeDisplay() {
+        if (distanceModeInfo != null) {
+            String modeText = currentDistanceMode == DistanceMode.STRAIGHT_LINE ? "直线距离" : "沿线距离";
+            distanceModeInfo.setText(String.format(Locale.CHINA, "距离模式: %s", modeText));
+        }
+    }
+
+    private void updateAnnounceModeState() {
+        if (currentAnnounceMode == AnnounceMode.GPS) {
+            announceMode.setText("GPS模式");
+            announceMode.setTextColor(0xFF008800);
+            gpsDebugInfo.setVisibility(View.VISIBLE);
+            if (realTimeManager != null) {
+                realTimeManager.stopTracking();
+            }
+            TTSUtils.getInstance(this).stopAll();
+            lastVoiceStationOrder = -1;
+            lastAnnouncedStationIndex = -1;
+            isInsideStationRadius = false;
+            lastInsideStationIndex = -1;
+            GpsWarmingUp.addListener(gpsActivityListener);
+            Location lastLocation = GpsWarmingUp.getLastKnownLocation();
+            if (lastLocation != null) {
+                handleGpsLocation(lastLocation);
+            }
+        } else {
+            announceMode.setText("网络模式");
+            announceMode.setTextColor(0xFFFFFFFF);
+            gpsDebugInfo.setVisibility(View.GONE);
+            GpsWarmingUp.removeListener(gpsActivityListener);
+            lastAnnouncedStationIndex = -1;
+            isInsideStationRadius = false;
+            lastInsideStationIndex = -1;
+            if (realTimeManager != null) {
+                realTimeManager.startTracking(getCurrentDirectionId(), this);
+            }
+        }
+    }
+
+    private final LocationListener gpsActivityListener = new LocationListener() {
+        @Override
+        public void onLocationChanged(Location location) {
+            handleGpsLocation(location);
+        }
+
+        @Override
+        public void onStatusChanged(String provider, int status, Bundle extras) {}
+
+        @Override
+        public void onProviderEnabled(String provider) {}
+
+        @Override
+        public void onProviderDisabled(String provider) {}
+    };
+
+    private void handleGpsLocation(Location location) {
+        if (currentAnnounceMode != AnnounceMode.GPS) {
+            return;
+        }
+        if (realTimeManager == null || realTimeManager.getStationList() == null) {
+            return;
+        }
+        currentGpsLat = location.getLatitude();
+        currentGpsLon = location.getLongitude();
+
+        io.sgr.geometry.Coordinate wgsCoord = new io.sgr.geometry.Coordinate(currentGpsLat, currentGpsLon);
+        io.sgr.geometry.Coordinate gcjCoord = GeometryUtils.wgs2gcj(wgsCoord);
+        double gcjLat = gcjCoord.getLat();
+        double gcjLon = gcjCoord.getLng();
+
+        gpsLocationInfo.setText(String.format(Locale.CHINA, "我的位置: %.6f, %.6f (GCJ-02)", gcjLat, gcjLon));
+
+        float speedMps = location.hasSpeed() ? location.getSpeed() : 0;
+        float speedKmh = speedMps * 3.6f;
+        if (gpsSpeedInfo != null) {
+            gpsSpeedInfo.setText(String.format(Locale.CHINA, "速度: %.1f km/h", speedKmh));
+        }
+
+        List<BusApiClient.BusLineStation> stations = realTimeManager.getStationList();
+        nearestStationName = "";
+        nearestStationDistance = -1;
+        nearestStationLat = 0;
+        nearestStationLon = 0;
+        nearestStationDirectDistance = -1;
+        isInsideRadius = false;
+        int currentInsideStationIndex = -1;
+
+        for (int i = 0; i < stations.size(); i++) {
+            BusApiClient.BusLineStation station = stations.get(i);
+            double stationLat = station.poiOriginLat;
+            double stationLon = station.poiOriginLon;
+            if (stationLat == 0 && stationLon == 0) {
+                continue;
+            }
+
+            double distance;
+            double directDistance = -1;
+            double gpsToRouteDist = -1;
+            double stationToRouteDist = -1;
+            double alongRouteDist = -1;
+
+            if (routePoints != null && !routePoints.isEmpty()) {
+                io.sgr.geometry.utils.RouteGeometryUtils.RouteDistanceResult distResult =
+                        io.sgr.geometry.utils.RouteGeometryUtils.calculateDistances(
+                                gcjLat, gcjLon, stationLat, stationLon, routePoints);
+
+                directDistance = distResult.directDistance;
+                alongRouteDist = distResult.alongRouteDistance;
+                gpsToRouteDist = distResult.gpsToRouteDistance;
+                stationToRouteDist = distResult.stationToRouteDistance;
+
+                distance = alongRouteDist;
+            } else {
+                float[] results = new float[1];
+                Location.distanceBetween(gcjLat, gcjLon, stationLat, stationLon, results);
+                distance = results[0];
+                directDistance = distance;
+            }
+
+            double distanceForCompare;
+            if (currentDistanceMode == DistanceMode.ALONG_ROUTE && routePoints != null && !routePoints.isEmpty()) {
+                distanceForCompare = alongRouteDist >= 0 ? alongRouteDist : directDistance;
+            } else {
+                distanceForCompare = directDistance;
+            }
+
+            Log.d(TAG, String.format(Locale.CHINA, "站点[%d] %s: 直线=%.1fm, 沿线=%.1fm, GPS到路线=%.1fm, 站点到路线=%.1fm, 半径=%.0fm",
+                    i, station.stationName, directDistance, alongRouteDist, gpsToRouteDist, stationToRouteDist, stationRadius));
+
+            if (nearestStationDistance < 0 || distanceForCompare < nearestStationDistance) {
+                nearestStationDistance = distanceForCompare;
+                nearestStationName = station.stationName;
+                nearestStationLat = stationLat;
+                nearestStationLon = stationLon;
+                nearestStationDirectDistance = directDistance;
+            }
+
+            if (distanceForCompare <= stationRadius) {
+                isInsideRadius = true;
+                currentInsideStationIndex = i;
+                Log.d(TAG, String.format(Locale.CHINA, "触发报站检查: isInsideStationRadius=%b, lastAnnouncedStationIndex=%d, i=%d", isInsideStationRadius, lastAnnouncedStationIndex, i));
+                if (!isInsideStationRadius || lastAnnouncedStationIndex != i) {
+                    isInsideStationRadius = true;
+                    lastAnnouncedStationIndex = i;
+                    announceStation(station.stationName, i, stations.size());
+                    Log.d(TAG, "已触发报站: " + station.stationName);
+                }
+                break;
+            }
+        }
+
+        if (!isInsideRadius && lastInsideStationIndex != -1) {
+            int leavingIndex = lastInsideStationIndex;
+            isInsideStationRadius = false;
+            lastInsideStationIndex = -1;
+            announceLeavingStation(stations.get(leavingIndex).stationName, leavingIndex, stations.size());
+            Log.d(TAG, "已触发离站报站: " + stations.get(leavingIndex).stationName);
+        } else if (isInsideRadius) {
+            lastInsideStationIndex = currentInsideStationIndex;
+        }
+
+        runOnUiThread(() -> {
+            if (nearestStationDistance >= 0) {
+                gpsNearestStationInfo.setText(String.format(Locale.CHINA, "最近站点: %s (沿线%.1fm/直线%.1fm)\nGPS:(%.6f,%.6f) 站点:(%.6f,%.6f)",
+                        nearestStationName, nearestStationDistance, nearestStationDirectDistance, gcjLon, gcjLat, nearestStationLon, nearestStationLat));
+            }
+            if (isInsideRadius) {
+                gpsStatusInfo.setText(String.format(Locale.CHINA, "状态: 在站内 ● 半径: %.0fm", stationRadius));
+                gpsStatusInfo.setTextColor(0xFF008800);
+            } else {
+                gpsStatusInfo.setText(String.format(Locale.CHINA, "状态: 在站外 ○ 半径: %.0fm", stationRadius));
+                gpsStatusInfo.setTextColor(0xFF666666);
+            }
+        });
+    }
+
+    private void announceStation(String stationName, int stationIndex, int totalStations) {
+        TTSUtils tts = TTSUtils.getInstance(this);
+        boolean isStartStation = stationIndex == 0;
+        boolean isTerminalStation = stationIndex == totalStations - 1;
+
+        if (isStartStation) {
+            String nextStationName = "";
+            if (stationIndex + 1 < totalStations) {
+                List<BusApiClient.BusLineStation> stations = realTimeManager.getStationList();
+                nextStationName = stations.get(stationIndex + 1).stationName;
+            }
+            tts.playGpsStartStationAnnouncement(lineName, startStation, endStation, nextStationName);
+            nextStationInfo.setText("下一站：" + nextStationName + "，下车请按铃  Next Station:" + nextStationName + ",Press the bell to get off");
+        } else if (isTerminalStation) {
+            tts.playGpsTerminalStationAnnouncement(stationName);
+            nextStationInfo.setText(stationName + " 到了！We are now at " + stationName + " !");
+        } else {
+            tts.playGpsMiddleStationAnnouncement(stationName);
+            nextStationInfo.setText(stationName + " 到了！We are now at " + stationName + " !");
+        }
+    }
+
+    private void announceLeavingStation(String stationName, int stationIndex, int totalStations) {
+        TTSUtils tts = TTSUtils.getInstance(this);
+        boolean isTerminalStation = stationIndex >= totalStations - 1;
+        String nextStationName = "";
+
+        if (stationIndex + 1 < totalStations) {
+            List<BusApiClient.BusLineStation> stations = realTimeManager.getStationList();
+            nextStationName = stations.get(stationIndex + 1).stationName;
+        }
+
+        tts.playGpsLeavingStationAnnouncement(nextStationName, isTerminalStation);
+        nextStationInfo.setText("下一站：" + nextStationName + "，下车请按铃  Next Station:" + nextStationName + ",Press the bell to get off");
+    }
+
+    private void updatePriceTips(BusApiClient.BusLineDirection lineDirection) {
+        String[] priceTips = buildPriceTips(lineDirection);
+        if (priceTips != null) {
+            int[] priceColors = new int[priceTips.length];
+            for (int i = 0; i < priceTips.length; i++) {
+                priceColors[i] = TIPS_COLOR_PURPLE;
+            }
+            int baseCount = TIPS_TEXT_BASE.length;
+            currentTipsText = new String[priceTips.length + baseCount];
+            currentTipsColor = new int[currentTipsText.length];
+            System.arraycopy(priceTips, 0, currentTipsText, 0, priceTips.length);
+            System.arraycopy(priceColors, 0, currentTipsColor, 0, priceColors.length);
+            System.arraycopy(TIPS_TEXT_BASE, 0, currentTipsText, priceTips.length, baseCount);
+            System.arraycopy(TIPS_COLOR_BASE, 0, currentTipsColor, priceTips.length, baseCount);
+        } else {
+            currentTipsText = TIPS_TEXT_BASE;
+            currentTipsColor = TIPS_COLOR_BASE;
+        }
+    }
+
+    private String toChineseNumber(double number) {
+        if (number == 1.0) return "一";
+        if (number == 2.0) return "二";
+        if (number == 3.0) return "三";
+        if (number == 4.0) return "四";
+        if (number == 5.0) return "五";
+        if (number == 6.0) return "六";
+        if (number == 7.0) return "七";
+        if (number == 8.0) return "八";
+        if (number == 9.0) return "九";
+        if (number == 10.0) return "十";
+        return formatPrice(number);
+    }
+
+    private String[] buildPriceTips(BusApiClient.BusLineDirection lineDirection) {
+        double price = lineDirection.totalPrice;
+        int lineType = lineDirection.lineType;
+        String lineTypeName = lineDirection.lineTypeName;
+
+        boolean isCityBus = (lineType == 1 || "城市".equals(lineTypeName));
+        boolean isIntercityBus = (lineTypeName != null && lineTypeName.contains("城乡"));
+
+        if (!isCityBus && !isIntercityBus && price > 0) {
+            if (price == 1.0) {
+                isCityBus = true;
+            } else if (price >= 2.0) {
+                isIntercityBus = true;
+            }
+        }
+
+        if (isCityBus && price == 1.0) {
+            return new String[]{"无人售票   票价一元"};
+        } else if (isIntercityBus && price == 2.0) {
+            return new String[]{"无人售票   票价二元"};
+        } else if (isIntercityBus && price > 0) {
+            return new String[]{"多票制二~" + toChineseNumber(price) + "元", "上下车均需刷卡扫码"};
+        } else if (price == 1.0) {
+            return new String[]{"无人售票   票价一元"};
+        }
+
+        return null;
     }
 
     @Override
@@ -141,26 +514,36 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         scheduleButton = findViewById(R.id.schedule_button);
         routeNumber = findViewById(R.id.route_number);
         routeNumber.setText(lineName);
-
+        routeNumber.setTextColor(0xFF00FF00);
+        routeNumber.setGravity(0);
+        routeNumber.setScrollSpeed(300f);
         Typeface dottedSongti = Typeface.createFromAsset(getAssets(), "fonts/DottedSongtiSquareRegular.otf");
         routeNumber.setTypeface(dottedSongti);
+
+        int maxWidth = (int) (120 * getResources().getDisplayMetrics().density);
+        int textWidth = (int) routeNumber.getTextWidth();
+        if (textWidth > 0 && textWidth < maxWidth) {
+            routeNumber.getLayoutParams().width = textWidth;
+        }
 
         LinearLayout noticeBar = findViewById(R.id.notice_bar);
         noticeText = findViewById(R.id.notice_text);
         noticeBar.setVisibility(View.GONE);
         HorizontalScrollTextView endStationName = findViewById(R.id.end_station_name);
+        endStationName.setGravity(2);
         endStationName.setText(endStation);
         endStationName.setTypeface(dottedSongti);
-        endStationName.setScrollSpeed(150f);
+        endStationName.setScrollSpeed(300f);
         tips = findViewById(R.id.tips);
         tips.setTypeface(dottedSongti);
+        tips.setGravity(1);
         startTipsAnimation();
         nextStationInfo = findViewById(R.id.next_station_info);
         nextStationInfo.setTypeface(dottedSongti);
         nextStationInfo.setTextColor(0xFFFF0000);
         nextStationInfo.setTextSize(30f);
         nextStationInfo.setText("欢迎乘坐" + lineName + "公交车");
-        nextStationInfo.setScrollSpeed(150f);
+        nextStationInfo.setScrollSpeed(300f);
         swapOrientation = findViewById(R.id.swap_orientation);
         swapOrientation.setVisibility(View.GONE);
 
@@ -180,9 +563,33 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                     .show();
             }
         });
-        
+
+        announceMode = findViewById(R.id.announce_mode);
+        announceMode.setOnClickListener(v -> showAnnounceModeDialog());
+        gpsLocationInfo = findViewById(R.id.gps_location_info);
+        gpsNearestStationInfo = findViewById(R.id.gps_nearest_station_info);
+        gpsStatusInfo = findViewById(R.id.gps_status_info);
+        distanceModeInfo = findViewById(R.id.distance_mode_info);
+        gpsSpeedInfo = findViewById(R.id.gps_speed_info);
+        gpsDebugInfo = findViewById(R.id.gps_debug_info);
+
+        if (distanceModeInfo != null) {
+            updateDistanceModeDisplay();
+            distanceModeInfo.setOnClickListener(v -> showDistanceModeDialog());
+        }
+        radiusSlider = findViewById(R.id.radius_slider);
+        if (radiusSlider != null) {
+            radiusSlider.setValue((float) stationRadius);
+            radiusSlider.addOnChangeListener((slider, value, fromUser) -> {
+                stationRadius = value;
+                if (fromUser) {
+                    gpsStatusInfo.setText(String.format(Locale.CHINA, "状态: 半径调整中 ○ 半径: %.0fm", stationRadius));
+                }
+            });
+        }
+
         startErrorBlinkAnimation();
-        
+
         // 创建格式化器，指定格式为 00:00:00
         SimpleDateFormat formatter = new SimpleDateFormat("HH:mm:ss", Locale.getDefault());
         // 获取当前时间
@@ -332,6 +739,20 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         Log.e(TAG + "-BusInfo-", "切换方向到: " + (currentDirection == 1 ? "上行" : "下行"));
         updateStartEndStations();
         showDirection();
+
+        if (currentAnnounceMode == AnnounceMode.GPS) {
+            GpsWarmingUp.removeListener(gpsActivityListener);
+            lastAnnouncedStationIndex = -1;
+            isInsideStationRadius = false;
+            lastInsideStationIndex = -1;
+            realTimeManager.stopTracking();
+            realTimeManager.startTracking(getCurrentDirectionId(), this);
+            GpsWarmingUp.addListener(gpsActivityListener);
+            Location lastLocation = GpsWarmingUp.getLastKnownLocation();
+            if (lastLocation != null) {
+                handleGpsLocation(lastLocation);
+            }
+        }
     }
 
     private void updateStartEndStations() {
@@ -343,7 +764,6 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             runOnUiThread(() -> {
                 HorizontalScrollTextView endStationName = findViewById(R.id.end_station_name);
                 endStationName.setText(lineDirection.endStation);
-
                 startStation = lineDirection.startStation;
                 endStation = lineDirection.endStation;
             });
@@ -377,9 +797,13 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             realTimeManager.stopTracking();
         }
 
+        routePoints = io.sgr.geometry.utils.RouteGeometryUtils.parseGeometry(lineDirection.geometry);
+
         updateAccessibilityTag(lineDirection);
         updateBusTimes(lineDirection);
         updateRouteSummary(lineDirection);
+        updatePriceTips(lineDirection);
+        startTipsAnimation();
         setupStationList(lineDirection);
     }
 
@@ -650,6 +1074,9 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
 
     @Override
     public void onBusPositionsUpdated(List<BusApiClient.BusPosition> positions) {
+        if (currentAnnounceMode == AnnounceMode.GPS) {
+            return;
+        }
         runOnUiThread(() -> {
             hideErrorIndicator();
             
@@ -764,7 +1191,6 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 TTSUtils tts = TTSUtils.getInstance(this);
                 tts.playLineDetailAnnouncement(lineName, startStation, endStation, nextStation.stationName);
                 nextStationInfo.setText("下一站：" + nextStation.stationName + "，下车请按铃  Next Station:" + nextStation.stationName + ",Press the bell to get off");
-
                 lastVoiceStationOrder = nearestVehicle.currentStationOrder;
             }
         }
@@ -838,7 +1264,6 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                     routeNumber.setText(lineName);
                     HorizontalScrollTextView endStationName = findViewById(R.id.end_station_name);
                     endStationName.setText(endStation);
-
                     busLineView = findViewById(R.id.bus_line_view);
                     stationScrollView = findViewById(R.id.station_scroll_view);
                     
@@ -870,6 +1295,9 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         if (realTimeManager != null) {
             realTimeManager.startTracking(getCurrentDirectionId(), this);
         }
+        if (currentAnnounceMode == AnnounceMode.GPS) {
+            GpsWarmingUp.addListener(gpsActivityListener);
+        }
     }
 
     @Override
@@ -877,6 +1305,9 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         super.onPause();
         if (realTimeManager != null) {
             //realTimeManager.stopTracking();
+        }
+        if (currentAnnounceMode == AnnounceMode.GPS) {
+            GpsWarmingUp.removeListener(gpsActivityListener);
         }
     }
 
@@ -890,6 +1321,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         if(realTimeManager != null){
             realTimeManager.stopTracking();
         }
+        GpsWarmingUp.removeListener(gpsActivityListener);
         realTimeManager = null;
         if (tipsHandler != null) {
             tipsHandler.removeCallbacksAndMessages(null);

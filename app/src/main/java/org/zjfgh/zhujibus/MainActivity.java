@@ -1,8 +1,16 @@
 package org.zjfgh.zhujibus;
 
+import android.Manifest;
+import android.annotation.SuppressLint;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.location.Location;
+import android.location.LocationListener;
+import android.location.LocationManager;
 import android.os.Bundle;
+import io.sgr.geometry.Coordinate;
+import io.sgr.geometry.utils.GeometryUtils;
 import android.text.TextUtils;
 import android.util.Log;
 import android.view.Gravity;
@@ -17,6 +25,7 @@ import androidx.activity.EdgeToEdge;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.app.ActivityCompat;
 import androidx.recyclerview.widget.DividerItemDecoration;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
@@ -31,6 +40,8 @@ public class MainActivity extends AppCompatActivity {
     private BusApiClient client;
     private double currentLatitude = 120.235555;
     private double currentLongitude = 29.713397;
+    private TextView tvGpsInfo;
+    private boolean locationObtained = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -40,7 +51,10 @@ public class MainActivity extends AppCompatActivity {
             recyclerView = findViewById(R.id.recyclerView);
             tv_search_line = findViewById(R.id.tv_search_line);
             viewFlipper = findViewById(R.id.view_flipper);
+            tvGpsInfo = findViewById(R.id.tv_gps_info);
             client = new BusApiClient();
+            GpsWarmingUp.startWarmingUp(this);
+            GpsWarmingUp.addListener(gpsListener);
             loadNearbyStations();
             TTSUtils.getInstance(this);
             tv_search_line.setOnClickListener(v -> {
@@ -59,7 +73,42 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // 加载附近站点的方法
+    private final LocationListener gpsListener = new LocationListener() {
+        @Override
+        public void onLocationChanged(Location location) {
+            if (!locationObtained) {
+                locationObtained = true;
+                Coordinate wgsCoord = new Coordinate(location.getLatitude(), location.getLongitude());
+                Coordinate gcjCoord = GeometryUtils.wgs2gcj(wgsCoord);
+                currentLatitude = gcjCoord.getLat();
+                currentLongitude = gcjCoord.getLng();
+                Log.d("MainActivity", String.format("GPS定位成功: WGS(%.6f,%.6f) -> GCJ(%.6f,%.6f)",
+                        location.getLatitude(), location.getLongitude(), currentLatitude, currentLongitude));
+
+                if (tvGpsInfo != null) {
+                    runOnUiThread(() -> tvGpsInfo.setText(String.format("GPS: %.6f, %.6f", currentLatitude, currentLongitude)));
+                }
+
+                runOnUiThread(() -> loadNearbyStations());
+            }
+        }
+
+        @Override
+        public void onStatusChanged(String provider, int status, Bundle extras) {}
+
+        @Override
+        public void onProviderEnabled(String provider) {}
+
+        @Override
+        public void onProviderDisabled(String provider) {}
+    };
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        GpsWarmingUp.removeListener(gpsListener);
+    }
+
     private void loadNearbyStations() {
         try {
             client.getNearbyStations(currentLongitude, currentLatitude, "2", 3, 5, new BusApiClient.ApiCallback<>() {
@@ -74,20 +123,22 @@ public class MainActivity extends AppCompatActivity {
                         for (int i = 0; i < response.data.size(); i++) {
                             BusApiClient.NearbyStationInfo stationInfo = response.data.get(i);
                             if (stationInfo == null) continue;
-                            
+
                             List<RouteItem> routes1 = new ArrayList<>();
                             List<BusApiClient.DistanceData> distanceDataList = stationInfo.distanceData;
                             if (distanceDataList != null) {
                                 for (int j = 0; j < distanceDataList.size(); j++) {
                                     BusApiClient.DistanceData distanceData = distanceDataList.get(j);
                                     if (distanceData != null) {
+                                        String distanceStr = (distanceData.nextNumber == -1 || distanceData.distance == -1)
+                                                ? "" : "距离" + distanceData.nextNumber + "站/" + DistanceUtils.formatDistance(distanceData.distance);
+                                        int arrivalTimeInt = (distanceData.arrivalTime <= 0) ? 0 : distanceData.arrivalTime;
                                         routes1.add(new RouteItem(
                                                 distanceData.lineName,
-                                                "距离" + distanceData.nextNumber + "站/" +
-                                                        DistanceUtils.formatDistance(distanceData.distance),
+                                                distanceStr,
                                                 distanceData.startStation,
                                                 distanceData.endStation,
-                                                distanceData.arrivalTime
+                                                arrivalTimeInt
                                         ));
                                     }
                                 }
@@ -141,7 +192,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // 显示站点详情对话框
     private void showStationDetailsDialog(String stationName) {
         StationDetailsFragment stationDetailsFragment = new StationDetailsFragment(stationName);
         stationDetailsFragment.show(getSupportFragmentManager(), "dialog_tag");
@@ -197,22 +247,8 @@ public class MainActivity extends AppCompatActivity {
                 ViewGroup.LayoutParams.MATCH_PARENT));
         textView.setText(announcement.title);
         textView.setTextSize(15);
-        textView.setTextColor(Color.BLACK);
+        textView.setTextColor(Color.parseColor("#666666"));
         textView.setGravity(Gravity.CENTER_VERTICAL);
         return textView;
-    }
-
-    @Override
-    public void onResume() {
-        super.onResume();
-        viewFlipper.startFlipping();
-        // 页面恢复时刷新数据
-        loadNearbyStations();
-    }
-
-    @Override
-    public void onPause() {
-        super.onPause();
-        viewFlipper.stopFlipping();
     }
 }

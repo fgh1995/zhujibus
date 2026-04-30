@@ -20,7 +20,7 @@ public class HorizontalScrollTextView extends View {
     private float density;
     private Typeface typeface;
     private float totalScrollWidth;
-    private float scrollSpeed = 100f;
+    private float scrollSpeed = 90f;
     private float pauseDuration = 800f;
     private boolean isPaused = false;
     private Runnable scrollRunnable;
@@ -119,6 +119,10 @@ public class HorizontalScrollTextView extends View {
         return textPaint.getTextSize() / density;
     }
 
+    public float getTextWidth() {
+        return textPaint.measureText(text);
+    }
+
     public void setTypeface(Typeface tf) {
         this.typeface = tf;
         textPaint.setTypeface(tf);
@@ -198,11 +202,13 @@ public class HorizontalScrollTextView extends View {
             scrollAnimator.cancel();
         }
 
-        float scrollDistance = getWidth() + textWidth;
-        totalScrollWidth = scrollDistance + 100 * density;
-        int duration = (int) (totalScrollWidth / scrollSpeed * 1000);
-        float endValue = scrollDistance / totalScrollWidth;
-        scrollAnimator = ValueAnimator.ofFloat(0f, endValue);
+        float scrollDistance = textWidth + getWidth();
+        if (scrollDistance <= 0) {
+            return;
+        }
+        totalScrollWidth = textWidth;
+        int duration = (int) (scrollDistance / scrollSpeed * 1000);
+        scrollAnimator = ValueAnimator.ofFloat(0f, 1f);
         scrollAnimator.setDuration(duration);
         scrollAnimator.setInterpolator(new android.view.animation.LinearInterpolator());
         scrollAnimator.addUpdateListener(animation -> {
@@ -258,17 +264,19 @@ public class HorizontalScrollTextView extends View {
             return;
         }
 
-        float offset = scrollOffset * totalScrollWidth;
+        float offset = scrollOffset * textWidth;
         Paint.FontMetrics fm = textPaint.getFontMetrics();
         float textY = getHeight() * 0.8f;
 
-        float firstTextX = getWidth() - offset;
-        float secondTextX = firstTextX + totalScrollWidth;
-
         canvas.save();
         canvas.clipRect(0, 0, getWidth(), getHeight());
-        canvas.drawText(text, firstTextX, textY, textPaint);
-        canvas.drawText(text, secondTextX, textY, textPaint);
+
+        int copiesNeeded = (int) Math.ceil((float) getWidth() / textWidth) + 3;
+        float startX = getWidth() - offset;
+        for (int i = 0; i < copiesNeeded; i++) {
+            canvas.drawText(text, startX + i * textWidth, textY, textPaint);
+        }
+
         canvas.restore();
     }
 

@@ -151,7 +151,12 @@ public class BusRouteSearchActivity extends AppCompatActivity {
                 "1. 单车到站（完整）",
                 "2. 两车同时到（第二辆合并）",
                 "3. 三车同时到（第二三辆合并）",
-                "4. 线路详情播报（完整含方向）"
+                "4. 线路详情播报（完整含方向）",
+                "5. GPS-起点站报站",
+                "6. GPS-中途站报站",
+                "7. GPS-终点站报站",
+                "8. GPS-离站报站(下一站非终点)",
+                "9. GPS-离站报站(下一站是终点)"
         };
         new android.app.AlertDialog.Builder(this)
                 .setTitle("测试语音播报")
@@ -159,19 +164,34 @@ public class BusRouteSearchActivity extends AppCompatActivity {
                     TTSUtils tts = TTSUtils.getInstance(this);
                     switch (which) {
                         case 0:
-                            tts.playArrivalAnnouncement("1路", "测试起点站", "小商品市场", "白门下村");
+                            tts.playArrivalAnnouncement("1路", "上海城", "小商品市场", "白门下村");
                             break;
                         case 1:
-                            tts.playArrivalAnnouncement("1路", "测试起点站", "小商品市场", "白门下村");
-                            tts.queueArrivalAnnouncement("2路", "测试起点站", "小商品市场", "白门下村");
+                            tts.playArrivalAnnouncement("1路", "上海城", "小商品市场", "白门下村");
+                            tts.queueArrivalAnnouncement("2路", "跨湖新村", "小商品市场", "白门下村");
                             break;
                         case 2:
-                            tts.playArrivalAnnouncement("1路", "测试起点站", "小商品市场", "白门下村");
-                            tts.queueArrivalAnnouncement("2路", "测试起点站", "小商品市场", "白门下村");
-                            tts.queueArrivalAnnouncement("3路", "测试起点站", "小商品市场", "白门下村");
+                            tts.playArrivalAnnouncement("1路", "跨湖新村", "小商品市场", "白门下村");
+                            tts.queueArrivalAnnouncement("2路", "八方热电厂", "小商品市场", "白门下村");
+                            tts.queueArrivalAnnouncement("3路", "跨湖新村", "小商品市场", "白门下村");
                             break;
                         case 3:
-                            tts.playLineDetailAnnouncement("1路", "测试起点站", "小商品市场", "白门下村");
+                            tts.playLineDetailAnnouncement("1路", "小商品市场", "跨湖新村", "白门下村");
+                            break;
+                        case 4:
+                            tts.playGpsStartStationAnnouncement("1路", "小商品市场", "上海城", "白门下村");
+                            break;
+                        case 5:
+                            tts.playGpsMiddleStationAnnouncement("白门下村");
+                            break;
+                        case 6:
+                            tts.playGpsTerminalStationAnnouncement("上海城");
+                            break;
+                        case 7:
+                            tts.playGpsLeavingStationAnnouncement("跨湖新村", false);
+                            break;
+                        case 8:
+                            tts.playGpsLeavingStationAnnouncement("八方热电厂", true);
                             break;
                     }
                 })

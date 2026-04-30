@@ -199,9 +199,16 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
                 R.raw.cn_num_90, R.raw.cn_num_91, R.raw.cn_num_92, R.raw.cn_num_93, R.raw.cn_num_94,
                 R.raw.cn_num_95, R.raw.cn_num_96, R.raw.cn_num_97, R.raw.cn_num_98, R.raw.cn_num_99,
                 R.raw.cn_num_100, R.raw.cn_num_yao, R.raw.cn_route,
-                R.raw.cn_01_zhuji_bus_reminder, R.raw.cn_02_heading_to,
-                R.raw.cn_03_direction, R.raw.cn_04_arriving,
-                R.raw.en_01_zhuji_bus_reminder, R.raw.en_02_bound_for, R.raw.en_03_is_arriving_at
+                R.raw.cn_00_welcom_zhuji, R.raw.cn_00_bus, R.raw.cn_01_this_bus_is_from,
+                R.raw.cn_01_zhuji_bus_reminder, R.raw.cn_02_heading_to, R.raw.cn_03_direction,
+                R.raw.cn_03_starting_stop_departing, R.raw.cn_04_arriving, R.raw.cn_04_the_bus_is_moving_tips,
+                R.raw.cn_05_next_station, R.raw.cn_06_press_the_bell_to_get_off_tips,
+                R.raw.cn_07_terminal_station, R.raw.cn_08_thank_you_for_riding_with_us, R.raw.cn_091_we_are_now_at,
+                R.raw.en_00_welcome_aboard_the_zhuji, R.raw.en_01_this_bus_is_from, R.raw.en_01_zhuji_bus_reminder, R.raw.en_02_bound_for,
+                R.raw.en_02_to, R.raw.en_03_is_arriving_at, R.raw.en_03_starting_stop_departing,
+                R.raw.en_04_the_bus_is_moving_tips, R.raw.en_05_next_station,
+                R.raw.en_06_press_the_bell_to_get_off_tips, R.raw.en_07_terminal_station,
+                R.raw.en_08_thank_you_for_riding_with_us, R.raw.en_091_we_are_now_at, R.raw.en_092_passengers_getting_off
         };
         int[] enNumRes = {
                 R.raw.en_num_0, R.raw.en_num_1, R.raw.en_num_2, R.raw.en_num_3, R.raw.en_num_4,
@@ -418,6 +425,85 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
         addEnStationName(endStation);
         playbackQueue.add(new PlaybackItem(R.raw.en_03_is_arriving_at));
         addEnStationName(nextStationName);
+
+        isPlaying = true;
+        playNext();
+    }
+
+    public void playGpsStartStationAnnouncement(String lineName, String startStation, String endStation, String nextStation) {
+        stopAll();
+        playbackQueue.clear();
+        playbackQueue.add(new PlaybackItem(R.raw.cn_00_welcom_zhuji));
+        addCnLineNumber(lineName);
+        playbackQueue.add(new PlaybackItem(R.raw.cn_00_bus));
+        playbackQueue.add(new PlaybackItem(R.raw.cn_01_this_bus_is_from));
+        addCnStationName(startStation);
+        playbackQueue.add(new PlaybackItem(R.raw.cn_02_heading_to));
+        addCnStationName(endStation);
+        playbackQueue.add(new PlaybackItem(R.raw.cn_05_next_station));
+        addCnStationName(nextStation);
+        playbackQueue.add(new PlaybackItem(R.raw.cn_03_starting_stop_departing));
+
+        String lineNameEn = lineName.replace("路", "");
+        playbackQueue.add(new PlaybackItem(R.raw.en_00_welcome_aboard_the_zhuji));
+        addEnLineNumber(lineNameEn);
+        playbackQueue.add(new PlaybackItem(R.raw.en_01_this_bus_is_from));
+        addEnStationName(startStation);
+        playbackQueue.add(new PlaybackItem(R.raw.en_02_to));
+        addEnStationName(endStation);
+        playbackQueue.add(new PlaybackItem(R.raw.en_05_next_station));
+        addEnStationName(nextStation);
+        playbackQueue.add(new PlaybackItem(R.raw.en_03_starting_stop_departing));
+
+        isPlaying = true;
+        playNext();
+    }
+
+    public void playGpsMiddleStationAnnouncement(String stationName) {
+        stopAll();
+        playbackQueue.clear();
+        addCnStationName(stationName);
+        playbackQueue.add(new PlaybackItem(R.raw.cn_091_we_are_now_at));
+        playbackQueue.add(new PlaybackItem(R.raw.en_091_we_are_now_at));
+        addEnStationName(stationName);
+        playbackQueue.add(new PlaybackItem(R.raw.en_092_passengers_getting_off));
+        isPlaying = true;
+        playNext();
+    }
+
+    public void playGpsTerminalStationAnnouncement(String stationName) {
+        stopAll();
+        playbackQueue.clear();
+        playbackQueue.add(new PlaybackItem(R.raw.cn_07_terminal_station));
+        playbackQueue.add(new PlaybackItem(R.raw.cn_091_we_are_now_at));
+        playbackQueue.add(new PlaybackItem(R.raw.cn_08_thank_you_for_riding_with_us));
+        playbackQueue.add(new PlaybackItem(R.raw.en_091_we_are_now_at));
+        playbackQueue.add(new PlaybackItem(R.raw.en_07_terminal_station));
+        playbackQueue.add(new PlaybackItem(R.raw.en_092_passengers_getting_off));
+        playbackQueue.add(new PlaybackItem(R.raw.en_08_thank_you_for_riding_with_us));
+
+        isPlaying = true;
+        playNext();
+    }
+
+    public void playGpsLeavingStationAnnouncement(String nextStation, boolean isTerminal) {
+        stopAll();
+        playbackQueue.clear();
+        playbackQueue.add(new PlaybackItem(R.raw.cn_04_the_bus_is_moving_tips));
+        playbackQueue.add(new PlaybackItem(R.raw.cn_05_next_station));
+        if (isTerminal) {
+            playbackQueue.add(new PlaybackItem(R.raw.cn_07_terminal_station));
+        }
+        addCnStationName(nextStation);
+        playbackQueue.add(new PlaybackItem(R.raw.cn_06_press_the_bell_to_get_off_tips));
+
+        playbackQueue.add(new PlaybackItem(R.raw.en_04_the_bus_is_moving_tips));
+        playbackQueue.add(new PlaybackItem(R.raw.en_05_next_station));
+        if (isTerminal) {
+            playbackQueue.add(new PlaybackItem(R.raw.en_07_terminal_station));
+        }
+        addEnStationName(nextStation);
+        playbackQueue.add(new PlaybackItem(R.raw.en_06_press_the_bell_to_get_off_tips));
 
         isPlaying = true;
         playNext();

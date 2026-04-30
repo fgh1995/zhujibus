@@ -69,6 +69,15 @@ public class BusRealTimeManager {
         resetAllStations();
         
         for (BusApiClient.VehicleDynamicInfo vehicle : data.list) {
+            if (stationList != null) {
+                if (vehicle.vehicleOrder <= 0 || vehicle.vehicleOrder > stationList.size()) {
+                    continue;
+                }
+                if (vehicle.vehicleOrder + 1 > stationList.size()) {
+                    continue;
+                }
+            }
+
             BusApiClient.BusPosition position = new BusApiClient.BusPosition();
             position.plateNumber = vehicle.plateNumber;
             position.isArrived = vehicle.isArriveStation == 1;
@@ -76,16 +85,10 @@ public class BusRealTimeManager {
             position.updateTime = System.currentTimeMillis();
             position.lat = vehicle.lat;
             position.lng = vehicle.lng;
-            // 当前站始终是 vehicleOrder（无论是否到站）
             position.currentStationOrder = vehicle.vehicleOrder;
-            // 下一站是 vehicleOrder + 1
             position.nextStationOrder = vehicle.vehicleOrder + 1;
-            // 确保不超出站点范围
+
             if (stationList != null) {
-                if (vehicle.vehicleOrder <= 0 || vehicle.vehicleOrder > stationList.size()) {
-                    continue;
-                }
-                
                 BusApiClient.BusLineStation currentStation = stationList.get(vehicle.vehicleOrder - 1);
                 if (vehicle.isArriveStation == 1) {
                     currentStation.status = BusApiClient.BusLineStation.StationStatus.CURRENT;

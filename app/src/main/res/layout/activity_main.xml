@@ -121,6 +121,14 @@
                         android:layout_marginEnd="8dp" />
 
                     <TextView
+                        android:id="@+id/tv_gps_info"
+                        android:textSize="11sp"
+                        android:textColor="#666666"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="8dp" />
+
+                    <TextView
                         android:textColor="#262224"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"

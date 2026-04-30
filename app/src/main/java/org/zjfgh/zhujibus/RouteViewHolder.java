@@ -27,7 +27,14 @@ public class RouteViewHolder extends BaseViewHolder {
         RouteItem route = (RouteItem) item;
         tvRouteName.setText(route.getRouteName());
         tvRouteInfo.setText(route.getRouteInfo());
+        tvRouteInfo.setVisibility(route.getRouteInfo().isEmpty() ? View.GONE : View.VISIBLE);
         startEndStation.setText(route.getStartStation() + " → " + route.getEndStation());
-        tvRouteArrivalTime.setText("预计：" + route.getArrivalTime() + "分种");
+
+        if (route.getArrivalTime() > 0) {
+            tvRouteArrivalTime.setText("预计：" + route.getArrivalTime() + "分种");
+            tvRouteArrivalTime.setVisibility(View.VISIBLE);
+        } else {
+            tvRouteArrivalTime.setVisibility(View.GONE);
+        }
     }
 }

@@ -319,6 +319,8 @@ public class BusApiClient {
         public String id;             // 线路ID
         public int hasMm;             // 是否有末班车(0无,1有)
         public String notice;         // 通知内容
+        public int lineType;         // 线路类型(1表示城市公交,其他值表示城乡公交)
+        public String lineTypeName;  // 线路类型名称("城市")
     }
 
     // ==================== 线路站点信息 ====================
