@@ -19,5 +19,6 @@
             <enum name="center" value="1" />
             <enum name="end" value="2" />
         </attr>
+        <attr name="hsTextGap" format="dimension" />
     </declare-styleable>
 </resources>

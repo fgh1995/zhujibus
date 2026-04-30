@@ -14,16 +14,15 @@ public class HorizontalScrollTextView extends View {
     private Paint textPaint;
     private String text = "";
     private float textWidth = 0f;
+    private float textGap = 0f;
+    private float singleUnitWidth = 0f;
     private float scrollOffset = 0f;
+    private float loopBaseOffset = 0f;
     private boolean needScroll = false;
     private ValueAnimator scrollAnimator;
     private float density;
     private Typeface typeface;
-    private float totalScrollWidth;
     private float scrollSpeed = 90f;
-    private float pauseDuration = 800f;
-    private boolean isPaused = false;
-    private Runnable scrollRunnable;
     private boolean autoStart = true;
     private int gravity = 2;
 
@@ -57,6 +56,7 @@ public class HorizontalScrollTextView extends View {
             float xmlScrollSpeed = a.getFloat(R.styleable.HorizontalScrollTextView_hsScrollSpeed, 100f);
             boolean xmlAutoStart = a.getBoolean(R.styleable.HorizontalScrollTextView_hsAutoStart, true);
             gravity = a.getInt(R.styleable.HorizontalScrollTextView_hsGravity, 2);
+            float xmlTextGap = a.getDimension(R.styleable.HorizontalScrollTextView_hsTextGap, 0f);
 
             if (xmlText != null) {
                 text = xmlText;
@@ -65,8 +65,11 @@ public class HorizontalScrollTextView extends View {
             textPaint.setTextSize(xmlTextSize);
             scrollSpeed = xmlScrollSpeed;
             autoStart = xmlAutoStart;
+            textGap = xmlTextGap;
             a.recycle();
         }
+        
+        updateTextWidth();
     }
 
     public void setText(String text) {
@@ -74,15 +77,31 @@ public class HorizontalScrollTextView extends View {
             text = "";
         }
         this.text = text;
-        textWidth = textPaint.measureText(text);
-        if (getWidth() > 0) {
-            needScroll = textWidth > getWidth();
-        }
         resetScroll();
+        updateTextWidth();
         invalidate();
-        if (needScroll && autoStart) {
-            startScrollAnimation();
+        if (getWidth() > 0) {
+            updateScrollState();
         }
+    }
+    
+    public void setTextGap(float gap) {
+        this.textGap = gap;
+        resetScroll();
+        updateTextWidth();
+        invalidate();
+        if (getWidth() > 0) {
+            updateScrollState();
+        }
+    }
+    
+    public float getTextGap() {
+        return textGap;
+    }
+    
+    private void updateTextWidth() {
+        textWidth = textPaint.measureText(text);
+        singleUnitWidth = textWidth + textGap;
     }
 
     private void resetScroll() {
@@ -93,6 +112,7 @@ public class HorizontalScrollTextView extends View {
             scrollAnimator = null;
         }
         scrollOffset = 0f;
+        loopBaseOffset = 0f;
     }
 
     public String getText() {
@@ -110,6 +130,7 @@ public class HorizontalScrollTextView extends View {
 
     public void setTextSize(float size) {
         textPaint.setTextSize(size * density);
+        updateTextWidth();
         requestLayout();
         invalidate();
         updateScrollState();
@@ -157,10 +178,6 @@ public class HorizontalScrollTextView extends View {
         return gravity;
     }
 
-    public void setScrollPauseDuration(float milliseconds) {
-        this.pauseDuration = milliseconds;
-    }
-
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
         int width = MeasureSpec.getSize(widthMeasureSpec);
@@ -171,7 +188,7 @@ public class HorizontalScrollTextView extends View {
     }
 
     private void updateScrollState() {
-        textWidth = textPaint.measureText(text);
+        updateTextWidth();
         int availableWidth = getWidth();
         needScroll = availableWidth > 0 && textWidth > availableWidth;
 
@@ -179,7 +196,9 @@ public class HorizontalScrollTextView extends View {
             startScrollAnimation();
         } else if (!needScroll && scrollAnimator != null) {
             scrollAnimator.cancel();
+            scrollAnimator = null;
             scrollOffset = 0f;
+            loopBaseOffset = 0f;
         }
     }
 
@@ -202,37 +221,52 @@ public class HorizontalScrollTextView extends View {
             scrollAnimator.cancel();
         }
 
-        float scrollDistance = textWidth + getWidth();
-        if (scrollDistance <= 0) {
+        if (singleUnitWidth <= 0 || getWidth() <= 0) {
             return;
         }
-        totalScrollWidth = textWidth;
-        int duration = (int) (scrollDistance / scrollSpeed * 1000);
-        scrollAnimator = ValueAnimator.ofFloat(0f, 1f);
-        scrollAnimator.setDuration(duration);
+
+        int availableWidth = getWidth();
+        float entryDistance = textWidth;
+        int entryDuration = (int) (entryDistance / scrollSpeed * 1000);
+
+        scrollAnimator = ValueAnimator.ofFloat(0f, entryDistance);
+        scrollAnimator.setDuration(entryDuration);
         scrollAnimator.setInterpolator(new android.view.animation.LinearInterpolator());
         scrollAnimator.addUpdateListener(animation -> {
             scrollOffset = (float) animation.getAnimatedValue();
             invalidate();
         });
-        scrollAnimator.addListener(new android.animation.ValueAnimator.AnimatorListener() {
-            @Override
-            public void onAnimationStart(android.animation.Animator animation) {}
-
+        scrollAnimator.addListener(new android.animation.AnimatorListenerAdapter() {
             @Override
             public void onAnimationEnd(android.animation.Animator animation) {
-                if (needScroll) {
-                    scrollOffset = 0f;
-                    invalidate();
-                    startScrollAnimation();
-                }
+                loopBaseOffset = entryDistance;
+                startLoopAnimation();
             }
+        });
+        scrollAnimator.start();
+    }
 
-            @Override
-            public void onAnimationCancel(android.animation.Animator animation) {}
+    private void startLoopAnimation() {
+        if (scrollAnimator != null) {
+            scrollAnimator.removeAllUpdateListeners();
+            scrollAnimator.removeAllListeners();
+            scrollAnimator.cancel();
+            scrollAnimator = null;
+        }
 
-            @Override
-            public void onAnimationRepeat(android.animation.Animator animation) {}
+        if (singleUnitWidth <= 0) {
+            return;
+        }
+
+        int duration = (int) (singleUnitWidth / scrollSpeed * 1000);
+        scrollAnimator = ValueAnimator.ofFloat(0f, singleUnitWidth);
+        scrollAnimator.setDuration(duration);
+        scrollAnimator.setRepeatCount(ValueAnimator.INFINITE);
+        scrollAnimator.setRepeatMode(ValueAnimator.RESTART);
+        scrollAnimator.setInterpolator(new android.view.animation.LinearInterpolator());
+        scrollAnimator.addUpdateListener(animation -> {
+            scrollOffset = loopBaseOffset + (float) animation.getAnimatedValue();
+            invalidate();
         });
         scrollAnimator.start();
     }
@@ -264,17 +298,22 @@ public class HorizontalScrollTextView extends View {
             return;
         }
 
-        float offset = scrollOffset * textWidth;
         Paint.FontMetrics fm = textPaint.getFontMetrics();
         float textY = getHeight() * 0.8f;
+        int availableWidth = getWidth();
 
         canvas.save();
-        canvas.clipRect(0, 0, getWidth(), getHeight());
+        canvas.clipRect(0, 0, availableWidth, getHeight());
 
-        int copiesNeeded = (int) Math.ceil((float) getWidth() / textWidth) + 3;
-        float startX = getWidth() - offset;
-        for (int i = 0; i < copiesNeeded; i++) {
-            canvas.drawText(text, startX + i * textWidth, textY, textPaint);
+        float originX = availableWidth;
+
+        int maxIndex = (int) Math.ceil((availableWidth + scrollOffset - originX) / singleUnitWidth);
+
+        for (int i = 0; i <= maxIndex; i++) {
+            float x = originX + i * singleUnitWidth - scrollOffset;
+            if (x + textWidth > 0 && x < availableWidth + textWidth) {
+                canvas.drawText(text, x, textY, textPaint);
+            }
         }
 
         canvas.restore();

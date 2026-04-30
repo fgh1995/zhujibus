@@ -10,8 +10,8 @@ android {
         applicationId "org.zjfgh.zhujibus"
         minSdk 24
         targetSdk 35
-        versionCode 101032
-        versionName "1.1.32-beta"
+        versionCode 101033
+        versionName "1.1.33-beta"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }

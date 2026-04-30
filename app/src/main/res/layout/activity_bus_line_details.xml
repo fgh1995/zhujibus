@@ -71,6 +71,7 @@
                     android:textSize="30sp"
                     android:textColor="#00FF00"
                     android:textStyle="bold"
+                    app:hsTextGap="20dp"
                     android:layout_marginRight="10dp"/>
                 <org.zjfgh.zhujibus.DotMatrixView
                     android:layout_width="36dp"
@@ -84,6 +85,7 @@
                     android:layout_marginStart="8dp"
                     android:textColor="#FF0000"
                     android:textSize="30sp"
+                    app:hsTextGap="20dp"
                     android:text="终点站名" />
             </LinearLayout>
             <LinearLayout
@@ -121,6 +123,7 @@
                     android:layout_height="wrap_content"
                     app:hsGravity="center"
                     app:hsTextColor="#FF0000"
+                    app:hsTextGap="90dp"
                     app:hsTextSize="30sp" />
             </LinearLayout>
             <LinearLayout

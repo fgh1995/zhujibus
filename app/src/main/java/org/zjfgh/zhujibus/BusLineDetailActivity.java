@@ -516,7 +516,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         routeNumber.setText(lineName);
         routeNumber.setTextColor(0xFF00FF00);
         routeNumber.setGravity(0);
-        routeNumber.setScrollSpeed(300f);
+        routeNumber.setScrollSpeed(250f);
         Typeface dottedSongti = Typeface.createFromAsset(getAssets(), "fonts/DottedSongtiSquareRegular.otf");
         routeNumber.setTypeface(dottedSongti);
 
@@ -533,7 +533,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         endStationName.setGravity(2);
         endStationName.setText(endStation);
         endStationName.setTypeface(dottedSongti);
-        endStationName.setScrollSpeed(300f);
+        endStationName.setScrollSpeed(250f);
         tips = findViewById(R.id.tips);
         tips.setTypeface(dottedSongti);
         tips.setGravity(1);
@@ -543,7 +543,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         nextStationInfo.setTextColor(0xFFFF0000);
         nextStationInfo.setTextSize(30f);
         nextStationInfo.setText("欢迎乘坐" + lineName + "公交车");
-        nextStationInfo.setScrollSpeed(300f);
+        nextStationInfo.setScrollSpeed(280f);
         swapOrientation = findViewById(R.id.swap_orientation);
         swapOrientation.setVisibility(View.GONE);
 
@@ -1190,7 +1190,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
 
                 TTSUtils tts = TTSUtils.getInstance(this);
                 tts.playLineDetailAnnouncement(lineName, startStation, endStation, nextStation.stationName);
-                nextStationInfo.setText("下一站：" + nextStation.stationName + "，下车请按铃  Next Station:" + nextStation.stationName + ",Press the bell to get off");
+                nextStationInfo.setText("下一站：" + nextStation.stationName + "，下车请按铃      Next Station:" + nextStation.stationName + ",Press the bell to get off");
                 lastVoiceStationOrder = nearestVehicle.currentStationOrder;
             }
         }
