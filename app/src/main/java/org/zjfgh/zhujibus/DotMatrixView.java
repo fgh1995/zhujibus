@@ -12,6 +12,7 @@ public class DotMatrixView extends View {
 
     public static final int PATTERN_ACCESSIBILITY = 0;
     public static final int PATTERN_RIGHT_ARROW = 1;
+    public static final int PATTERN_GPS = 2;
 
     public static final int[][] PATTERN_ACCESSIBILITY_DATA = {
         {0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0},
@@ -59,6 +60,44 @@ public class DotMatrixView extends View {
         {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0},
         {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0}
     };
+    public static final int[][] GPS_PATTERN_DATA = {
+        {0, 0, 0, 0, 0, 1, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 1, 1, 0, 0},
+        {0, 1, 0, 0, 1, 0, 0, 1, 1, 0},
+        {1, 1, 1, 0, 0, 1, 1, 0, 1, 1},
+        {1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
+        {1, 1, 1, 1, 1, 1, 1, 1, 0, 1},
+        {1, 1, 1, 1, 1, 1, 0, 0, 0, 0},
+        {0, 1, 1, 1, 1, 1, 1, 1, 0, 0},
+        {0, 0, 1, 1, 1, 1, 1, 1, 0, 0},
+        {0, 0, 0, 1, 1, 1, 1, 1, 0, 0}
+    };
+
+    public static final int PATTERN_UP_DOWN_ARROW = 3;
+
+    public static final int[][] PATTERN_UP_DOWN_ARROW_DATA = {
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0},
+        {0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0},
+        {0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0},
+        {0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0},
+        {0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
+        {0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0},
+        {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0},
+        {0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0},
+        {0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0},
+        {0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0},
+        {0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+    };
 
     private int currentPattern = PATTERN_RIGHT_ARROW;
     private int dotColor = 0xFFFFFFFF;
@@ -101,8 +140,8 @@ public class DotMatrixView extends View {
     }
 
     public void setPattern(int pattern) {
-        if (pattern != PATTERN_ACCESSIBILITY && pattern != PATTERN_RIGHT_ARROW) {
-            throw new IllegalArgumentException("Invalid pattern. Use PATTERN_ACCESSIBILITY or PATTERN_RIGHT_ARROW.");
+        if (pattern != PATTERN_ACCESSIBILITY && pattern != PATTERN_RIGHT_ARROW && pattern != PATTERN_GPS && pattern != PATTERN_UP_DOWN_ARROW) {
+            throw new IllegalArgumentException("Invalid pattern. Use PATTERN_ACCESSIBILITY, PATTERN_RIGHT_ARROW, PATTERN_GPS, or PATTERN_UP_DOWN_ARROW.");
         }
         this.currentPattern = pattern;
         invalidate();
@@ -156,6 +195,10 @@ public class DotMatrixView extends View {
         switch (currentPattern) {
             case PATTERN_ACCESSIBILITY:
                 return PATTERN_ACCESSIBILITY_DATA;
+            case PATTERN_GPS:
+                return GPS_PATTERN_DATA;
+            case PATTERN_UP_DOWN_ARROW:
+                return PATTERN_UP_DOWN_ARROW_DATA;
             case PATTERN_RIGHT_ARROW:
             default:
                 return PATTERN_RIGHT_ARROW_DATA;
@@ -171,6 +214,10 @@ public class DotMatrixView extends View {
             pattern = customPatternData;
         } else if (patternIndex == PATTERN_ACCESSIBILITY) {
             pattern = PATTERN_ACCESSIBILITY_DATA;
+        } else if (patternIndex == PATTERN_GPS) {
+            pattern = GPS_PATTERN_DATA;
+        } else if (patternIndex == PATTERN_UP_DOWN_ARROW) {
+            pattern = PATTERN_UP_DOWN_ARROW_DATA;
         } else {
             pattern = PATTERN_RIGHT_ARROW_DATA;
         }

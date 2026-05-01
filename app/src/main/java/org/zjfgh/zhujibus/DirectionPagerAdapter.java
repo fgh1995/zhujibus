@@ -4,6 +4,7 @@ import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Color;
+import android.graphics.Typeface;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -24,6 +25,7 @@ import java.util.Set;
 
 public class DirectionPagerAdapter extends RecyclerView.Adapter<DirectionPagerAdapter.DirectionViewHolder> {
     private Context context;
+    private Typeface dottedSongti;
     private List<BusApiClient.LineDirection> directions;
     private OnDirectionLongClickListener longClickListener;
     private Set<String> highlightedLineIds = new HashSet<>();
@@ -78,13 +80,14 @@ public class DirectionPagerAdapter extends RecyclerView.Adapter<DirectionPagerAd
     public DirectionPagerAdapter(Context context, List<BusApiClient.LineDirection> directions) {
         this.context = context;
         this.directions = directions;
+        this.dottedSongti = Typeface.createFromAsset(context.getAssets(), "fonts/DottedSongtiSquareRegular.otf");
     }
 
     @NonNull
     @Override
     public DirectionViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
         View view = LayoutInflater.from(context).inflate(R.layout.item_bus_direction_station, parent, false);
-        return new DirectionViewHolder(view);
+        return new DirectionViewHolder(view, dottedSongti);
     }
 
     @Override
@@ -111,9 +114,11 @@ public class DirectionPagerAdapter extends RecyclerView.Adapter<DirectionPagerAd
         private TextView nextBusLabel;
         private TextView firstBusTime;
         private TextView lastBusTime;
+        private Typeface typeface;
 
-        public DirectionViewHolder(@NonNull View itemView) {
+        public DirectionViewHolder(@NonNull View itemView, Typeface typeface) {
             super(itemView);
+            this.typeface = typeface;
             busInfoContainer = itemView.findViewById(R.id.bus_info_container);
             busRouteName = itemView.findViewById(R.id.bus_route_name);
             busDistance = itemView.findViewById(R.id.bus_distance);
@@ -132,6 +137,8 @@ public class DirectionPagerAdapter extends RecyclerView.Adapter<DirectionPagerAd
                         boolean isHighlighted, boolean isGrayed) {
             busRouteName.setText(String.format("%s(%s公交)", direction.lineName, direction.lineTypeName));
             busStations.setText(String.format("%s-%s", direction.startStation, direction.endStation));
+            firstBusTime.setTypeface(typeface);
+            lastBusTime.setTypeface(typeface);
             firstBusTime.setText(direction.departureTime);
             lastBusTime.setText(direction.collectTime);
 

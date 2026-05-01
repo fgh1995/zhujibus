@@ -4,6 +4,8 @@
         <attr name="dotMatrixPattern" format="enum">
             <enum name="accessibility" value="0" />
             <enum name="right_arrow" value="1" />
+            <enum name="gps" value="2" />
+            <enum name="up_down_arrow" value="3" />
         </attr>
         <attr name="dotMatrixColor" format="color" />
         <attr name="dotMatrixDotSize" format="dimension" />
@@ -20,5 +22,11 @@
             <enum name="end" value="2" />
         </attr>
         <attr name="hsTextGap" format="dimension" />
+    </declare-styleable>
+    <declare-styleable name="BorderLabel">
+        <attr name="labelText" format="string" />
+        <attr name="labelLitColor" format="color" />
+        <attr name="labelDimColor" format="color" />
+        <attr name="labelTextSize" format="dimension" />
     </declare-styleable>
 </resources>

@@ -40,7 +40,7 @@ public class MainActivity extends AppCompatActivity {
     private BusApiClient client;
     private double currentLatitude = 120.235555;
     private double currentLongitude = 29.713397;
-    private TextView tvGpsInfo;
+    private TextView tvNoData;
     private boolean locationObtained = false;
 
     @Override
@@ -51,11 +51,27 @@ public class MainActivity extends AppCompatActivity {
             recyclerView = findViewById(R.id.recyclerView);
             tv_search_line = findViewById(R.id.tv_search_line);
             viewFlipper = findViewById(R.id.view_flipper);
-            tvGpsInfo = findViewById(R.id.tv_gps_info);
+            tvNoData = findViewById(R.id.tv_no_data);
             client = new BusApiClient();
-            GpsWarmingUp.startWarmingUp(this);
-            GpsWarmingUp.addListener(gpsListener);
-            loadNearbyStations();
+            if (PermissionUtils.hasLocationPermission(this)) {
+                startGpsIfNeeded();
+            } else {
+                PermissionUtils.requestLocationPermission(this, new PermissionUtils.PermissionCallback() {
+                    @Override
+                    public void onPermissionGranted() {
+                        runOnUiThread(() -> startGpsIfNeeded());
+                    }
+
+                    @Override
+                    public void onPermissionDenied() {
+                        runOnUiThread(() -> {
+                            if (tvNoData != null) {
+                                tvNoData.setText("需要位置权限才能获取附近站点~");
+                            }
+                        });
+                    }
+                });
+            }
             TTSUtils.getInstance(this);
             tv_search_line.setOnClickListener(v -> {
                 try {
@@ -85,10 +101,8 @@ public class MainActivity extends AppCompatActivity {
                 Log.d("MainActivity", String.format("GPS定位成功: WGS(%.6f,%.6f) -> GCJ(%.6f,%.6f)",
                         location.getLatitude(), location.getLongitude(), currentLatitude, currentLongitude));
 
-                if (tvGpsInfo != null) {
-                    runOnUiThread(() -> tvGpsInfo.setText(String.format("GPS: %.6f, %.6f", currentLatitude, currentLongitude)));
-                }
-
+                GpsWarmingUp.removeListener(this);
+                GpsWarmingUp.stopWarmingUp();
                 runOnUiThread(() -> loadNearbyStations());
             }
         }
@@ -107,6 +121,33 @@ public class MainActivity extends AppCompatActivity {
     protected void onDestroy() {
         super.onDestroy();
         GpsWarmingUp.removeListener(gpsListener);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (locationObtained) {
+            runOnUiThread(() -> loadNearbyStations());
+        } else if (PermissionUtils.hasLocationPermission(this)) {
+            startGpsIfNeeded();
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        PermissionUtils.onRequestPermissionsResult(requestCode, permissions, grantResults);
+    }
+
+    private void startGpsIfNeeded() {
+        if (!GpsWarmingUp.isWarmingUp()) {
+            try {
+                GpsWarmingUp.startWarmingUp(this);
+                GpsWarmingUp.addListener(gpsListener);
+            } catch (Exception e) {
+                Log.e("MainActivity", "GPS初始化失败", e);
+            }
+        }
     }
 
     private void loadNearbyStations() {
@@ -156,6 +197,9 @@ public class MainActivity extends AppCompatActivity {
                                 recyclerView.setLayoutManager(new LinearLayoutManager(MainActivity.this));
                                 recyclerView.setAdapter(adapter);
                                 recyclerView.addItemDecoration(new DividerItemDecoration(MainActivity.this, DividerItemDecoration.VERTICAL));
+                                if (tvNoData != null) {
+                                    tvNoData.setVisibility(View.GONE);
+                                }
 
                                 adapter.setOnItemClickListener(new StationRouteAdapter.OnItemClickListener() {
                                     @Override
@@ -247,7 +291,7 @@ public class MainActivity extends AppCompatActivity {
                 ViewGroup.LayoutParams.MATCH_PARENT));
         textView.setText(announcement.title);
         textView.setTextSize(15);
-        textView.setTextColor(Color.parseColor("#666666"));
+        textView.setTextColor(Color.parseColor("#000000"));
         textView.setGravity(Gravity.CENTER_VERTICAL);
         return textView;
     }

@@ -44,7 +44,6 @@ public class BusRealTimeManager {
                 new BusApiClient.ApiCallback<>() {
                     @Override
                     public void onSuccess(BusApiClient.BusVehicleDynamicResponse response) {
-                        Log.d("BusInfo", "response.returnFlag" + response.returnFlag);
                         if ("200".equals(response.returnFlag)) {
                             busAverageSpeed = response.data.busAverageSpeed;
                             processResponse(response.data, listener);

@@ -37,6 +37,7 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
     private SoundPool soundPool;
     private MediaPlayer durationMediaPlayer;
     private HashMap<Integer, Integer> soundMap = new HashMap<>();
+    private int currentStreamId = 0;
     private Handler mainHandler = new Handler();
     private Handler backgroundHandler;
     private HandlerThread backgroundThread;
@@ -555,11 +556,11 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
                 durationMediaPlayer.setDataSource(context, android.net.Uri.parse("android.resource://" + context.getPackageName() + "/" + rawResId));
                 durationMediaPlayer.prepare();
                 int duration = durationMediaPlayer.getDuration();
-                soundPool.play(soundId, 1.0f, 1.0f, 0, 0, 1.0f);
+                currentStreamId = soundPool.play(soundId, 1.0f, 1.0f, 0, 0, 1.0f);
                 mainHandler.postDelayed(this::playNext, duration);
             } catch (Exception e) {
                 Log.e(TAG, "获取音频时长失败", e);
-                soundPool.play(soundId, 1.0f, 1.0f, 0, 0, 1.0f);
+                currentStreamId = soundPool.play(soundId, 1.0f, 1.0f, 0, 0, 1.0f);
                 mainHandler.postDelayed(this::playNext, getSoundDuration(rawResId));
             }
         } else {
@@ -848,6 +849,10 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
         isPlaying = false;
         currentUtteranceId = null;
         mainHandler.removeCallbacksAndMessages(null);
+        if (soundPool != null && currentStreamId != 0) {
+            soundPool.stop(currentStreamId);
+            currentStreamId = 0;
+        }
         releaseDurationMediaPlayer();
         abandonAudioFocus();
         if (isInitialized) {

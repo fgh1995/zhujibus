@@ -54,53 +54,60 @@
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:gravity="center_vertical">
-                <org.zjfgh.zhujibus.DotMatrixView
-                    android:id="@+id/accessibility_icon"
-                    android:layout_width="36dp"
-                    android:layout_height="36dp"
-                    app:dotMatrixPattern="accessibility"
-                    app:dotMatrixColor="#FFFFFF"
-                    android:layout_marginRight="10dp"/>
-                <org.zjfgh.zhujibus.HorizontalScrollTextView
-                    android:id="@+id/route_number"
-                    android:layout_width="120dp"
-                    android:layout_height="wrap_content"
-                    android:gravity="center"
-                    android:text="00"
-                    android:textSize="30sp"
-                    android:textColor="#00FF00"
-                    android:textStyle="bold"
-                    app:hsTextGap="20dp"
-                    android:layout_marginRight="10dp"/>
-                <org.zjfgh.zhujibus.DotMatrixView
-                    android:layout_width="36dp"
-                    android:layout_height="36dp"
-                    app:dotMatrixPattern="right_arrow"
-                    app:dotMatrixColor="#FF0000"/>
-                <org.zjfgh.zhujibus.HorizontalScrollTextView
-                    android:id="@+id/end_station_name"
+                android:orientation="vertical"
+                android:background="@drawable/led_dot_matrix_dark_red_bg">
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="8dp"
-                    android:textColor="#FF0000"
-                    android:textSize="30sp"
-                    app:hsTextGap="20dp"
-                    android:text="终点站名" />
-            </LinearLayout>
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="5dp"
-                android:gravity="center_horizontal">
-                <org.zjfgh.zhujibus.HorizontalScrollTextView
-                    android:id="@+id/tips"
-                    android:layout_width="wrap_content"
+                    android:gravity="center_vertical">
+                    <org.zjfgh.zhujibus.DotMatrixView
+                        android:id="@+id/accessibility_icon"
+                        android:layout_width="36dp"
+                        android:layout_height="36dp"
+                        app:dotMatrixPattern="accessibility"
+                        app:dotMatrixColor="#FFFFFF"
+                        android:layout_marginRight="10dp"/>
+                    <org.zjfgh.zhujibus.HorizontalScrollTextView
+                        android:id="@+id/route_number"
+                        android:layout_width="120dp"
+                        android:layout_height="wrap_content"
+                        android:gravity="center"
+                        android:text="00"
+                        android:textSize="30sp"
+                        android:textColor="#00FF00"
+                        android:textStyle="bold"
+                        app:hsTextGap="20dp"
+                        android:layout_marginRight="10dp"/>
+                    <org.zjfgh.zhujibus.DotMatrixView
+                        android:layout_width="36dp"
+                        android:layout_height="36dp"
+                        app:dotMatrixPattern="right_arrow"
+                        app:dotMatrixColor="#FF0000"/>
+                    <org.zjfgh.zhujibus.HorizontalScrollTextView
+                        android:id="@+id/end_station_name"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:textColor="#FF0000"
+                        android:textSize="30sp"
+                        app:hsTextGap="20dp"
+                        android:text="终点站名" />
+                </LinearLayout>
+                <LinearLayout
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:textSize="30sp"
-                    android:textColor="#FFFF00"
-                    android:text="文明排队   上下有序"/>
+                    android:layout_marginTop="5dp"
+                    android:gravity="center_horizontal">
+                    <org.zjfgh.zhujibus.HorizontalScrollTextView
+                        android:id="@+id/tips"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textSize="30sp"
+                        android:textColor="#FFFF00"
+                        android:text="文明排队   上下有序"/>
+                </LinearLayout>
             </LinearLayout>
+
         </LinearLayout>
         <LinearLayout
             android:layout_width="match_parent"
@@ -118,171 +125,500 @@
                 android:padding="10dp">
 
                 <org.zjfgh.zhujibus.HorizontalScrollTextView
+                    android:background="@drawable/led_dot_matrix_dark_red_bg"
                     android:id="@+id/next_station_info"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
+                    android:padding="2dp"
                     app:hsGravity="center"
                     app:hsTextColor="#FF0000"
                     app:hsTextGap="90dp"
                     app:hsTextSize="30sp" />
             </LinearLayout>
             <LinearLayout
-                android:id="@+id/swap_orientation"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="4dp"
-                android:gravity="center_vertical">
-
-                <View
-                    android:layout_width="1dp"
-                    android:layout_height="40dp"
-                    android:background="#D0D0D0" />
-
-                <View
-                    android:layout_width="40dp"
-                    android:layout_height="40dp"
-                    android:background="@drawable/ic_swap" />
-
-                <TextView
+                android:layout_marginStart="8dp"
+                android:paddingLeft="4dp"
+                android:paddingEnd="4dp"
+                android:gravity="center_vertical"
+                android:background="@drawable/led_time_background">
+                <LinearLayout
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="换向"
-                    android:textColor="@color/black"
-                    android:textStyle="bold"
-                    android:textSize="18sp" />
+                    android:paddingStart="5dp"
+                    android:paddingEnd="6dp"
+                    android:paddingTop="7dp"
+                    android:paddingBottom="7dp"
+                    android:orientation="vertical">
+                    <LinearLayout
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="2dp"
+                        android:background="@drawable/led_dot_matrix_dark_red_bg">
+                        <LinearLayout
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:layout_marginBottom="2dp">
+                            <TextView
+                                android:id="@+id/network_status_indicator"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="●"
+                                android:textColor="#00FF00"
+                                android:textSize="10sp" />
+                            <TextView
+                                android:id="@+id/network_mode_text"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginStart="4dp"
+                                android:textColor="#FF0000"
+                                android:textSize="14sp"
+                                android:text="网络"/>
+
+                            <TextView
+                                android:id="@+id/refresh_time"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:paddingStart="5dp"
+                                android:paddingEnd="5dp"
+                                android:text="00:00:00"
+                                android:textColor="#FF0000"
+                                android:textSize="17sp" />
+                        </LinearLayout>
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical">
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:gravity="center_vertical">
+                                <TextView
+                                    android:id="@+id/gps_status_indicator"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="●"
+                                    android:textColor="#555555"
+                                    android:textSize="10sp" />
+                                <TextView
+                                    android:id="@+id/gps_mode_text"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginStart="4dp"
+                                    android:textColor="#555555"
+                                    android:textSize="15sp"
+                                    android:layout_marginEnd="3dp"
+                                    android:text="GPS"/>
+
+                                <TextView
+                                    android:id="@+id/gps_count"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:paddingStart="5dp"
+                                    android:paddingEnd="5dp"
+                                    android:text="-- / --"
+                                    android:textAlignment="center"
+                                    android:textColor="#555555"
+                                    android:textSize="17sp" />
+                            </LinearLayout>
+                        </LinearLayout>
+                    </LinearLayout>
+
+                </LinearLayout>
             </LinearLayout>
+
+
+        </LinearLayout>
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_marginTop="10dp"
+            android:padding="10dp"
+            android:background="@drawable/led_dark_bg_rounded">
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="2dp"
+                android:background="@drawable/led_dot_matrix_dark_red_bg">
+                <LinearLayout
+                    android:id="@+id/schedule_info"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="2dp"
+                    android:gravity="center_vertical">
+                    <LinearLayout
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical">
+                        <LinearLayout
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical">
+                            <!-- 首班车 -->
+                            <LinearLayout
+                                android:id="@+id/first_bus"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_gravity="center_vertical"
+                                android:gravity="center_vertical"
+                                android:layout_marginEnd="10dp"
+                                tools:ignore="UselessParent">
+
+                                <TextView
+                                    android:id="@+id/first_bus_marker"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="首："
+                                    android:textColor="#00FF3A"
+                                    android:textSize="18sp"
+                                    tools:ignore="SmallSp" />
+
+                                <TextView
+                                    android:id="@+id/first_bus_time"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_gravity="center_vertical"
+                                    android:layout_marginStart="5dp"
+                                    android:textColor="#00FF0B"
+                                    android:textSize="19sp"
+                                    android:text="06:00" />
+                            </LinearLayout>
+
+                            <!-- 末班车 -->
+                            <LinearLayout
+                                android:id="@+id/last_bus"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                tools:ignore="UselessParent"
+                                android:gravity="center_vertical">
+
+                                <TextView
+                                    android:id="@+id/last_bus_marker"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_gravity="center"
+                                    android:gravity="center"
+                                    android:text="末："
+                                    android:textColor="#FF0000"
+                                    android:textSize="18sp"
+                                    tools:ignore="SmallSp" />
+
+                                <TextView
+                                    android:id="@+id/last_bus_time"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:textColor="#FF0000"
+                                    android:layout_marginStart="5dp"
+                                    android:textSize="19sp"
+                                    android:text="18:10" />
+                            </LinearLayout>
+
+                        </LinearLayout>
+                        <!-- 时刻表按钮 -->
+
+                    </LinearLayout>
+
+                    <!-- 线路摘要 -->
+                    <TextView
+                        android:id="@+id/route_summary"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical|end"
+                        android:layout_marginStart="10dp"
+                        android:text="总里程：10公里"
+                        android:textColor="#00FFFF"
+                        android:textSize="18sp"
+                        android:lineSpacingMultiplier="1.5"
+                        tools:ignore="SmallSp" />
+                </LinearLayout>
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+
+                    android:gravity="center_vertical">
+                    <org.zjfgh.zhujibus.BorderLabel
+                        android:id="@+id/loop_line_label"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="center_vertical"
+                        android:gravity="center"
+                        app:labelText="环线"
+                        app:labelLitColor="#FF0000"
+                        app:labelDimColor="#660000"
+                        app:labelTextSize="15sp"
+                        android:layout_marginEnd="5dp"/>
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_weight="1"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical|end">
+                        <LinearLayout
+                            android:id="@+id/swap_orientation"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginEnd="4dp"
+                            android:gravity="center_vertical">
+                            <org.zjfgh.zhujibus.BorderLabel
+                                android:id="@+id/hide_bus_card_reader"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginEnd="5dp"
+                                app:labelLitColor="#FF0000"
+                                app:labelDimColor="#990000"
+                                app:labelTextSize="10dp"
+                                app:labelText="刷卡机" />
+                            <org.zjfgh.zhujibus.BorderLabel
+                                android:id="@+id/schedule_button"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                app:labelText="时刻表"
+                                android:layout_marginEnd="5dp"/>
+                            <LinearLayout
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:paddingStart="4dp"
+                                android:paddingEnd="1dp"
+                                android:gravity="center_vertical"
+                                android:background="@drawable/cyan_border_rounded">
+                                <org.zjfgh.zhujibus.DotMatrixView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    app:dotMatrixColor="#00FFFF"
+                                    android:layout_marginEnd="2dp"
+                                    app:dotMatrixDotSize="27sp"
+                                    app:dotMatrixPattern="up_down_arrow"/>
+
+                                <TextView
+                                    android:id="@+id/swap_orientation_label"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="换向"
+                                    android:textSize="18sp"
+                                    android:textColor="#00FFFF"/>
+                            </LinearLayout>
+
+                        </LinearLayout>
+                    </LinearLayout>
+
+                </LinearLayout>
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:layout_marginStart="2dp">
+                    <LinearLayout
+                        android:id="@+id/gps_label"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:layout_gravity="start">
+                        <TextView
+                            android:id="@+id/gps_speed_text"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="时速：0km/h"
+                            android:textColor="#00FFFF"
+                            android:textSize="12sp"
+                            android:layout_marginBottom="5dp"/>
+                        <TextView
+                            android:id="@+id/gps_location_info"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginBottom="5dp"
+                            android:textSize="12sp"
+                            android:text="坐标:29.361333,120.334511"
+                            android:textColor="#00FF0B" />
+                        <LinearLayout
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical">
+                            <TextView
+                                android:id="@+id/gps_nearest_station_info"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:textSize="12sp"
+                                android:text="站点：白门下村  1071m"
+                                android:textColor="#FF0000"
+                                android:layout_marginEnd="10dp"/>
+                            <org.zjfgh.zhujibus.BorderLabel
+                                android:id="@+id/gps_status_info"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                app:labelText="站内"
+                                app:labelLitColor="#00FF00"
+                                app:labelDimColor="#990000"
+                                app:labelTextSize="10sp" />
+                        </LinearLayout>
+                        <LinearLayout
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical">
+                            <org.zjfgh.zhujibus.BorderLabel
+                                android:id="@+id/distance_mode_info"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginEnd="5dp"
+                                app:labelTextSize="12sp"
+                                app:labelLitColor="#00FFFF"
+                                app:labelDimColor="#00FFFF"
+                                app:labelText="报站判定: 直线距离"
+                                android:text="" />
+                            <LinearLayout
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:orientation="horizontal"
+                                android:gravity="center_vertical">
+                                <TextView
+                                    android:id="@+id/radius_min_text"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="0m"
+                                    android:textSize="12sp"
+                                    android:textColor="#00FF0B" />
+                                <com.google.android.material.slider.Slider
+                                    android:id="@+id/radius_slider"
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_weight="1"
+                                    android:layout_marginTop="-17dp"
+                                    android:layout_marginBottom="-17dp"
+                                    android:valueFrom="0"
+                                    android:valueTo="500"
+                                    android:stepSize="10"
+                                    app:trackColorActive="#008800"
+                                    app:thumbColor="#008800"
+                                    app:thumbRadius="6dp"
+                                    app:trackHeight="10dp" />
+                                <TextView
+                                    android:id="@+id/radius_max_text"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="500m"
+                                    android:textSize="10sp"
+                                    android:textColor="#00FF0B" />
+                            </LinearLayout>
+                        </LinearLayout>
+
+                    </LinearLayout>
+
+
+                </LinearLayout>
+            </LinearLayout>
+
+
+
         </LinearLayout>
 
         <!-- 时刻信息 -->
         <LinearLayout
-            android:id="@+id/schedule_info"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:gravity="center_vertical"
+            android:layout_gravity="center_vertical"
             android:layout_marginTop="8dp">
-
-            <!-- 首班车 -->
-            <LinearLayout
-                android:id="@+id/first_bus"
-                android:layout_width="wrap_content"
+            <FrameLayout
+                android:id="@+id/bus_card_reader_view"
+                android:layout_width="130dp"
                 android:layout_height="wrap_content"
-                android:layout_gravity="center_vertical"
-                android:gravity="center_vertical"
-                tools:ignore="UselessParent">
-
-                <TextView
-                    android:id="@+id/first_bus_marker"
-                    android:layout_width="22dp"
-                    android:layout_height="22dp"
-                    android:background="@drawable/green_circle_border"
+                android:layout_marginStart="5dp">
+                <ImageView
+                    android:layout_width="130dp"
+                    android:layout_height="200dp"
+                    android:src="@drawable/bus_card_reader_icon"/>
+                <LinearLayout
+                    android:layout_width="95dp"
+                    android:layout_height="60dp"
+                    android:paddingStart="2dp"
+                    android:paddingEnd="2dp"
                     android:layout_gravity="center"
-                    android:gravity="center"
-                    android:text="首"
-                    android:textColor="#266735"
-                    android:textSize="10sp"
-                    tools:ignore="SmallSp" />
+                    android:orientation="vertical">
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="center_horizontal"
+                        android:textColor="#FF0000"
+                        android:textSize="10sp"
+                        android:text="消费"/>
+                    <View
+                        android:layout_width="50dp"
+                        android:layout_height="1dp"
+                        android:background="#00FF0B"
+                        android:layout_gravity="center_horizontal"/>
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical">
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:gravity="center"
+                            android:textColor="#FF0000"
+                            android:textSize="7dp"
+                            android:background="@drawable/red_border_rounded"
+                            android:paddingStart="1dp"
+                            android:paddingEnd="1dp"
+                            android:paddingTop="1dp"
+                            android:paddingBottom="1dp"
+                            android:text="票\n价"/>
+                        <TextView
+                            android:id="@+id/ticket"
+                            android:padding="0dp"
+                            android:layout_width="0dp"
+                            android:layout_weight="1"
+                            android:layout_height="wrap_content"
+                            android:gravity="end|center_vertical"
+                            android:text="1.00"
+                            android:textSize="17sp"
+                            android:textColor="#FF0000" />
+                    </LinearLayout>
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical">
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="0.3"
+                            android:gravity="end">
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:textColor="#FF0000"
+                                android:textSize="7dp"
+                                android:background="@drawable/red_border_rounded"
+                                android:paddingStart="1dp"
+                                android:paddingEnd="1dp"
+                                android:paddingTop="1dp"
+                                android:paddingBottom="1dp"
+                                android:text="时\n间"/>
+                        </LinearLayout>
 
-                <TextView
-                    android:id="@+id/first_bus_time"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_gravity="center_vertical"
-                    android:layout_marginStart="5dp"
-                    android:text="06:00" />
-            </LinearLayout>
-
-            <!-- 末班车 -->
-            <LinearLayout
-                android:id="@+id/last_bus"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                tools:ignore="UselessParent"
-                android:gravity="center_vertical"
-                android:layout_marginStart="4dp">
-
-                <TextView
-                    android:id="@+id/last_bus_marker"
-                    android:layout_width="22dp"
-                    android:layout_height="22dp"
-                    android:background="@drawable/red_circle_border"
-                    android:layout_gravity="center"
-                    android:gravity="center"
-                    android:text="末"
-                    android:textColor="#FF0000"
-                    android:textSize="10sp"
-                    tools:ignore="SmallSp" />
-
-                <TextView
-                    android:id="@+id/last_bus_time"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_gravity="center_vertical"
-                    android:layout_marginStart="4dp"
-                    android:text="18:10" />
-            </LinearLayout>
-
-            <!-- 时刻表按钮 -->
-            <TextView
-                android:id="@+id/schedule_button"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_gravity="center_vertical"
-                android:gravity="center"
-                android:background="@drawable/blue_rounded_bg"
-                android:paddingStart="4dp"
-                android:paddingEnd="4dp"
-                android:paddingTop="2dp"
-                android:paddingBottom="3dp"
-                android:layout_marginStart="6dp"
-                android:textSize="12sp"
-                android:text="时刻表"
-                android:textColor="@color/white" />
-
-            <!-- 线路摘要 -->
-            <TextView
-                android:id="@+id/route_summary"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center_vertical|end"
-                android:layout_marginStart="10dp"
-                android:text="总里程：10公里  票价：1元"
-                android:textColor="@color/black"
-                android:textSize="14sp"
-                tools:ignore="SmallSp" />
+                        <TextView
+                            android:id="@+id/current_time"
+                            android:layout_width="0dp"
+                            android:layout_weight="0.7"
+                            android:layout_height="wrap_content"
+                            android:gravity="end|center_vertical"
+                            android:text="00.00.00"
+                            android:textSize="17sp"
+                            android:textColor="#FF0000" />
+                    </LinearLayout>
+                </LinearLayout>
+            </FrameLayout>
         </LinearLayout>
+
 
         <!-- 标签容器 -->
         <LinearLayout
             android:id="@+id/tags_container"
             android:layout_width="match_parent"
             android:layout_height="wrap_content">
-
-            <!-- 环线标签 -->
-            <LinearLayout
-                android:id="@+id/loop_line_tag"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="6dp"
-                android:layout_marginTop="6dp"
-                android:gravity="center_vertical"
-                android:paddingStart="4dp"
-                android:paddingEnd="4dp"
-                android:paddingTop="2dp"
-                android:paddingBottom="3dp"
-                android:background="@drawable/red_rounded_bg"
-                tools:ignore="UselessParent">
-
-                <TextView
-                    android:id="@+id/loop_line_label"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_gravity="center_vertical"
-                    android:gravity="center"
-                    android:textSize="12sp"
-                    android:text="环线"
-                    android:textStyle="bold"
-                    android:textColor="#FFFFFF" />
-            </LinearLayout>
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -296,11 +632,6 @@
                     android:gravity="end|center_vertical"
                     android:orientation="horizontal">
                     <TextView
-                        android:id="@+id/announce_mode"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="报站模式"/>
-                    <TextView
                         android:id="@+id/error_indicator"
                         android:layout_width="18dp"
                         android:layout_height="18dp"
@@ -312,12 +643,6 @@
                         android:textSize="14sp"
                         android:textStyle="bold"
                         android:visibility="gone" />
-                    <TextView
-                        android:id="@+id/refresh_time"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:textSize="12sp"
-                        android:textColor="#000000" />
                 </LinearLayout>
                 <LinearLayout
                     android:id="@+id/gps_debug_info"
@@ -325,67 +650,9 @@
                     android:layout_height="wrap_content"
                     android:gravity="end"
                     android:orientation="vertical"
-                    android:visibility="gone">
-                    <TextView
-                        android:id="@+id/gps_location_info"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:textSize="11sp"
-                        android:textColor="#666666" />
-                    <TextView
-                        android:id="@+id/gps_nearest_station_info"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:textSize="11sp"
-                        android:textColor="#666666" />
-                    <TextView
-                        android:id="@+id/gps_status_info"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:textSize="11sp"
-                        android:textColor="#008800" />
-                    <TextView
-                        android:id="@+id/distance_mode_info"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:textSize="11sp"
-                        android:textColor="#0000FF"
-                        android:background="#E0E0FF"
-                        android:padding="4dp"
-                        android:text="距离模式: 直线距离" />
-                    <TextView
-                        android:id="@+id/gps_speed_info"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:textSize="11sp"
-                        android:textColor="#008800" />
-                    <LinearLayout
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical">
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="0m"
-                            android:textSize="10sp"
-                            android:textColor="#666666" />
-                        <com.google.android.material.slider.Slider
-                            android:id="@+id/radius_slider"
-                            android:layout_width="200dp"
-                            android:layout_height="wrap_content"
-                            android:valueFrom="0"
-                            android:valueTo="500"
-                            android:stepSize="10"
-                            app:trackColorActive="#008800"
-                            app:thumbColor="#008800" />
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="500m"
-                            android:textSize="10sp"
-                            android:textColor="#666666" />
-                    </LinearLayout>
+                    android:visibility="visible">
+
+
                 </LinearLayout>
             </LinearLayout>
         </LinearLayout>

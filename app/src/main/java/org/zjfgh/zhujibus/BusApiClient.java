@@ -70,7 +70,6 @@ public class BusApiClient {
                 ApiRequestWrapper wrapper = new ApiRequestWrapper();
                 wrapper.h = commonHeaders;
                 wrapper.b = requestBody;
-                Log.d("BusInfo", host + endpoint);
                 String jsonBody = objectMapper.writeValueAsString(wrapper);
                 Request request = new Request.Builder()
                         .url(host + endpoint)
@@ -87,10 +86,7 @@ public class BusApiClient {
                     notifySuccess(callback, result);
                 }
             } catch (Exception e) {
-                Log.e("busbusbus", "API调用失败(重试次数:" + retryCount + "): " + e.getMessage());
-                
                 if (retryCount < MAX_RETRY_COUNT && shouldRetry(e)) {
-                    Log.d("busbusbus", "准备重试API调用...");
                     try {
                         Thread.sleep(RETRY_DELAY_MS);
                         callApiAsyncWithRetry(endpoint, requestBody, responseType, callback, retryCount + 1);
@@ -157,7 +153,7 @@ public class BusApiClient {
         }
 
         public BusApiException(String message, Throwable cause) {
-            super(message, cause);
+            super(message + " (caused by: " + (cause != null ? cause.getClass().getSimpleName() + ": " + cause.getMessage() : "null") + ")", cause);
         }
     }
 
@@ -451,6 +447,7 @@ public class BusApiClient {
         public List<VehicleDynamicInfo> list; // 车辆动态列表
     }
 
+    @com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true)
     public static class VehicleDynamicInfo {
         public int vehicleOrder;      // 车辆顺序
         public double lng;           // 经度
@@ -531,10 +528,7 @@ public class BusApiClient {
                         responseBody, BusAnnouncementResponse.class);
                 notifySuccess(callback, result);
             } catch (Exception e) {
-                Log.e("busbusbus", "获取公告失败(重试次数:" + retryCount + "): " + e.getMessage());
-                
                 if (retryCount < MAX_RETRY_COUNT && shouldRetry(e)) {
-                    Log.d("busbusbus", "准备重试获取公告...");
                     try {
                         Thread.sleep(RETRY_DELAY_MS);
                         getBusAnnouncementsWithRetry(page, size, callback, retryCount + 1);
