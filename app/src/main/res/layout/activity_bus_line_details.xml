@@ -55,6 +55,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
+                android:padding="4dp"
                 android:background="@drawable/led_dot_matrix_dark_red_bg">
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -129,7 +130,7 @@
                     android:id="@+id/next_station_info"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:padding="2dp"
+                    android:padding="4dp"
                     app:hsGravity="center"
                     app:hsTextColor="#FF0000"
                     app:hsTextGap="90dp"
@@ -155,7 +156,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:orientation="vertical"
-                        android:padding="2dp"
+                        android:padding="4dp"
                         android:background="@drawable/led_dot_matrix_dark_red_bg">
                         <LinearLayout
                             android:layout_width="wrap_content"
@@ -220,7 +221,6 @@
                                     android:paddingStart="5dp"
                                     android:paddingEnd="5dp"
                                     android:text="-- / --"
-                                    android:textAlignment="center"
                                     android:textColor="#555555"
                                     android:textSize="17sp" />
                             </LinearLayout>
@@ -243,7 +243,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:padding="2dp"
+                android:padding="4dp"
                 android:background="@drawable/led_dot_matrix_dark_red_bg">
                 <LinearLayout
                     android:id="@+id/schedule_info"

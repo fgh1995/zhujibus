@@ -40,6 +40,11 @@ public class BusLineView extends View {
     private ValueAnimator blinkAnimator;
     private float touchDownX;
     private float touchDownY;
+    private boolean isGpsMode = false;
+    private int gpsPositionIndex = -1;
+    private boolean isGpsArriving = false;
+    private int gpsLeavingStationIndex = -1;
+    private Bitmap busRedIconBitmap;
 
     public interface OnStationClickListener {
         void onStationClick(BusApiClient.BusLineStation station, int position);
@@ -95,6 +100,7 @@ public class BusLineView extends View {
         plateTextPaint.setTextAlign(Paint.Align.CENTER);
 
         busIconBitmap = BitmapFactory.decodeResource(getResources(), R.drawable.bus_icon);
+        busRedIconBitmap = BitmapFactory.decodeResource(getResources(), R.drawable.bus_red_icon);
 
         startArrowAnimation();
         startBlinkAnimation();
@@ -158,7 +164,7 @@ public class BusLineView extends View {
         cachedUserSelectedPosition = -1;
     }
 
-    private void resetAllStations() {
+    public void resetAllStations() {
         if (stations == null) {
             return;
         }
@@ -166,6 +172,40 @@ public class BusLineView extends View {
             station.status = BusApiClient.BusLineStation.StationStatus.NORMAL;
             station.plateNumber = null;
         }
+    }
+
+    public void setGpsMode(boolean isGpsMode) {
+        this.isGpsMode = isGpsMode;
+        if (isGpsMode) {
+            resetAllStations();
+            clearBusPositionCache();
+            selectedPosition = -1;
+        } else {
+            gpsPositionIndex = -1;
+            isGpsArriving = false;
+            gpsLeavingStationIndex = -1;
+        }
+        invalidate();
+    }
+
+    public void updateGpsPosition(int position, boolean isArriving) {
+        if (this.gpsPositionIndex != position || this.isGpsArriving != isArriving) {
+            this.gpsPositionIndex = position;
+            this.isGpsArriving = isArriving;
+            if (!isArriving) {
+                this.gpsLeavingStationIndex = position;
+            } else {
+                this.gpsLeavingStationIndex = -1;
+            }
+            invalidate();
+        }
+    }
+
+    public void clearGpsPosition() {
+        this.gpsPositionIndex = -1;
+        this.isGpsArriving = false;
+        this.gpsLeavingStationIndex = -1;
+        invalidate();
     }
 
     public void setSelectedPosition(int position) {
@@ -191,20 +231,23 @@ public class BusLineView extends View {
                 touchDownX = event.getX();
                 touchDownY = event.getY();
                 return true;
-                
+
             case MotionEvent.ACTION_UP:
+                if (isGpsMode) {
+                    return true;
+                }
                 float x = event.getX();
                 float y = event.getY();
-                
+
                 float moveDistance = (float) Math.sqrt(
                     Math.pow(x - touchDownX, 2) + Math.pow(y - touchDownY, 2)
                 );
-                
+
                 if (moveDistance < 10f) {
                     if (stations != null) {
                         for (int i = 0; i < stations.size(); i++) {
                             float stationY = startY + i * stationSpacing;
-                            
+
                             if (y >= stationY - stationSpacing / 2 && y <= stationY + stationSpacing / 2) {
                                 if (listener != null) {
                                     listener.onStationClick(stations.get(i), i);
@@ -333,7 +376,8 @@ public class BusLineView extends View {
         float leftPadding = 20f;
         float busAreaWidth = calculateBusAreaWidth();
         float spacing = 70f;
-        centerX = leftPadding + busAreaWidth + spacing;
+        float gpsExtraSpacing = isGpsMode ? 40f : 0f;
+        centerX = leftPadding + busAreaWidth + spacing + gpsExtraSpacing;
 
         for (int i = 0; i < stations.size(); i++) {
             BusApiClient.BusLineStation station = stations.get(i);
@@ -365,62 +409,92 @@ public class BusLineView extends View {
 
     private void drawStation(Canvas canvas, float x, float y, BusApiClient.BusLineStation station, int index) {
         float radius = 32f;
-        
-        BusPositionInfo busInfo = findBusPosition(selectedPosition);
+
+        BusPositionInfo busInfo = null;
+        int busPositionForAnimation = -1;
+
+        if (isGpsMode && gpsPositionIndex >= 0) {
+            busPositionForAnimation = gpsPositionIndex;
+        } else {
+            busInfo = findBusPosition(selectedPosition);
+            if (busInfo != null && busInfo.isBeforeUserSelected) {
+                busPositionForAnimation = busInfo.position;
+            }
+        }
+
         boolean shouldDim = false;
         boolean isNextStation = false;
         boolean shouldLightUpGreen = false;
-        
-        if (busInfo != null && busInfo.isBeforeUserSelected) {
-            if (busInfo.status == BusApiClient.BusLineStation.StationStatus.NEXT_STATION) {
-                shouldDim = (index <= busInfo.position);
-                if (index == busInfo.position + 1) {
+
+        if (busPositionForAnimation >= 0) {
+            BusApiClient.BusLineStation.StationStatus busStatus;
+            if (isGpsMode) {
+                busStatus = isGpsArriving ? BusApiClient.BusLineStation.StationStatus.CURRENT : BusApiClient.BusLineStation.StationStatus.NEXT_STATION;
+            } else {
+                busStatus = busInfo.status;
+            }
+
+            if (busStatus == BusApiClient.BusLineStation.StationStatus.NEXT_STATION) {
+                shouldDim = (index <= busPositionForAnimation);
+                if (index == busPositionForAnimation + 1) {
                     isNextStation = true;
                 }
-                
-                if (index >= busInfo.position) {
-                    int totalSegments = stations.size() - busInfo.position;
+
+                if (index >= busPositionForAnimation) {
+                    int totalSegments = stations.size() - busPositionForAnimation;
                     int totalLights = totalSegments * 4;
                     float totalProgress = animationProgress * (totalLights - 1);
                     int activeStep = (int) totalProgress;
-                    
-                    int stationLightIndex = (index - busInfo.position) * 4 - 1;
+
+                    int stationLightIndex = (index - busPositionForAnimation) * 4 - 1;
                     if (stationLightIndex >= activeStep - 3 && stationLightIndex <= activeStep && stationLightIndex >= 0) {
                         shouldLightUpGreen = true;
                     }
                 }
-            } else if (busInfo.status == BusApiClient.BusLineStation.StationStatus.CURRENT) {
-                shouldDim = (index < busInfo.position);
-                
-                if (index >= busInfo.position) {
-                    int totalSegments = stations.size() - busInfo.position;
+            } else if (busStatus == BusApiClient.BusLineStation.StationStatus.CURRENT) {
+                shouldDim = (index < busPositionForAnimation);
+
+                if (index >= busPositionForAnimation) {
+                    int totalSegments = stations.size() - busPositionForAnimation;
                     int totalLights = totalSegments * 4;
                     float totalProgress = animationProgress * (totalLights - 1);
                     int activeStep = (int) totalProgress;
-                    
-                    int stationLightIndex = (index - busInfo.position) * 4 - 1;
+
+                    int stationLightIndex = (index - busPositionForAnimation) * 4 - 1;
                     if (stationLightIndex >= activeStep - 3 && stationLightIndex <= activeStep && stationLightIndex >= 0) {
                         shouldLightUpGreen = true;
                     }
                 }
             } else {
-                shouldDim = (index < busInfo.position);
+                shouldDim = (index < busPositionForAnimation);
             }
         }
         
         Paint circlePaintToUse;
         Paint textPaintToUse;
         Paint namePaintToUse;
-        
-        if (index == selectedPosition) {
+
+        boolean shouldHighlightRed = false;
+        if (isGpsMode && isGpsArriving && gpsPositionIndex >= 0 && index == gpsPositionIndex) {
+            shouldHighlightRed = true;
+        }
+
+        if (shouldHighlightRed) {
+            shouldDim = false;
+        }
+
+        if (index == selectedPosition && !isGpsMode) {
+            circlePaintToUse = selectedCirclePaint;
+            textPaintToUse = textPaint;
+        } else if (shouldHighlightRed) {
             circlePaintToUse = selectedCirclePaint;
             textPaintToUse = textPaint;
         } else {
             circlePaintToUse = circlePaint;
             textPaintToUse = textPaint;
         }
-        
-        if (shouldDim) {
+
+        if (shouldDim && !shouldHighlightRed) {
             circlePaintToUse = new Paint(circlePaintToUse);
             circlePaintToUse.setColor(0xFF333333);
             circlePaintToUse.setStyle(Paint.Style.STROKE);
@@ -429,25 +503,25 @@ public class BusLineView extends View {
             textPaintToUse.setColor(0xFF666666);
             textPaintToUse.setAlpha(150);
         }
-        
-        if (isNextStation) {
+
+        if (isNextStation && !shouldHighlightRed) {
             circlePaintToUse = new Paint(circlePaintToUse);
             int yellowColor = 0xFFFFD700;
             int alpha = blinkProgress < 0.5f ? 255 : 0;
             circlePaintToUse.setColor(yellowColor);
             circlePaintToUse.setAlpha(alpha);
             circlePaintToUse.setStyle(Paint.Style.FILL);
-            
+
             textPaintToUse = new Paint(textPaintToUse);
             textPaintToUse.setColor(0xFF000000);
             textPaintToUse.setAlpha(alpha);
         }
-        
-        if (shouldLightUpGreen) {
+
+        if (shouldLightUpGreen && !shouldHighlightRed) {
             circlePaintToUse = new Paint(circlePaintToUse);
             circlePaintToUse.setColor(0xFF00FF00);
             circlePaintToUse.setStyle(Paint.Style.FILL);
-            
+
             textPaintToUse = new Paint(textPaintToUse);
             textPaintToUse.setColor(0xFF000000);
         }
@@ -460,28 +534,48 @@ public class BusLineView extends View {
         namePaintToUse = new Paint(textPaint);
         namePaintToUse.setTextAlign(Paint.Align.LEFT);
         namePaintToUse.setTextSize(52f);
-        
-        if (index == selectedPosition) {
+
+        if (index == selectedPosition && !isGpsMode) {
+            namePaintToUse.setColor(0xFFFF0000);
+        } else if (shouldHighlightRed) {
             namePaintToUse.setColor(0xFFFF0000);
         } else {
             namePaintToUse.setColor(0xFF333333);
         }
-        
-        if (shouldDim) {
+
+        if (shouldDim && !shouldHighlightRed) {
             namePaintToUse.setAlpha(100);
         }
-        
+
         canvas.drawText(station.stationName, nameX, nameY, namePaintToUse);
     }
 
     private void drawBusIcon(Canvas canvas, float x, float y, BusApiClient.BusLineStation station) {
-        if (station.status == null) {
+        if (station.status == null && !isGpsMode) {
             return;
         }
-        
+
         float iconSize = 96f;
         float iconX;
         float iconY;
+
+        int stationIndex = stations.indexOf(station);
+
+        boolean isGpsLeavingStation = !isGpsArriving && isGpsMode && gpsLeavingStationIndex >= 0 && stationIndex == gpsLeavingStationIndex;
+
+        if (isGpsLeavingStation) {
+            iconY = y + stationSpacing / 2 - iconSize / 2;
+            drawGpsBus(canvas, x, iconY, iconSize, true);
+            return;
+        }
+
+        boolean isGpsArrivingStation = isGpsArriving && isGpsMode && gpsPositionIndex >= 0 && stationIndex == gpsPositionIndex;
+
+        if (isGpsArrivingStation) {
+            iconY = y - iconSize / 2;
+            drawGpsBus(canvas, x, iconY, iconSize, true);
+            return;
+        }
 
         switch (station.status) {
             case CURRENT:
@@ -506,6 +600,17 @@ public class BusLineView extends View {
                 }
                 drawBus(canvas, iconX, iconY, iconSize);
                 break;
+        }
+    }
+
+    private void drawGpsBus(Canvas canvas, float x, float y, float size, boolean showLocationTag) {
+        float textWidth = plateTextPaint.measureText("当前位置") + 16f;
+        float busIconX = x + textWidth - size;
+        if (busRedIconBitmap != null) {
+            canvas.drawBitmap(busRedIconBitmap, null, new android.graphics.RectF(busIconX, y, busIconX + size, y + size), null);
+        }
+        if (showLocationTag) {
+            drawPlateNumber(canvas, x, y + size + 15f, "当前位置");
         }
     }
 
@@ -576,23 +681,37 @@ public class BusLineView extends View {
         float lineStart = y + radius;
         float lineEnd = y + stationSpacing - radius;
 
-        BusPositionInfo busInfo = findBusPosition(selectedPosition);
+        BusPositionInfo busInfo = null;
+        int busPositionForAnimation = -1;
+        BusApiClient.BusLineStation.StationStatus busStatusForAnimation = null;
+
+        if (isGpsMode && gpsPositionIndex >= 0) {
+            busPositionForAnimation = gpsPositionIndex;
+            busStatusForAnimation = isGpsArriving ? BusApiClient.BusLineStation.StationStatus.CURRENT : BusApiClient.BusLineStation.StationStatus.NEXT_STATION;
+        } else {
+            busInfo = findBusPosition(selectedPosition);
+            if (busInfo != null && busInfo.isBeforeUserSelected) {
+                busPositionForAnimation = busInfo.position;
+                busStatusForAnimation = busInfo.status;
+            }
+        }
+
         boolean shouldDim = false;
         boolean shouldDrawLED = false;
-        
-        if (busInfo != null && busInfo.isBeforeUserSelected) {
-            if (busInfo.status == BusApiClient.BusLineStation.StationStatus.NEXT_STATION) {
-                shouldDim = (index < busInfo.position);
-                if (index >= busInfo.position) {
+
+        if (busPositionForAnimation >= 0) {
+            if (busStatusForAnimation == BusApiClient.BusLineStation.StationStatus.NEXT_STATION) {
+                shouldDim = (index < busPositionForAnimation);
+                if (index >= busPositionForAnimation) {
                     shouldDrawLED = true;
                 }
-            } else if (busInfo.status == BusApiClient.BusLineStation.StationStatus.CURRENT) {
-                shouldDim = (index < busInfo.position);
-                if (index >= busInfo.position) {
+            } else if (busStatusForAnimation == BusApiClient.BusLineStation.StationStatus.CURRENT) {
+                shouldDim = (index < busPositionForAnimation);
+                if (index >= busPositionForAnimation) {
                     shouldDrawLED = true;
                 }
             } else {
-                shouldDim = (index < busInfo.position);
+                shouldDim = (index < busPositionForAnimation);
             }
         }
         
@@ -605,8 +724,8 @@ public class BusLineView extends View {
         ledPaint.setStyle(Paint.Style.FILL);
         
         if (shouldDrawLED) {
-            int totalSegments = stations.size() - busInfo.position;
-            int currentSegmentIndex = index - busInfo.position;
+            int totalSegments = stations.size() - busPositionForAnimation;
+            int currentSegmentIndex = index - busPositionForAnimation;
             
             if (currentSegmentIndex < 0 || currentSegmentIndex >= totalSegments) {
                 ledPaint.setColor(shouldDim ? 0xFF999999 : 0xFF0070FD);

@@ -156,6 +156,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private int lastAnnouncedStationIndex = -1;
     private boolean isInsideStationRadius = false;
     private int lastInsideStationIndex = -1;
+    private boolean hasLeftTerminalStation = false;
 
     private double currentGpsLat = 0;
     private double currentGpsLon = 0;
@@ -170,6 +171,13 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private Slider radiusSlider;
     private List<io.sgr.geometry.Coordinate> routePoints;
 
+    private double lastLocationLat = 0;
+    private double lastLocationLon = 0;
+    private long lastLocationTimeForSpeed = 0;
+    private int stationaryConsecutiveCount = 0;
+    private static final double STATIONARY_DISTANCE_THRESHOLD_M = 1.0;
+    private static final int STATIONARY_CONSECUTIVE_UPDATES = 3;
+
     public enum DistanceMode {
         ALONG_ROUTE("沿线距离"),
         STRAIGHT_LINE("直线距离");
@@ -183,6 +191,21 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         }
     }
     private DistanceMode currentDistanceMode = DistanceMode.STRAIGHT_LINE;
+
+    public enum CoordConvertMode {
+        WGS_TO_GCJ("WGS→GCJ-02"),
+        GCJ_TO_WGS("GCJ-02→WGS"),
+        NO_CONVERT("不转换");
+
+        private final String displayName;
+        CoordConvertMode(String displayName) {
+            this.displayName = displayName;
+        }
+        public String getDisplayName() {
+            return displayName;
+        }
+    }
+    private CoordConvertMode currentCoordConvertMode = CoordConvertMode.WGS_TO_GCJ;
 
     private static final int TIPS_INTERVAL = 3000;
     private static final String[] TIPS_TEXT_BASE = {"文明排队   上下有序", "严禁携带危险物品上车"};
@@ -253,6 +276,56 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 .show();
     }
 
+    private void showCoordConvertModeDialog() {
+        String[] modes = {
+                CoordConvertMode.WGS_TO_GCJ.getDisplayName(),
+                CoordConvertMode.GCJ_TO_WGS.getDisplayName(),
+                CoordConvertMode.NO_CONVERT.getDisplayName()
+        };
+        int selectedIndex;
+        switch (currentCoordConvertMode) {
+            case GCJ_TO_WGS:
+                selectedIndex = 1;
+                break;
+            case NO_CONVERT:
+                selectedIndex = 2;
+                break;
+            default:
+                selectedIndex = 0;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("选择坐标转换模式")
+                .setSingleChoiceItems(modes, selectedIndex, (dialog, which) -> {
+                    CoordConvertMode newMode;
+                    switch (which) {
+                        case 1:
+                            newMode = CoordConvertMode.GCJ_TO_WGS;
+                            break;
+                        case 2:
+                            newMode = CoordConvertMode.NO_CONVERT;
+                            break;
+                        default:
+                            newMode = CoordConvertMode.WGS_TO_GCJ;
+                    }
+                    if (newMode != currentCoordConvertMode) {
+                        currentCoordConvertMode = newMode;
+                        updateCoordConvertModeState();
+                    }
+                    dialog.dismiss();
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void updateCoordConvertModeState() {
+        Log.d(TAG, "坐标转换模式已切换为: " + currentCoordConvertMode.getDisplayName());
+        updateCoordConvertModeDisplay();
+    }
+
+    private void updateCoordConvertModeDisplay() {
+        Log.d(TAG, "坐标转换模式显示: " + currentCoordConvertMode.getDisplayName());
+    }
+
     private void updateDistanceModeState() {
         String modeText = currentDistanceMode == DistanceMode.STRAIGHT_LINE ? "直线" : "沿线";
         Log.d(TAG, "距离模式已切换为: " + modeText);
@@ -289,6 +362,15 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             lastAnnouncedStationIndex = -1;
             isInsideStationRadius = false;
             lastInsideStationIndex = -1;
+            hasLeftTerminalStation = false;
+            if (realTimeManager != null) {
+                realTimeManager.stopTracking();
+            }
+            clearEtaItems();
+            if (busLineView != null) {
+                busLineView.resetAllStations();
+                busLineView.setGpsMode(true);
+            }
             GpsWarmingUp.startWarmingUp(this);
             GpsWarmingUp.addListener(gpsActivityListener);
             GpsWarmingUp.addSatelliteListener(satelliteCountListener);
@@ -305,8 +387,12 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             lastAnnouncedStationIndex = -1;
             isInsideStationRadius = false;
             lastInsideStationIndex = -1;
+            hasLeftTerminalStation = false;
             if (realTimeManager != null) {
                 realTimeManager.startTracking(getCurrentDirectionId(), this);
+            }
+            if (busLineView != null) {
+                busLineView.setGpsMode(false);
             }
             stopGpsTimeUpdate();
         }
@@ -420,15 +506,69 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         currentGpsLat = location.getLatitude();
         currentGpsLon = location.getLongitude();
 
-        io.sgr.geometry.Coordinate wgsCoord = new io.sgr.geometry.Coordinate(currentGpsLat, currentGpsLon);
-        io.sgr.geometry.Coordinate gcjCoord = GeometryUtils.wgs2gcj(wgsCoord);
-        double gcjLat = gcjCoord.getLat();
-        double gcjLon = gcjCoord.getLng();
+        double gcjLat = currentGpsLat;
+        double gcjLon = currentGpsLon;
 
-        gpsLocationInfo.setText(String.format(Locale.CHINA, "坐标：%.6f, %.6f (GCJ-02)", gcjLat, gcjLon));
+        switch (currentCoordConvertMode) {
+            case WGS_TO_GCJ:
+                io.sgr.geometry.Coordinate wgsCoord = new io.sgr.geometry.Coordinate(currentGpsLat, currentGpsLon);
+                io.sgr.geometry.Coordinate gcjCoordFromWgs = GeometryUtils.wgs2gcj(wgsCoord);
+                gcjLat = gcjCoordFromWgs.getLat();
+                gcjLon = gcjCoordFromWgs.getLng();
+                Log.d(TAG, String.format(Locale.CHINA, "WGS→GCJ转换后: lat=%.6f, lon=%.6f", gcjLat, gcjLon));
+                break;
+            case GCJ_TO_WGS:
+                io.sgr.geometry.Coordinate gcjCoordForWgs = new io.sgr.geometry.Coordinate(currentGpsLat, currentGpsLon);
+                io.sgr.geometry.Coordinate wgsCoordFromGcj = GeometryUtils.gcj2wgs(gcjCoordForWgs);
+                gcjLat = wgsCoordFromGcj.getLat();
+                gcjLon = wgsCoordFromGcj.getLng();
+                Log.d(TAG, String.format(Locale.CHINA, "GCJ→WGS转换后: lat=%.6f, lon=%.6f", gcjLat, gcjLon));
+                break;
+            case NO_CONVERT:
+                Log.d(TAG, String.format(Locale.CHINA, "不转换，直接使用原始坐标"));
+                break;
+        }
+        Log.d(TAG, String.format(Locale.CHINA, "最终使用: lat=%.6f, lon=%.6f", gcjLat, gcjLon));
+        Log.d(TAG, String.format(Locale.CHINA, "============================"));
+
+        String coordSystemLabel;
+        switch (currentCoordConvertMode) {
+            case NO_CONVERT:
+                coordSystemLabel = "原始";
+                break;
+            case GCJ_TO_WGS:
+                coordSystemLabel = "WGS";
+                break;
+            default:
+                coordSystemLabel = "GCJ-02";
+        }
+        gpsLocationInfo.setText(String.format(Locale.CHINA, "坐标：%.6f, %.6f (%s)", gcjLat, gcjLon, coordSystemLabel));
 
         float speedMps = location.hasSpeed() ? location.getSpeed() : 0;
         float speedKmh = speedMps * 3.6f;
+
+        long currentTime = System.currentTimeMillis();
+        if (lastLocationTimeForSpeed > 0) {
+            float[] results = new float[1];
+            android.location.Location.distanceBetween(lastLocationLat, lastLocationLon, gcjLat, gcjLon, results);
+            double distanceMoved = results[0];
+
+            if (distanceMoved < STATIONARY_DISTANCE_THRESHOLD_M) {
+                stationaryConsecutiveCount++;
+            } else {
+                stationaryConsecutiveCount = 0;
+            }
+
+            if (stationaryConsecutiveCount >= STATIONARY_CONSECUTIVE_UPDATES) {
+                speedMps = 0;
+                speedKmh = 0;
+                Log.d(TAG, String.format(Locale.CHINA, "检测到车辆静止，速度归零"));
+            }
+        }
+        lastLocationLat = gcjLat;
+        lastLocationLon = gcjLon;
+        lastLocationTimeForSpeed = currentTime;
+
         if (gpsSpeedText != null) {
             gpsSpeedText.setText(String.format(Locale.CHINA, "实速：%.0fkm/h", speedKmh));
         }
@@ -483,10 +623,6 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             } else {
                 distanceForCompare = directDistance;
             }
-
-            Log.d(TAG, String.format(Locale.CHINA, "站点[%d] %s: 直线=%.1fm, 沿线=%.1fm, GPS到路线=%.1fm, 站点到路线=%.1fm, 半径=%.0fm",
-                    i, station.stationName, directDistance, alongRouteDist, gpsToRouteDist, stationToRouteDist, stationRadius));
-
             if (nearestStationDistance < 0 || distanceForCompare < nearestStationDistance) {
                 nearestStationDistance = distanceForCompare;
                 nearestStationName = station.stationName;
@@ -498,6 +634,14 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             if (distanceForCompare <= stationRadius) {
                 isInsideRadius = true;
                 currentInsideStationIndex = i;
+                int totalStations = stations.size();
+                boolean isTerminalStation = i >= totalStations - 1;
+
+                if (isTerminalStation && hasLeftTerminalStation) {
+                    Log.d(TAG, "已离开过终点站，忽略此次进入终点站");
+                    break;
+                }
+
                 Log.d(TAG, String.format(Locale.CHINA, "触发报站检查: isInsideStationRadius=%b, lastAnnouncedStationIndex=%d, i=%d", isInsideStationRadius, lastAnnouncedStationIndex, i));
                 if (!isInsideStationRadius || lastAnnouncedStationIndex != i) {
                     isInsideStationRadius = true;
@@ -509,22 +653,67 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             }
         }
 
+        int leavingStationFinal = -1;
+        boolean isLeavingTerminal = false;
         if (!isInsideRadius && lastInsideStationIndex != -1) {
             int leavingIndex = lastInsideStationIndex;
+            int totalStations = stations.size();
+            boolean isTerminalStation = leavingIndex >= totalStations - 1;
+
+            if (isTerminalStation) {
+                isLeavingTerminal = true;
+                hasLeftTerminalStation = true;
+            }
+
             isInsideStationRadius = false;
             lastInsideStationIndex = -1;
-            announceLeavingStation(stations.get(leavingIndex).stationName, leavingIndex, stations.size());
-            Log.d(TAG, "已触发离站报站: " + stations.get(leavingIndex).stationName);
+            leavingStationFinal = leavingIndex;
+
+            if (!isTerminalStation) {
+                announceLeavingStation(stations.get(leavingIndex).stationName, leavingIndex, stations.size());
+                Log.d(TAG, "已触发离站报站: " + stations.get(leavingIndex).stationName);
+            } else {
+                Log.d(TAG, "已离开终点站，不报站: " + stations.get(leavingIndex).stationName);
+            }
         } else if (isInsideRadius) {
-            lastInsideStationIndex = currentInsideStationIndex;
+            int totalStations = stations.size();
+            boolean isTerminalStation = currentInsideStationIndex >= totalStations - 1;
+
+            if (currentInsideStationIndex >= 0 && !isTerminalStation) {
+                hasLeftTerminalStation = false;
+            }
+
+            if (isTerminalStation && hasLeftTerminalStation) {
+                currentInsideStationIndex = -1;
+                isInsideRadius = false;
+            } else {
+                lastInsideStationIndex = currentInsideStationIndex;
+            }
         }
+
+        final boolean isInsideRadiusFinal = isInsideRadius;
+        final int currentInsideStationIndexFinal = currentInsideStationIndex;
+        final int leavingStationIndexFinal = leavingStationFinal;
+        final boolean isLeavingTerminalFinal = isLeavingTerminal;
 
         runOnUiThread(() -> {
             if (nearestStationDistance >= 0) {
                 gpsNearestStationInfo.setText(String.format(Locale.CHINA, "站点: %s (沿线%s/直线%s)",
                         nearestStationName, formatDistance(nearestStationDistance), formatDistance(nearestStationDirectDistance)));
             }
-            if (isInsideRadius) {
+            if (busLineView != null) {
+                if (isLeavingTerminalFinal) {
+                    busLineView.updateGpsPosition(-1, false);
+                } else if (isInsideRadiusFinal && currentInsideStationIndexFinal >= 0) {
+                    busLineView.updateGpsPosition(currentInsideStationIndexFinal, true);
+                } else if (!isInsideRadiusFinal && leavingStationIndexFinal >= 0) {
+                    busLineView.updateGpsPosition(leavingStationIndexFinal, false);
+                }
+            }
+            if (isLeavingTerminalFinal) {
+                gpsStatusInfo.setLit(false);
+                gpsStatusInfo.setText("已离终点站");
+            } else if (isInsideRadiusFinal) {
                 if (!wasInsideStation) {
                     isInsideStationRadius = true;
                     gpsStatusInfo.setLit(true);
@@ -780,6 +969,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         updateAnnounceModeDisplay();
         gpsLocationInfo = findViewById(R.id.gps_location_info);
         gpsLocationInfo.setTypeface(dottedSongti);
+        gpsLocationInfo.setOnClickListener(v -> showCoordConvertModeDialog());
         gpsNearestStationInfo = findViewById(R.id.gps_nearest_station_info);
         gpsNearestStationInfo.setTypeface(dottedSongti);
         gpsStatusInfo = findViewById(R.id.gps_status_info);
@@ -1403,6 +1593,14 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private void updateRefreshTimeDisplay() {
         SimpleDateFormat formatter = new SimpleDateFormat("HH:mm:ss", Locale.getDefault());
         refreshTime.setText(formatter.format(new Date()));
+    }
+
+    private void clearEtaItems() {
+        if (busEtaAdapter == null) {
+            return;
+        }
+        etaItems.clear();
+        busEtaAdapter.notifyDataSetChanged();
     }
 
     private void updateEtaItems(List<BusApiClient.BusPosition> positions, int selectedStationIndex) {

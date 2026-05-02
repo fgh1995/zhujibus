@@ -84,7 +84,7 @@ public class GpsWarmingUp {
             locationManager.registerGnssStatusCallback((android.location.GnssStatus.Callback) gnssCallback, mainHandler);
         }
 
-        locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 3000, 10, locationListener, Looper.getMainLooper());
+        locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000, 0, locationListener, Looper.getMainLooper());
         isWarmingUp = true;
     }
 
