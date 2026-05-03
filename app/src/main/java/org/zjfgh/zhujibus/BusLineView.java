@@ -50,6 +50,12 @@ public class BusLineView extends View {
         void onStationClick(BusApiClient.BusLineStation station, int position);
     }
 
+    public interface OnGpsArrivalListener {
+        void onGpsArrival(int stationIndex);
+    }
+
+    private OnGpsArrivalListener gpsArrivalListener;
+
     public BusLineView(Context context) {
         super(context);
         init();
@@ -190,12 +196,16 @@ public class BusLineView extends View {
 
     public void updateGpsPosition(int position, boolean isArriving) {
         if (this.gpsPositionIndex != position || this.isGpsArriving != isArriving) {
+            boolean wasArriving = this.isGpsArriving;
             this.gpsPositionIndex = position;
             this.isGpsArriving = isArriving;
             if (!isArriving) {
                 this.gpsLeavingStationIndex = position;
             } else {
                 this.gpsLeavingStationIndex = -1;
+            }
+            if (isArriving && !wasArriving && gpsArrivalListener != null && position >= 0) {
+                gpsArrivalListener.onGpsArrival(position);
             }
             invalidate();
         }
@@ -222,6 +232,10 @@ public class BusLineView extends View {
 
     public void setOnStationClickListener(OnStationClickListener listener) {
         this.listener = listener;
+    }
+
+    public void setOnGpsArrivalListener(OnGpsArrivalListener listener) {
+        this.gpsArrivalListener = listener;
     }
 
     @Override
@@ -376,8 +390,7 @@ public class BusLineView extends View {
         float leftPadding = 20f;
         float busAreaWidth = calculateBusAreaWidth();
         float spacing = 70f;
-        float gpsExtraSpacing = isGpsMode ? 40f : 0f;
-        centerX = leftPadding + busAreaWidth + spacing + gpsExtraSpacing;
+        centerX = leftPadding + busAreaWidth + spacing;
 
         for (int i = 0; i < stations.size(); i++) {
             BusApiClient.BusLineStation station = stations.get(i);
@@ -395,15 +408,20 @@ public class BusLineView extends View {
     private float calculateBusAreaWidth() {
         float maxWidth = 0f;
         float iconSize = 96f;
-        
-        for (BusApiClient.BusLineStation station : stations) {
-            if (station.status != null && station.plateNumber != null && !station.plateNumber.isEmpty()) {
-                float plateWidth = plateTextPaint.measureText(station.plateNumber) + 16f;
-                float busWidth = iconSize;
-                maxWidth = Math.max(maxWidth, Math.max(busWidth, plateWidth));
+
+        if (isGpsMode) {
+            float gpsTextWidth = plateTextPaint.measureText("当前位置") + 16f;
+            maxWidth = Math.max(iconSize, gpsTextWidth);
+        } else {
+            for (BusApiClient.BusLineStation station : stations) {
+                if (station.status != null && station.plateNumber != null && !station.plateNumber.isEmpty()) {
+                    float plateWidth = plateTextPaint.measureText(station.plateNumber) + 16f;
+                    float busWidth = iconSize;
+                    maxWidth = Math.max(maxWidth, Math.max(busWidth, plateWidth));
+                }
             }
         }
-        
+
         return maxWidth > 0 ? maxWidth : iconSize;
     }
 
@@ -577,6 +595,8 @@ public class BusLineView extends View {
             return;
         }
 
+        float busAreaWidth = calculateBusAreaWidth();
+
         switch (station.status) {
             case CURRENT:
                 iconY = y - iconSize / 2;
@@ -585,7 +605,7 @@ public class BusLineView extends View {
                     drawPlateNumber(canvas, x, iconY + iconSize + 15f, station.plateNumber);
                     iconX = x + plateWidth - iconSize;
                 } else {
-                    iconX = x - iconSize;
+                    iconX = x + busAreaWidth - iconSize;
                 }
                 drawBus(canvas, iconX, iconY, iconSize);
                 break;
@@ -596,7 +616,7 @@ public class BusLineView extends View {
                     drawPlateNumber(canvas, x, iconY + iconSize + 15f, station.plateNumber);
                     iconX = x + plateWidth - iconSize;
                 } else {
-                    iconX = x - iconSize;
+                    iconX = x + busAreaWidth - iconSize;
                 }
                 drawBus(canvas, iconX, iconY, iconSize);
                 break;
@@ -604,13 +624,15 @@ public class BusLineView extends View {
     }
 
     private void drawGpsBus(Canvas canvas, float x, float y, float size, boolean showLocationTag) {
-        float textWidth = plateTextPaint.measureText("当前位置") + 16f;
-        float busIconX = x + textWidth - size;
+        float busAreaWidth = calculateBusAreaWidth();
+        float busIconX = x + busAreaWidth - size;
         if (busRedIconBitmap != null) {
             canvas.drawBitmap(busRedIconBitmap, null, new android.graphics.RectF(busIconX, y, busIconX + size, y + size), null);
         }
         if (showLocationTag) {
-            drawPlateNumber(canvas, x, y + size + 15f, "当前位置");
+            float textWidth = plateTextPaint.measureText("当前位置") + 16f;
+            float plateX = x + busAreaWidth - textWidth;
+            drawPlateNumber(canvas, plateX, y + size + 15f, "当前位置");
         }
     }
 

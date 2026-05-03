@@ -177,6 +177,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private int stationaryConsecutiveCount = 0;
     private static final double STATIONARY_DISTANCE_THRESHOLD_M = 1.0;
     private static final int STATIONARY_CONSECUTIVE_UPDATES = 3;
+    private int locationUpdateCount = 0;
 
     public enum DistanceMode {
         ALONG_ROUTE("沿线距离"),
@@ -363,6 +364,11 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             isInsideStationRadius = false;
             lastInsideStationIndex = -1;
             hasLeftTerminalStation = false;
+            lastLocationTimeForSpeed = 0;
+            lastLocationLat = 0;
+            lastLocationLon = 0;
+            stationaryConsecutiveCount = 0;
+            locationUpdateCount = 0;
             if (realTimeManager != null) {
                 realTimeManager.stopTracking();
             }
@@ -486,7 +492,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private final GpsWarmingUp.SatelliteCountListener satelliteCountListener = (usedCount, totalCount) -> {
         runOnUiThread(() -> {
             if (gpsCount != null) {
-                gpsCount.setText(usedCount + " / " + totalCount);
+                gpsCount.setText(usedCount + "/" + totalCount);
             }
         });
     };
@@ -544,11 +550,11 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         }
         gpsLocationInfo.setText(String.format(Locale.CHINA, "坐标：%.6f, %.6f (%s)", gcjLat, gcjLon, coordSystemLabel));
 
-        float speedMps = location.hasSpeed() ? location.getSpeed() : 0;
-        float speedKmh = speedMps * 3.6f;
+        float speedMps = 0;
+        float speedKmh = 0;
 
         long currentTime = System.currentTimeMillis();
-        if (lastLocationTimeForSpeed > 0) {
+        if (locationUpdateCount >= 2 && lastLocationTimeForSpeed > 0) {
             float[] results = new float[1];
             android.location.Location.distanceBetween(lastLocationLat, lastLocationLon, gcjLat, gcjLon, results);
             double distanceMoved = results[0];
@@ -563,8 +569,15 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 speedMps = 0;
                 speedKmh = 0;
                 Log.d(TAG, String.format(Locale.CHINA, "检测到车辆静止，速度归零"));
+            } else {
+                long timeDiff = currentTime - lastLocationTimeForSpeed;
+                if (timeDiff > 0) {
+                    speedMps = (float) (distanceMoved / (timeDiff / 1000.0));
+                    speedKmh = speedMps * 3.6f;
+                }
             }
         }
+        locationUpdateCount++;
         lastLocationLat = gcjLat;
         lastLocationLon = gcjLon;
         lastLocationTimeForSpeed = currentTime;
@@ -1032,6 +1045,26 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 busCardReaderView.setVisibility(View.VISIBLE);
             }
         });
+
+        View paymentSuccessfulView = findViewById(R.id.payment_successful);
+        if (paymentSuccessfulView != null) {
+            paymentSuccessfulView.setOnClickListener(v -> {
+                TTSUtils ttsUtils = TTSUtils.getInstance(this);
+                if (ttsUtils != null) {
+                    ttsUtils.playScanCodeSuccessSound();
+                }
+            });
+        }
+
+        View cardAcceptedView = findViewById(R.id.card_accepted);
+        if (cardAcceptedView != null) {
+            cardAcceptedView.setOnClickListener(v -> {
+                TTSUtils ttsUtils = TTSUtils.getInstance(this);
+                if (ttsUtils != null) {
+                    ttsUtils.playCardSwipeSuccessSound();
+                }
+            });
+        }
     }
 
     private void initData() {
@@ -1357,9 +1390,10 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             try {
                 busLineView = findViewById(R.id.bus_line_view);
                 stationScrollView = findViewById(R.id.station_scroll_view);
-                
+
                 busLineView.setStations(lineDirection.stationList);
                 busLineView.setOnStationClickListener(this::showStationDetails);
+                busLineView.setOnGpsArrivalListener(this::scrollToStation);
                 
                 realTimeManager = new BusRealTimeManager(handler, lineDirection.stationList);
                 realTimeManager.startTracking(lineDirection.id, BusLineDetailActivity.this);
@@ -1519,6 +1553,22 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
 
         scheduleText.setText(spannableBuilder);
         dialog.show();
+    }
+
+    private void scrollToStation(int stationIndex) {
+        if (stationScrollView != null && stationIndex >= 0) {
+            stationScrollView.post(() -> {
+                int startY = 60;
+                int stationHeight = 150;
+                int stationCenterY = startY + stationIndex * stationHeight + stationHeight / 2;
+                int scrollViewHeight = stationScrollView.getHeight();
+                int scrollY = stationCenterY - scrollViewHeight / 2;
+                int childHeight = stationScrollView.getChildAt(0) != null ? stationScrollView.getChildAt(0).getHeight() : 0;
+                int maxScrollY = childHeight - scrollViewHeight;
+                scrollY = Math.max(0, Math.min(scrollY, maxScrollY));
+                stationScrollView.smoothScrollTo(0, scrollY);
+            });
+        }
     }
 
     private void showStationDetails(BusApiClient.BusLineStation station, int position) {

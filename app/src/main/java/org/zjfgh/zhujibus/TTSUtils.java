@@ -13,16 +13,24 @@ import android.speech.tts.TextToSpeech;
 import android.speech.tts.UtteranceProgressListener;
 import android.util.Log;
 
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
 import java.lang.reflect.Field;
+
 public class TTSUtils implements TextToSpeech.OnInitListener {
     private static final String TAG = "TTSUtils";
 
@@ -35,13 +43,11 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
     private float pitch = 1.0f;
 
     private SoundPool soundPool;
-    private MediaPlayer durationMediaPlayer;
+    private MediaPlayer mediaPlayer;
     private HashMap<Integer, Integer> soundMap = new HashMap<>();
-    private int currentStreamId = 0;
     private Handler mainHandler = new Handler();
     private Handler backgroundHandler;
     private HandlerThread backgroundThread;
-    private List<PlaybackItem> playbackQueue = new ArrayList<>();
     private boolean isPlaying = false;
     private String currentUtteranceId;
     private List<QueuedAnnouncement> pendingAnnouncements = new ArrayList<>();
@@ -52,6 +58,8 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
 
     private final ConcurrentHashMap<String, Integer> stationResIdCache = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, String> md5Cache = new ConcurrentHashMap<>();
+
+    private byte[] mergedAudioBytes;
 
     private static final AudioAttributes UNIFIED_AUDIO_ATTRIBUTES = new AudioAttributes.Builder()
             .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
@@ -73,7 +81,7 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
             this.type = type;
             this.text = text;
         }
-        
+
         PlaybackItem(int rawResId, Type type) {
             this.type = type;
             this.rawResId = rawResId;
@@ -164,9 +172,15 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
     }
 
     private void pausePlayback() {
+        if (mediaPlayer != null && mediaPlayer.isPlaying()) {
+            mediaPlayer.pause();
+        }
     }
 
     private void resumePlayback() {
+        if (mediaPlayer != null && !mediaPlayer.isPlaying()) {
+            mediaPlayer.start();
+        }
     }
 
     private void initSoundPool() {
@@ -174,11 +188,12 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
                 .setMaxStreams(10)
                 .setAudioAttributes(UNIFIED_AUDIO_ATTRIBUTES)
                 .build();
-        loadSounds();
+        backgroundHandler.post(this::loadSounds);
     }
 
     private void loadSounds() {
         int[] cnNumRes = {
+                R.raw.dingdong,
                 R.raw.cn_num_0, R.raw.cn_num_1, R.raw.cn_num_2, R.raw.cn_num_3, R.raw.cn_num_4,
                 R.raw.cn_num_5, R.raw.cn_num_6, R.raw.cn_num_7, R.raw.cn_num_8, R.raw.cn_num_9,
                 R.raw.cn_num_10, R.raw.cn_num_11, R.raw.cn_num_12, R.raw.cn_num_13, R.raw.cn_num_14,
@@ -212,6 +227,7 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
                 R.raw.en_08_thank_you_for_riding_with_us, R.raw.en_091_we_are_now_at, R.raw.en_092_passengers_getting_off
         };
         int[] enNumRes = {
+                R.raw.dingdong,
                 R.raw.en_num_0, R.raw.en_num_1, R.raw.en_num_2, R.raw.en_num_3, R.raw.en_num_4,
                 R.raw.en_num_5, R.raw.en_num_6, R.raw.en_num_7, R.raw.en_num_8, R.raw.en_num_9,
                 R.raw.en_num_10, R.raw.en_num_11, R.raw.en_num_12, R.raw.en_num_13, R.raw.en_num_14,
@@ -255,17 +271,11 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
             @Override
             public void onDone(String utteranceId) {
                 Log.d(TAG, "TTS播放完成: " + utteranceId);
-                if (utteranceId != null && utteranceId.equals(currentUtteranceId)) {
-                    mainHandler.post(() -> playNext());
-                }
             }
 
             @Override
             public void onError(String utteranceId) {
                 Log.e(TAG, "TTS播放出错: " + utteranceId);
-                if (utteranceId != null && utteranceId.equals(currentUtteranceId)) {
-                    mainHandler.post(() -> playNext());
-                }
             }
         });
     }
@@ -321,9 +331,7 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
             if (!requestAudioFocus()) {
                 Log.w(TAG, "无法获取音频焦点");
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                tts.setAudioAttributes(UNIFIED_AUDIO_ATTRIBUTES);
-            }
+            tts.setAudioAttributes(UNIFIED_AUDIO_ATTRIBUTES);
             tts.stop();
             tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId);
         }
@@ -336,312 +344,497 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
         }
         pendingAnnouncements.clear();
         pendingAnnouncements.add(new QueuedAnnouncement(lineName, endStation, nextStationName));
-        playbackQueue.clear();
-        queueArrivalAnnouncementWithDirection(lineName, endStation, nextStationName);
-        isPlaying = true;
-        playNext();
+        backgroundHandler.post(() -> {
+            List<PlaybackItem> items = new ArrayList<>();
+            buildArrivalAnnouncementWithDirection(items, lineName, endStation, nextStationName);
+            buildAndPlayMergedAudio(items);
+        });
     }
 
     public void queueArrivalAnnouncement(String lineName, String startStation, String endStation, String nextStationName) {
         pendingAnnouncements.add(new QueuedAnnouncement(lineName, endStation, nextStationName));
     }
 
-    private void queueArrivalAnnouncementWithDirection(String lineName, String endStation, String nextStationName) {
-        playbackQueue.add(new PlaybackItem(R.raw.cn_01_zhuji_bus_reminder));
-        playbackQueue.add(new PlaybackItem(R.raw.cn_02_heading_to));
-        addCnStationName(endStation);
-        playbackQueue.add(new PlaybackItem(R.raw.cn_03_direction));
-        addCnLineNumber(lineName);
-        playbackQueue.add(new PlaybackItem(R.raw.cn_04_arriving));
-        addCnStationName(nextStationName);
+    private void buildArrivalAnnouncementWithDirection(List<PlaybackItem> items, String lineName, String endStation, String nextStationName) {
+        items.add(new PlaybackItem(R.raw.cn_01_zhuji_bus_reminder));
+        items.add(new PlaybackItem(R.raw.cn_02_heading_to));
+        addCnStationName(items, endStation);
+        items.add(new PlaybackItem(R.raw.cn_03_direction));
+        addCnLineNumber(items, lineName);
+        items.add(new PlaybackItem(R.raw.cn_04_arriving));
+        addCnStationName(items, nextStationName);
 
         String lineNameEn = lineName.replace("路", "");
-        playbackQueue.add(new PlaybackItem(R.raw.en_01_zhuji_bus_reminder));
-        addEnLineNumber(lineNameEn);
-        playbackQueue.add(new PlaybackItem(R.raw.en_02_bound_for));
-        addEnStationName(endStation);
-        playbackQueue.add(new PlaybackItem(R.raw.en_03_is_arriving_at));
-        addEnStationName(nextStationName);
+        items.add(new PlaybackItem(R.raw.en_01_zhuji_bus_reminder));
+        addEnLineNumber(items, lineNameEn);
+        items.add(new PlaybackItem(R.raw.en_02_bound_for));
+        addEnStationName(items, endStation);
+        items.add(new PlaybackItem(R.raw.en_03_is_arriving_at));
+        addEnStationName(items, nextStationName);
     }
 
-    private void queueArrivalAnnouncement(String lineName, String nextStationName) {
-        playbackQueue.add(new PlaybackItem(R.raw.cn_01_zhuji_bus_reminder));
-        addCnLineNumber(lineName);
-        playbackQueue.add(new PlaybackItem(R.raw.cn_04_arriving));
-        addCnStationName(nextStationName);
+    private void buildArrivalAnnouncement(List<PlaybackItem> items, String lineName, String nextStationName) {
+        items.add(new PlaybackItem(R.raw.cn_01_zhuji_bus_reminder));
+        addCnLineNumber(items, lineName);
+        items.add(new PlaybackItem(R.raw.cn_04_arriving));
+        addCnStationName(items, nextStationName);
 
         String lineNameEn = lineName.replace("路", "");
-        playbackQueue.add(new PlaybackItem(R.raw.en_01_zhuji_bus_reminder));
-        addEnLineNumber(lineNameEn);
-        playbackQueue.add(new PlaybackItem(R.raw.en_03_is_arriving_at));
-        addEnStationName(nextStationName);
+        items.add(new PlaybackItem(R.raw.en_01_zhuji_bus_reminder));
+        addEnLineNumber(items, lineNameEn);
+        items.add(new PlaybackItem(R.raw.en_03_is_arriving_at));
+        addEnStationName(items, nextStationName);
     }
 
     private void mergeAndPlayQueuedAnnouncements() {
-        playbackQueue.clear();
-        if (pendingAnnouncements.size() <= 1) {
+        backgroundHandler.post(() -> {
+            if (pendingAnnouncements.size() <= 1) {
+                pendingAnnouncements.clear();
+                isPlaying = false;
+                mainHandler.post(this::abandonAudioFocus);
+                return;
+            }
+
+            List<PlaybackItem> items = new ArrayList<>();
+            String firstNextStation = pendingAnnouncements.get(1).nextStationName;
+
+            items.add(new PlaybackItem(R.raw.cn_01_zhuji_bus_reminder));
+            for (int i = 1; i < pendingAnnouncements.size(); i++) {
+                QueuedAnnouncement qa = pendingAnnouncements.get(i);
+                addCnLineNumber(items, qa.lineName);
+            }
+            items.add(new PlaybackItem(R.raw.cn_04_arriving));
+            addCnStationName(items, firstNextStation);
+
+            items.add(new PlaybackItem(R.raw.en_01_zhuji_bus_reminder));
+            for (int i = 1; i < pendingAnnouncements.size(); i++) {
+                QueuedAnnouncement qa = pendingAnnouncements.get(i);
+                addEnLineNumber(items, qa.lineName.replace("路", ""));
+            }
+            items.add(new PlaybackItem(R.raw.en_03_is_arriving_at));
+            addEnStationName(items, firstNextStation);
+
             pendingAnnouncements.clear();
-            isPlaying = false;
-            abandonAudioFocus();
-            return;
-        }
-
-        String firstNextStation = pendingAnnouncements.get(1).nextStationName;
-
-        playbackQueue.add(new PlaybackItem(R.raw.cn_01_zhuji_bus_reminder));
-        for (int i = 1; i < pendingAnnouncements.size(); i++) {
-            QueuedAnnouncement qa = pendingAnnouncements.get(i);
-            addCnLineNumber(qa.lineName);
-        }
-        playbackQueue.add(new PlaybackItem(R.raw.cn_04_arriving));
-        addCnStationName(firstNextStation);
-
-        playbackQueue.add(new PlaybackItem(R.raw.en_01_zhuji_bus_reminder));
-        for (int i = 1; i < pendingAnnouncements.size(); i++) {
-            QueuedAnnouncement qa = pendingAnnouncements.get(i);
-            addEnLineNumber(qa.lineName.replace("路", ""));
-        }
-        playbackQueue.add(new PlaybackItem(R.raw.en_03_is_arriving_at));
-        addEnStationName(firstNextStation);
-
-        pendingAnnouncements.clear();
-        playNext();
+            buildAndPlayMergedAudio(items);
+        });
     }
 
     public void playLineDetailAnnouncement(String lineName, String startStation, String endStation, String nextStationName) {
         stopAll();
-        playbackQueue.clear();
-        playbackQueue.add(new PlaybackItem(R.raw.cn_01_zhuji_bus_reminder));
-        playbackQueue.add(new PlaybackItem(R.raw.cn_02_heading_to));
-        addCnStationName(endStation);
-        playbackQueue.add(new PlaybackItem(R.raw.cn_03_direction));
-        addCnLineNumber(lineName);
-        playbackQueue.add(new PlaybackItem(R.raw.cn_04_arriving));
-        addCnStationName(nextStationName);
+        backgroundHandler.post(() -> {
+            List<PlaybackItem> items = new ArrayList<>();
+            items.add(new PlaybackItem(R.raw.cn_01_zhuji_bus_reminder));
+            items.add(new PlaybackItem(R.raw.cn_02_heading_to));
+            addCnStationName(items, endStation);
+            items.add(new PlaybackItem(R.raw.cn_03_direction));
+            addCnLineNumber(items, lineName);
+            items.add(new PlaybackItem(R.raw.cn_04_arriving));
+            addCnStationName(items, nextStationName);
 
-        String lineNameEn = lineName.replace("路", "");
-        playbackQueue.add(new PlaybackItem(R.raw.en_01_zhuji_bus_reminder));
-        addEnLineNumber(lineNameEn);
-        playbackQueue.add(new PlaybackItem(R.raw.en_02_bound_for));
-        addEnStationName(endStation);
-        playbackQueue.add(new PlaybackItem(R.raw.en_03_is_arriving_at));
-        addEnStationName(nextStationName);
+            String lineNameEn = lineName.replace("路", "");
+            items.add(new PlaybackItem(R.raw.en_01_zhuji_bus_reminder));
+            addEnLineNumber(items, lineNameEn);
+            items.add(new PlaybackItem(R.raw.en_02_bound_for));
+            addEnStationName(items, endStation);
+            items.add(new PlaybackItem(R.raw.en_03_is_arriving_at));
+            addEnStationName(items, nextStationName);
 
-        isPlaying = true;
-        playNext();
+            buildAndPlayMergedAudio(items);
+        });
     }
 
     public void playGpsStartStationAnnouncement(String lineName, String startStation, String endStation, String nextStation) {
         stopAll();
-        playbackQueue.clear();
-        playbackQueue.add(new PlaybackItem(R.raw.cn_00_welcom_zhuji));
-        addCnLineNumber(lineName);
-        playbackQueue.add(new PlaybackItem(R.raw.cn_00_bus));
-        playbackQueue.add(new PlaybackItem(R.raw.cn_01_this_bus_is_from));
-        addCnStationName(startStation);
-        playbackQueue.add(new PlaybackItem(R.raw.cn_02_heading_to));
-        addCnStationName(endStation);
-        playbackQueue.add(new PlaybackItem(R.raw.cn_05_next_station));
-        addCnStationName(nextStation);
-        playbackQueue.add(new PlaybackItem(R.raw.cn_03_starting_stop_departing));
+        backgroundHandler.post(() -> {
+            List<PlaybackItem> items = new ArrayList<>();
+            items.add(new PlaybackItem(R.raw.cn_00_welcom_zhuji));
+            addCnLineNumber(items, lineName);
+            items.add(new PlaybackItem(R.raw.cn_00_bus));
+            items.add(new PlaybackItem(R.raw.cn_01_this_bus_is_from));
+            addCnStationName(items, startStation);
+            items.add(new PlaybackItem(R.raw.cn_02_heading_to));
+            addCnStationName(items, endStation);
+            items.add(new PlaybackItem(R.raw.cn_05_next_station));
+            addCnStationName(items, nextStation);
+            items.add(new PlaybackItem(R.raw.cn_03_starting_stop_departing));
 
-        String lineNameEn = lineName.replace("路", "");
-        playbackQueue.add(new PlaybackItem(R.raw.en_00_welcome_aboard_the_zhuji));
-        addEnLineNumber(lineNameEn);
-        playbackQueue.add(new PlaybackItem(R.raw.en_01_this_bus_is_from));
-        addEnStationName(startStation);
-        playbackQueue.add(new PlaybackItem(R.raw.en_02_to));
-        addEnStationName(endStation);
-        playbackQueue.add(new PlaybackItem(R.raw.en_05_next_station));
-        addEnStationName(nextStation);
-        playbackQueue.add(new PlaybackItem(R.raw.en_03_starting_stop_departing));
+            String lineNameEn = lineName.replace("路", "");
+            items.add(new PlaybackItem(R.raw.en_00_welcome_aboard_the_zhuji));
+            addEnLineNumber(items, lineNameEn);
+            items.add(new PlaybackItem(R.raw.en_01_this_bus_is_from));
+            addEnStationName(items, startStation);
+            items.add(new PlaybackItem(R.raw.en_02_to));
+            addEnStationName(items, endStation);
+            items.add(new PlaybackItem(R.raw.en_05_next_station));
+            addEnStationName(items, nextStation);
+            items.add(new PlaybackItem(R.raw.en_03_starting_stop_departing));
 
-        isPlaying = true;
-        playNext();
+            buildAndPlayMergedAudio(items);
+        });
     }
 
     public void playGpsMiddleStationAnnouncement(String stationName) {
         stopAll();
-        playbackQueue.clear();
-        addCnStationName(stationName);
-        playbackQueue.add(new PlaybackItem(R.raw.cn_091_we_are_now_at));
-        playbackQueue.add(new PlaybackItem(R.raw.en_091_we_are_now_at));
-        addEnStationName(stationName);
-        playbackQueue.add(new PlaybackItem(R.raw.en_092_passengers_getting_off));
-        isPlaying = true;
-        playNext();
+        backgroundHandler.post(() -> {
+            List<PlaybackItem> items = new ArrayList<>();
+            items.add(new PlaybackItem(R.raw.dingdong));
+            addCnStationName(items, stationName);
+            items.add(new PlaybackItem(R.raw.cn_091_we_are_now_at));
+            items.add(new PlaybackItem(R.raw.en_091_we_are_now_at));
+            addEnStationName(items, stationName);
+            items.add(new PlaybackItem(R.raw.en_092_passengers_getting_off));
+            buildAndPlayMergedAudio(items);
+        });
     }
 
     public void playGpsTerminalStationAnnouncement(String stationName) {
         stopAll();
-        playbackQueue.clear();
-        playbackQueue.add(new PlaybackItem(R.raw.cn_07_terminal_station));
-        playbackQueue.add(new PlaybackItem(R.raw.cn_091_we_are_now_at));
-        playbackQueue.add(new PlaybackItem(R.raw.cn_08_thank_you_for_riding_with_us));
-        playbackQueue.add(new PlaybackItem(R.raw.en_091_we_are_now_at));
-        playbackQueue.add(new PlaybackItem(R.raw.en_07_terminal_station));
-        playbackQueue.add(new PlaybackItem(R.raw.en_092_passengers_getting_off));
-        playbackQueue.add(new PlaybackItem(R.raw.en_08_thank_you_for_riding_with_us));
-
-        isPlaying = true;
-        playNext();
+        backgroundHandler.post(() -> {
+            List<PlaybackItem> items = new ArrayList<>();
+            items.add(new PlaybackItem(R.raw.dingdong));
+            items.add(new PlaybackItem(R.raw.cn_07_terminal_station));
+            addCnStationName(items, stationName);
+            items.add(new PlaybackItem(R.raw.cn_08_thank_you_for_riding_with_us));
+            items.add(new PlaybackItem(R.raw.en_07_terminal_station));
+            addEnStationName(items, stationName);
+            items.add(new PlaybackItem(R.raw.en_08_thank_you_for_riding_with_us));
+            buildAndPlayMergedAudio(items);
+        });
     }
 
     public void playGpsLeavingStationAnnouncement(String nextStation, boolean isTerminal) {
         stopAll();
-        playbackQueue.clear();
-        playbackQueue.add(new PlaybackItem(R.raw.cn_04_the_bus_is_moving_tips));
-        playbackQueue.add(new PlaybackItem(R.raw.cn_05_next_station));
-        if (isTerminal) {
-            playbackQueue.add(new PlaybackItem(R.raw.cn_07_terminal_station));
-        }
-        addCnStationName(nextStation);
-        playbackQueue.add(new PlaybackItem(R.raw.cn_06_press_the_bell_to_get_off_tips));
+        backgroundHandler.post(() -> {
+            List<PlaybackItem> items = new ArrayList<>();
+            items.add(new PlaybackItem(R.raw.cn_04_the_bus_is_moving_tips));
+            items.add(new PlaybackItem(R.raw.cn_05_next_station));
+            if (isTerminal) {
+                items.add(new PlaybackItem(R.raw.cn_07_terminal_station));
+            }
+            addCnStationName(items, nextStation);
+            items.add(new PlaybackItem(R.raw.cn_06_press_the_bell_to_get_off_tips));
 
-        playbackQueue.add(new PlaybackItem(R.raw.en_04_the_bus_is_moving_tips));
-        playbackQueue.add(new PlaybackItem(R.raw.en_05_next_station));
-        if (isTerminal) {
-            playbackQueue.add(new PlaybackItem(R.raw.en_07_terminal_station));
-        }
-        addEnStationName(nextStation);
-        playbackQueue.add(new PlaybackItem(R.raw.en_06_press_the_bell_to_get_off_tips));
+            items.add(new PlaybackItem(R.raw.en_05_next_station));
+            if (isTerminal) {
+                items.add(new PlaybackItem(R.raw.en_07_terminal_station));
+            }
+            addEnStationName(items, nextStation);
+            items.add(new PlaybackItem(R.raw.en_06_press_the_bell_to_get_off_tips));
 
-        isPlaying = true;
-        playNext();
+            buildAndPlayMergedAudio(items);
+        });
     }
 
-    private void playNext() {
-        if (playbackQueue.isEmpty()) {
-            if (!pendingAnnouncements.isEmpty()) {
-                mergeAndPlayQueuedAnnouncements();
+    public void playScanCodeSuccessSound() {
+        stopAll();
+        backgroundHandler.post(() -> {
+            List<PlaybackItem> items = new ArrayList<>();
+            items.add(new PlaybackItem(R.raw.di));
+            items.add(new PlaybackItem(R.raw.payment_successful));
+            buildAndPlayMergedAudio(items);
+        });
+    }
+
+    public void playCardSwipeSuccessSound() {
+        stopAll();
+        backgroundHandler.post(() -> {
+            List<PlaybackItem> items = new ArrayList<>();
+            items.add(new PlaybackItem(R.raw.di));
+            buildAndPlayMergedAudio(items);
+        });
+    }
+
+    private static class WavInfo {
+        byte[] pcmData;
+        int sampleRate;
+        int channels;
+        int bitsPerSample;
+
+        WavInfo(byte[] pcmData, int sampleRate, int channels, int bitsPerSample) {
+            this.pcmData = pcmData;
+            this.sampleRate = sampleRate;
+            this.channels = channels;
+            this.bitsPerSample = bitsPerSample;
+        }
+    }
+
+    private void buildAndPlayMergedAudio(List<PlaybackItem> items) {
+        try {
+            List<WavInfo> wavInfos = new ArrayList<>();
+
+            for (PlaybackItem item : items) {
+                if (item.type == PlaybackItem.Type.TTS_CN || item.type == PlaybackItem.Type.TTS_EN) {
+                    WavInfo ttsWav = synthesizeTtsToWav(item.text,
+                            item.type == PlaybackItem.Type.TTS_EN ? Locale.US : Locale.CHINESE);
+                    if (ttsWav != null && ttsWav.pcmData.length > 0) {
+                        wavInfos.add(ttsWav);
+                    }
+                } else {
+                    WavInfo rawWav = readRawWav(item.rawResId);
+                    if (rawWav != null && rawWav.pcmData.length > 0) {
+                        wavInfos.add(rawWav);
+                    }
+                }
+            }
+
+            if (wavInfos.isEmpty()) {
+                isPlaying = false;
+                mainHandler.post(this::abandonAudioFocus);
                 return;
             }
-            isPlaying = false;
-            currentUtteranceId = null;
-            abandonAudioFocus();
-            return;
-        }
 
-        PlaybackItem item = playbackQueue.remove(0);
+            int targetSampleRate = wavInfos.get(0).sampleRate;
+            int targetChannels = wavInfos.get(0).channels;
+            int targetBitsPerSample = wavInfos.get(0).bitsPerSample;
 
-        if (item.type == PlaybackItem.Type.WAV) {
-            playWav(item.rawResId);
-        } else if (item.type == PlaybackItem.Type.MEDIA_PLAYER_WAV) {
-            playMediaPlayerWav(item.rawResId);
-        } else {
-            playTts(item);
-        }
-    }
-
-    private void playWav(int rawResId) {
-        if (soundPool == null) {
-            initSoundPool();
-        }
-        if (!requestAudioFocus()) {
-            Log.w(TAG, "无法获取音频焦点");
-        }
-        soundPool.stop(0);
-        Integer soundId = soundMap.get(rawResId);
-        if (soundId != null) {
-            releaseDurationMediaPlayer();
-            durationMediaPlayer = new MediaPlayer();
-            try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                    durationMediaPlayer.setAudioAttributes(UNIFIED_AUDIO_ATTRIBUTES);
-                } else {
-                    @SuppressWarnings("deprecation")
-                    int streamType = AudioManager.STREAM_NOTIFICATION;
-                    durationMediaPlayer.setAudioStreamType(streamType);
+            for (WavInfo info : wavInfos) {
+                if (info.sampleRate != targetSampleRate || info.channels != targetChannels || info.bitsPerSample != targetBitsPerSample) {
+                    Log.w(TAG, "WAV格式不一致，需要重采样: " + info.sampleRate + "Hz/" + info.channels + "ch vs " + targetSampleRate + "Hz/" + targetChannels + "ch");
                 }
-                durationMediaPlayer.setDataSource(context, android.net.Uri.parse("android.resource://" + context.getPackageName() + "/" + rawResId));
-                durationMediaPlayer.prepare();
-                int duration = durationMediaPlayer.getDuration();
-                currentStreamId = soundPool.play(soundId, 1.0f, 1.0f, 0, 0, 1.0f);
-                mainHandler.postDelayed(this::playNext, duration);
-            } catch (Exception e) {
-                Log.e(TAG, "获取音频时长失败", e);
-                currentStreamId = soundPool.play(soundId, 1.0f, 1.0f, 0, 0, 1.0f);
-                mainHandler.postDelayed(this::playNext, getSoundDuration(rawResId));
             }
-        } else {
-            playNext();
-        }
-    }
-    
-    private void playMediaPlayerWav(int rawResId) {
-        if (!requestAudioFocus()) {
-            Log.w(TAG, "无法获取音频焦点");
-        }
-        releaseDurationMediaPlayer();
-        durationMediaPlayer = new MediaPlayer();
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                durationMediaPlayer.setAudioAttributes(UNIFIED_AUDIO_ATTRIBUTES);
-            } else {
-                @SuppressWarnings("deprecation")
-                int streamType = AudioManager.STREAM_NOTIFICATION;
-                durationMediaPlayer.setAudioStreamType(streamType);
+
+            int totalPcmSize = 0;
+            for (WavInfo info : wavInfos) {
+                totalPcmSize += info.pcmData.length;
             }
-            durationMediaPlayer.setDataSource(context, android.net.Uri.parse("android.resource://" + context.getPackageName() + "/" + rawResId));
-            durationMediaPlayer.prepare();
-            int duration = durationMediaPlayer.getDuration();
-            durationMediaPlayer.start();
-            mainHandler.postDelayed(this::playNext, duration);
+
+            byte[] mergedPcm = new byte[totalPcmSize];
+            int offset = 0;
+            for (WavInfo info : wavInfos) {
+                System.arraycopy(info.pcmData, 0, mergedPcm, offset, info.pcmData.length);
+                offset += info.pcmData.length;
+            }
+
+            byte[] wavHeader = buildWavHeader(mergedPcm.length, targetSampleRate, targetChannels, targetBitsPerSample);
+            mergedAudioBytes = new byte[wavHeader.length + mergedPcm.length];
+            System.arraycopy(wavHeader, 0, mergedAudioBytes, 0, wavHeader.length);
+            System.arraycopy(mergedPcm, 0, mergedAudioBytes, wavHeader.length, mergedPcm.length);
+
+            mainHandler.post(this::playMergedAudioFromMemory);
         } catch (Exception e) {
-            Log.e(TAG, "使用MediaPlayer播放站点音频失败", e);
-            playNext();
+            Log.e(TAG, "拼接音频失败", e);
+            isPlaying = false;
+            mainHandler.post(this::abandonAudioFocus);
         }
     }
 
-    private void releaseDurationMediaPlayer() {
-        if (durationMediaPlayer != null) {
-            try {
-                durationMediaPlayer.release();
-            } catch (Exception e) {
-                Log.e(TAG, "释放durationMediaPlayer异常", e);
-            }
-            durationMediaPlayer = null;
-        }
-    }
-
-    private int getSoundDuration(int rawResId) {
-        if (rawResId >= R.raw.cn_num_0 && rawResId <= R.raw.cn_num_9) return 350;
-        if (rawResId >= R.raw.cn_num_10 && rawResId <= R.raw.cn_num_99) return 450;
-        if (rawResId == R.raw.cn_num_100) return 550;
-        if (rawResId == R.raw.cn_num_yao) return 350;
-        if (rawResId == R.raw.cn_route) return 400;
-        if (rawResId >= R.raw.en_num_0 && rawResId <= R.raw.en_num_9) return 350;
-        if (rawResId >= R.raw.en_num_10 && rawResId <= R.raw.en_num_99) return 450;
-        if (rawResId == R.raw.cn_01_zhuji_bus_reminder) return 1600;
-        if (rawResId == R.raw.cn_02_heading_to) return 500;
-        if (rawResId == R.raw.cn_03_direction) return 500;
-        if (rawResId == R.raw.cn_04_arriving) return 700;
-        if (rawResId == R.raw.en_01_zhuji_bus_reminder) return 1300;
-        if (rawResId == R.raw.en_02_bound_for) return 600;
-        if (rawResId == R.raw.en_03_is_arriving_at) return 700;
-        return 600;
-    }
-
-    private void playTts(PlaybackItem item) {
-        if (!isInitialized) {
-            playNext();
-            return;
-        }
-
+    private void playMergedAudioFromMemory() {
         if (!requestAudioFocus()) {
             Log.w(TAG, "无法获取音频焦点");
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            tts.setAudioAttributes(UNIFIED_AUDIO_ATTRIBUTES);
+        releaseMediaPlayer();
+        mediaPlayer = new MediaPlayer();
+        try {
+            mediaPlayer.setAudioAttributes(UNIFIED_AUDIO_ATTRIBUTES);
+
+            mediaPlayer.setDataSource(new ByteArrayMediaDataSource(mergedAudioBytes));
+
+            mediaPlayer.setOnCompletionListener(mp -> {
+                isPlaying = false;
+                abandonAudioFocus();
+                if (!pendingAnnouncements.isEmpty()) {
+                    mergeAndPlayQueuedAnnouncements();
+                }
+            });
+            mediaPlayer.setOnErrorListener((mp, what, extra) -> {
+                Log.e(TAG, "合并音频播放出错: " + what + ", " + extra);
+                isPlaying = false;
+                abandonAudioFocus();
+                return true;
+            });
+            mediaPlayer.prepare();
+            isPlaying = true;
+            mediaPlayer.start();
+        } catch (Exception e) {
+            Log.e(TAG, "播放合并音频失败", e);
+            isPlaying = false;
+            abandonAudioFocus();
+        }
+    }
+
+    private void releaseMediaPlayer() {
+        if (mediaPlayer != null) {
+            try {
+                mediaPlayer.release();
+            } catch (Exception e) {
+                Log.e(TAG, "释放mediaPlayer异常", e);
+            }
+            mediaPlayer = null;
+        }
+    }
+
+    private WavInfo synthesizeTtsToWav(String text, Locale locale) {
+        if (!isInitialized) {
+            return null;
         }
 
-        currentUtteranceId = "tts_" + System.currentTimeMillis();
-        Locale locale = item.type == PlaybackItem.Type.TTS_EN ? Locale.US : Locale.CHINESE;
+        final WavInfo[] result = new WavInfo[1];
+        final CountDownLatch latch = new CountDownLatch(1);
+
+        File tempFile = new File(context.getCacheDir(), "tts_temp_" + System.currentTimeMillis() + ".wav");
+
         tts.setLanguage(locale);
         tts.setSpeechRate(speechRate);
         tts.setPitch(pitch);
-        tts.speak(item.text, TextToSpeech.QUEUE_FLUSH, null, currentUtteranceId);
+
+        int status = tts.synthesizeToFile(text, null, tempFile, "tts_synth_" + System.currentTimeMillis());
+        if (status != TextToSpeech.SUCCESS) {
+            return null;
+        }
+
+        mainHandler.postDelayed(() -> {
+            try {
+                if (tempFile.exists() && tempFile.length() > 0) {
+                    result[0] = readWavFile(tempFile);
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "读取TTS合成文件失败", e);
+            } finally {
+                latch.countDown();
+            }
+        }, 500);
+
+        try {
+            latch.await();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+
+        tempFile.delete();
+        return result[0];
+    }
+
+    private WavInfo readRawWav(int rawResId) {
+        try (InputStream is = context.getResources().openRawResource(rawResId);
+             ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
+            byte[] buffer = new byte[4096];
+            int read;
+            while ((read = is.read(buffer)) != -1) {
+                baos.write(buffer, 0, read);
+            }
+            return parseWav(baos.toByteArray());
+        } catch (Exception e) {
+            Log.e(TAG, "读取WAV资源失败: " + rawResId, e);
+            return null;
+        }
+    }
+
+    private WavInfo readWavFile(File file) {
+        try (FileInputStream fis = new FileInputStream(file);
+             ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
+            byte[] buffer = new byte[4096];
+            int read;
+            while ((read = fis.read(buffer)) != -1) {
+                baos.write(buffer, 0, read);
+            }
+            return parseWav(baos.toByteArray());
+        } catch (Exception e) {
+            Log.e(TAG, "读取WAV文件失败", e);
+            return null;
+        }
+    }
+
+    private WavInfo parseWav(byte[] wavData) {
+        if (wavData.length < 44) {
+            return new WavInfo(wavData, 16000, 1, 16);
+        }
+
+        ByteBuffer buffer = ByteBuffer.wrap(wavData);
+        buffer.order(ByteOrder.LITTLE_ENDIAN);
+
+        buffer.position(22);
+        int channels = buffer.getShort() & 0xFFFF;
+
+        buffer.position(24);
+        int sampleRate = buffer.getInt();
+
+        buffer.position(34);
+        int bitsPerSample = buffer.getShort() & 0xFFFF;
+
+        int[] dataChunkInfo = findDataChunkInfo(wavData);
+        int dataOffset;
+        int dataSize;
+        if (dataChunkInfo != null) {
+            dataOffset = dataChunkInfo[0];
+            dataSize = dataChunkInfo[1];
+        } else {
+            dataOffset = 44;
+            dataSize = wavData.length - 44;
+        }
+
+        if (dataSize <= 0 || dataOffset + dataSize > wavData.length) {
+            dataSize = wavData.length - dataOffset;
+        }
+
+        byte[] pcm = new byte[dataSize];
+        System.arraycopy(wavData, dataOffset, pcm, 0, dataSize);
+
+        return new WavInfo(pcm, sampleRate, channels, bitsPerSample);
+    }
+
+    private int[] findDataChunkInfo(byte[] wavData) {
+        for (int i = 36; i < wavData.length - 8; i++) {
+            if (wavData[i] == 'd' && wavData[i + 1] == 'a' && wavData[i + 2] == 't' && wavData[i + 3] == 'a') {
+                ByteBuffer buffer = ByteBuffer.wrap(wavData);
+                buffer.order(ByteOrder.LITTLE_ENDIAN);
+                buffer.position(i + 4);
+                int dataSize = buffer.getInt();
+                int dataOffset = i + 8;
+                return new int[]{dataOffset, dataSize};
+            }
+        }
+        return null;
+    }
+
+    private byte[] buildWavHeader(int pcmDataLength, int sampleRate, int channels, int bitsPerSample) {
+        int byteRate = sampleRate * channels * bitsPerSample / 8;
+        int blockAlign = channels * bitsPerSample / 8;
+        int totalDataLen = pcmDataLength + 36;
+
+        ByteBuffer buffer = ByteBuffer.allocate(44);
+        buffer.order(ByteOrder.LITTLE_ENDIAN);
+        buffer.put(new byte[]{'R', 'I', 'F', 'F'});
+        buffer.putInt(totalDataLen);
+        buffer.put(new byte[]{'W', 'A', 'V', 'E'});
+        buffer.put(new byte[]{'f', 'm', 't', ' '});
+        buffer.putInt(16);
+        buffer.putShort((short) 1);
+        buffer.putShort((short) channels);
+        buffer.putInt(sampleRate);
+        buffer.putInt(byteRate);
+        buffer.putShort((short) blockAlign);
+        buffer.putShort((short) bitsPerSample);
+        buffer.put(new byte[]{'d', 'a', 't', 'a'});
+        buffer.putInt(pcmDataLength);
+        return buffer.array();
+    }
+
+    private static class ByteArrayMediaDataSource extends android.media.MediaDataSource {
+        private final byte[] data;
+
+        ByteArrayMediaDataSource(byte[] data) {
+            this.data = data;
+        }
+
+        @Override
+        public int readAt(long position, byte[] buffer, int offset, int size) {
+            if (position >= data.length) {
+                return -1;
+            }
+            int length = (int) Math.min(size, data.length - position);
+            System.arraycopy(data, (int) position, buffer, offset, length);
+            return length;
+        }
+
+        @Override
+        public long getSize() {
+            return data.length;
+        }
+
+        @Override
+        public void close() {
+        }
     }
 
     private static final int[] CN_NUM_RES = {
@@ -691,7 +884,7 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
         R.raw.en_num_95, R.raw.en_num_96, R.raw.en_num_97, R.raw.en_num_98, R.raw.en_num_99
     };
 
-    private void addCnLineNumber(String lineName) {
+    private void addCnLineNumber(List<PlaybackItem> items, String lineName) {
         String numStr = lineName.replace("路", " ").trim();
         String[] parts = numStr.split("\\s+", 2);
         String numberPart = parts[0];
@@ -699,72 +892,72 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
         try {
             int num = Integer.parseInt(numberPart);
             if (num >= 1 && num <= 100) {
-                playbackQueue.add(new PlaybackItem(CN_NUM_RES[num]));
+                items.add(new PlaybackItem(CN_NUM_RES[num]));
             } else if (num > 100) {
                 String digits = String.valueOf(num);
                 for (char c : digits.toCharArray()) {
                     int d = c - '0';
                     if (d == 1) {
-                        playbackQueue.add(new PlaybackItem(R.raw.cn_num_yao));
+                        items.add(new PlaybackItem(R.raw.cn_num_yao));
                     } else {
-                        playbackQueue.add(new PlaybackItem(CN_NUM_RES[d]));
+                        items.add(new PlaybackItem(CN_NUM_RES[d]));
                     }
                 }
             }
-            playbackQueue.add(new PlaybackItem(R.raw.cn_route));
+            items.add(new PlaybackItem(R.raw.cn_route));
             if (!suffix.isEmpty()) {
-                playbackQueue.add(new PlaybackItem(suffix, PlaybackItem.Type.TTS_CN));
+                items.add(new PlaybackItem(suffix, PlaybackItem.Type.TTS_CN));
             }
         } catch (NumberFormatException e) {
-            playbackQueue.add(new PlaybackItem(lineName, PlaybackItem.Type.TTS_CN));
+            items.add(new PlaybackItem(lineName, PlaybackItem.Type.TTS_CN));
         }
     }
 
-    private void addEnLineNumber(String lineNameEn) {
-        addEnLineNumber(lineNameEn, true);
+    private void addEnLineNumber(List<PlaybackItem> items, String lineNameEn) {
+        addEnLineNumber(items, lineNameEn, true);
     }
 
-    private void addEnLineNumber(String lineNameEn, boolean withRoute) {
+    private void addEnLineNumber(List<PlaybackItem> items, String lineNameEn, boolean withRoute) {
         String numStr = lineNameEn.trim();
         try {
             int num = Integer.parseInt(numStr);
             if (withRoute) {
-                playbackQueue.add(new PlaybackItem(R.raw.en_route));
+                items.add(new PlaybackItem(R.raw.en_route));
             }
             if (num >= 0 && num <= 99) {
-                playbackQueue.add(new PlaybackItem(EN_NUM_RES[num]));
+                items.add(new PlaybackItem(EN_NUM_RES[num]));
             } else if (num >= 100) {
                 String digits = String.valueOf(num);
                 for (char c : digits.toCharArray()) {
                     int d = c - '0';
                     if (d >= 0 && d <= 9) {
-                        playbackQueue.add(new PlaybackItem(EN_NUM_RES[d]));
+                        items.add(new PlaybackItem(EN_NUM_RES[d]));
                     }
                 }
             }
         } catch (NumberFormatException e) {
             if (withRoute) {
-                playbackQueue.add(new PlaybackItem(R.raw.en_route));
+                items.add(new PlaybackItem(R.raw.en_route));
             }
-            playbackQueue.add(new PlaybackItem(lineNameEn, PlaybackItem.Type.TTS_EN));
+            items.add(new PlaybackItem(lineNameEn, PlaybackItem.Type.TTS_EN));
         }
     }
 
-    private void addCnStationName(String stationName) {
+    private void addCnStationName(List<PlaybackItem> items, String stationName) {
         Integer resId = getCachedStationResId(stationName, "cn_stations_");
         if (resId != null) {
-            playbackQueue.add(new PlaybackItem(resId, PlaybackItem.Type.MEDIA_PLAYER_WAV));
+            items.add(new PlaybackItem(resId, PlaybackItem.Type.MEDIA_PLAYER_WAV));
         } else {
-            playbackQueue.add(new PlaybackItem(stationName, PlaybackItem.Type.TTS_CN));
+            items.add(new PlaybackItem(stationName, PlaybackItem.Type.TTS_CN));
         }
     }
 
-    private void addEnStationName(String stationName) {
+    private void addEnStationName(List<PlaybackItem> items, String stationName) {
         Integer resId = getCachedStationResId(stationName, "en_stations_");
         if (resId != null) {
-            playbackQueue.add(new PlaybackItem(resId, PlaybackItem.Type.MEDIA_PLAYER_WAV));
+            items.add(new PlaybackItem(resId, PlaybackItem.Type.MEDIA_PLAYER_WAV));
         } else {
-            playbackQueue.add(new PlaybackItem(stationName, PlaybackItem.Type.TTS_CN));
+            items.add(new PlaybackItem(stationName, PlaybackItem.Type.TTS_CN));
         }
     }
 
@@ -844,16 +1037,18 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
     }
 
     public void stopAll() {
-        playbackQueue.clear();
         pendingAnnouncements.clear();
         isPlaying = false;
         currentUtteranceId = null;
         mainHandler.removeCallbacksAndMessages(null);
-        if (soundPool != null && currentStreamId != 0) {
-            soundPool.stop(currentStreamId);
-            currentStreamId = 0;
+        if (mediaPlayer != null) {
+            try {
+                mediaPlayer.stop();
+            } catch (Exception e) {
+                Log.e(TAG, "停止mediaPlayer异常", e);
+            }
         }
-        releaseDurationMediaPlayer();
+        releaseMediaPlayer();
         abandonAudioFocus();
         if (isInitialized) {
             tts.stop();
@@ -884,6 +1079,7 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
             backgroundThread = null;
             backgroundHandler = null;
         }
+        mergedAudioBytes = null;
         instance = null;
     }
 
