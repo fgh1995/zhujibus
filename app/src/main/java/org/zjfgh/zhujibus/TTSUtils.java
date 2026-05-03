@@ -219,11 +219,11 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
                 R.raw.cn_01_zhuji_bus_reminder, R.raw.cn_02_heading_to, R.raw.cn_03_direction,
                 R.raw.cn_03_starting_stop_departing, R.raw.cn_04_arriving, R.raw.cn_04_the_bus_is_moving_tips,
                 R.raw.cn_05_next_station, R.raw.cn_06_press_the_bell_to_get_off_tips,
-                R.raw.cn_07_terminal_station, R.raw.cn_08_thank_you_for_riding_with_us, R.raw.cn_091_we_are_now_at,
+                R.raw.cn_17_terminal_station, R.raw.cn_07_passengers_terminal_station, R.raw.cn_08_thank_you_for_riding_with_us, R.raw.cn_091_we_are_now_at,
                 R.raw.en_00_welcome_aboard_the_zhuji, R.raw.en_01_this_bus_is_from, R.raw.en_01_zhuji_bus_reminder, R.raw.en_02_bound_for,
                 R.raw.en_02_to, R.raw.en_03_is_arriving_at, R.raw.en_03_starting_stop_departing,
                 R.raw.en_04_the_bus_is_moving_tips, R.raw.en_05_next_station,
-                R.raw.en_06_press_the_bell_to_get_off_tips, R.raw.en_07_terminal_station,
+                R.raw.en_06_press_the_bell_to_get_off_tips, R.raw.en_17_terminal_station,R.raw.en_07_passengers_terminal_station,
                 R.raw.en_08_thank_you_for_riding_with_us, R.raw.en_091_we_are_now_at, R.raw.en_092_passengers_getting_off
         };
         int[] enNumRes = {
@@ -492,10 +492,10 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
         backgroundHandler.post(() -> {
             List<PlaybackItem> items = new ArrayList<>();
             items.add(new PlaybackItem(R.raw.dingdong));
-            items.add(new PlaybackItem(R.raw.cn_07_terminal_station));
+            items.add(new PlaybackItem(R.raw.cn_07_passengers_terminal_station));
             addCnStationName(items, stationName);
             items.add(new PlaybackItem(R.raw.cn_08_thank_you_for_riding_with_us));
-            items.add(new PlaybackItem(R.raw.en_07_terminal_station));
+            items.add(new PlaybackItem(R.raw.en_07_passengers_terminal_station));
             addEnStationName(items, stationName);
             items.add(new PlaybackItem(R.raw.en_08_thank_you_for_riding_with_us));
             buildAndPlayMergedAudio(items);
@@ -509,14 +509,14 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
             items.add(new PlaybackItem(R.raw.cn_04_the_bus_is_moving_tips));
             items.add(new PlaybackItem(R.raw.cn_05_next_station));
             if (isTerminal) {
-                items.add(new PlaybackItem(R.raw.cn_07_terminal_station));
+                items.add(new PlaybackItem(R.raw.cn_17_terminal_station));
             }
             addCnStationName(items, nextStation);
             items.add(new PlaybackItem(R.raw.cn_06_press_the_bell_to_get_off_tips));
-
+            items.add(new PlaybackItem(R.raw.en_04_the_bus_is_moving_tips));
             items.add(new PlaybackItem(R.raw.en_05_next_station));
             if (isTerminal) {
-                items.add(new PlaybackItem(R.raw.en_07_terminal_station));
+                items.add(new PlaybackItem(R.raw.en_17_terminal_station));
             }
             addEnStationName(items, nextStation);
             items.add(new PlaybackItem(R.raw.en_06_press_the_bell_to_get_off_tips));

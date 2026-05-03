@@ -759,7 +759,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 nextStationName = stations.get(stationIndex + 1).stationName;
             }
             tts.playGpsStartStationAnnouncement(lineName, startStation, endStation, nextStationName);
-            nextStationInfo.setText("下一站：" + nextStationName + "，下车请按铃  Next Station:" + nextStationName + ",Press the bell to get off");
+            nextStationInfo.setText("下一站：" + nextStationName + "    Next Station:" + nextStationName);
         } else if (isTerminalStation) {
             tts.playGpsTerminalStationAnnouncement(stationName);
             nextStationInfo.setText(stationName + " 到了！We are now at " + stationName + " !");
@@ -771,16 +771,15 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
 
     private void announceLeavingStation(String stationName, int stationIndex, int totalStations) {
         TTSUtils tts = TTSUtils.getInstance(this);
-        boolean isTerminalStation = stationIndex >= totalStations - 1;
+        boolean isTerminalStation = stationIndex + 1 >= totalStations - 1;
         String nextStationName = "";
 
         if (stationIndex + 1 < totalStations) {
             List<BusApiClient.BusLineStation> stations = realTimeManager.getStationList();
             nextStationName = stations.get(stationIndex + 1).stationName;
         }
-
         tts.playGpsLeavingStationAnnouncement(nextStationName, isTerminalStation);
-        nextStationInfo.setText("下一站：" + nextStationName + "，下车请按铃  Next Station:" + nextStationName + ",Press the bell to get off");
+        nextStationInfo.setText("下一站：" + nextStationName + "    Next Station:" + nextStationName);
     }
 
     private void updatePriceTips(BusApiClient.BusLineDirection lineDirection) {
@@ -1728,7 +1727,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
 
                 TTSUtils tts = TTSUtils.getInstance(this);
                 tts.playLineDetailAnnouncement(lineName, startStation, endStation, nextStation.stationName);
-                nextStationInfo.setText("下一站：" + nextStation.stationName + "，下车请按铃      Next Station:" + nextStation.stationName + ",Press the bell to get off");
+                nextStationInfo.setText("下一站：" + nextStation.stationName + "    Next Station:" + nextStation.stationName);
                 lastVoiceStationOrder = nearestVehicle.currentStationOrder;
             }
         }
