@@ -174,10 +174,16 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private double lastLocationLat = 0;
     private double lastLocationLon = 0;
     private long lastLocationTimeForSpeed = 0;
-    private int stationaryConsecutiveCount = 0;
-    private static final double STATIONARY_DISTANCE_THRESHOLD_M = 1.0;
-    private static final int STATIONARY_CONSECUTIVE_UPDATES = 3;
     private int locationUpdateCount = 0;
+
+    private static final long SPEED_TIMEOUT_MS = 2000;
+    private static final int SPEED_WINDOW_SIZE = 3;
+    private static final float MAX_VALID_SPEED_KMH = 120.0f;
+    private static final float MIN_VALID_SPEED_KMH = 0.5f;
+    private final ArrayList<Float> speedWindow = new ArrayList<>();
+    private float currentSmoothedSpeedKmh = 0f;
+    private Handler speedTimeoutHandler = new Handler();
+    private Runnable speedTimeoutRunnable;
 
     public enum DistanceMode {
         ALONG_ROUTE("沿线距离"),
@@ -367,8 +373,10 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             lastLocationTimeForSpeed = 0;
             lastLocationLat = 0;
             lastLocationLon = 0;
-            stationaryConsecutiveCount = 0;
             locationUpdateCount = 0;
+            speedWindow.clear();
+            currentSmoothedSpeedKmh = 0f;
+            stopSpeedTimeout();
             if (realTimeManager != null) {
                 realTimeManager.stopTracking();
             }
@@ -550,37 +558,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         }
         gpsLocationInfo.setText(String.format(Locale.CHINA, "坐标：%.6f, %.6f (%s)", gcjLat, gcjLon, coordSystemLabel));
 
-        float speedMps = 0;
-        float speedKmh = 0;
-
-        long currentTime = System.currentTimeMillis();
-        if (locationUpdateCount >= 2 && lastLocationTimeForSpeed > 0) {
-            float[] results = new float[1];
-            android.location.Location.distanceBetween(lastLocationLat, lastLocationLon, gcjLat, gcjLon, results);
-            double distanceMoved = results[0];
-
-            if (distanceMoved < STATIONARY_DISTANCE_THRESHOLD_M) {
-                stationaryConsecutiveCount++;
-            } else {
-                stationaryConsecutiveCount = 0;
-            }
-
-            if (stationaryConsecutiveCount >= STATIONARY_CONSECUTIVE_UPDATES) {
-                speedMps = 0;
-                speedKmh = 0;
-                Log.d(TAG, String.format(Locale.CHINA, "检测到车辆静止，速度归零"));
-            } else {
-                long timeDiff = currentTime - lastLocationTimeForSpeed;
-                if (timeDiff > 0) {
-                    speedMps = (float) (distanceMoved / (timeDiff / 1000.0));
-                    speedKmh = speedMps * 3.6f;
-                }
-            }
-        }
-        locationUpdateCount++;
-        lastLocationLat = gcjLat;
-        lastLocationLon = gcjLon;
-        lastLocationTimeForSpeed = currentTime;
+        float speedKmh = calculateRealTimeSpeed(location, gcjLat, gcjLon);
 
         if (gpsSpeedText != null) {
             gpsSpeedText.setText(String.format(Locale.CHINA, "实速：%.0fkm/h", speedKmh));
@@ -745,6 +723,93 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 }
             }
         });
+    }
+
+    private float calculateRealTimeSpeed(Location location, double gcjLat, double gcjLon) {
+        long currentTime = System.currentTimeMillis();
+        float speedKmh = 0f;
+
+        boolean hasGpsSpeed = location.hasSpeed();
+        float gpsSpeedMps = hasGpsSpeed ? location.getSpeed() : 0f;
+        float gpsSpeedKmh = gpsSpeedMps * 3.6f;
+
+        float computedSpeedKmh = 0f;
+        boolean hasComputedSpeed = false;
+        if (locationUpdateCount >= 1 && lastLocationTimeForSpeed > 0) {
+            long timeDiff = currentTime - lastLocationTimeForSpeed;
+            if (timeDiff > 0 && timeDiff < 10000) {
+                float[] results = new float[1];
+                android.location.Location.distanceBetween(lastLocationLat, lastLocationLon, gcjLat, gcjLon, results);
+                double distanceMoved = results[0];
+                if (distanceMoved < 0.5) {
+                    computedSpeedKmh = 0f;
+                    hasComputedSpeed = true;
+                } else {
+                    computedSpeedKmh = (float) (distanceMoved / (timeDiff / 1000.0)) * 3.6f;
+                    hasComputedSpeed = true;
+                }
+            }
+        }
+        locationUpdateCount++;
+        lastLocationLat = gcjLat;
+        lastLocationLon = gcjLon;
+        lastLocationTimeForSpeed = currentTime;
+
+        if (hasGpsSpeed) {
+            if (hasComputedSpeed && computedSpeedKmh < MIN_VALID_SPEED_KMH && gpsSpeedKmh < MIN_VALID_SPEED_KMH) {
+                speedKmh = 0f;
+            } else {
+                speedKmh = gpsSpeedKmh;
+            }
+        } else if (hasComputedSpeed) {
+            speedKmh = computedSpeedKmh;
+        }
+
+        if (speedKmh < MIN_VALID_SPEED_KMH) {
+            speedKmh = 0f;
+        }
+
+        speedWindow.add(speedKmh);
+        if (speedWindow.size() > SPEED_WINDOW_SIZE) {
+            speedWindow.remove(0);
+        }
+        if (!speedWindow.isEmpty()) {
+            float sum = 0f;
+            for (float s : speedWindow) {
+                sum += s;
+            }
+            currentSmoothedSpeedKmh = sum / speedWindow.size();
+        } else {
+            currentSmoothedSpeedKmh = speedKmh;
+        }
+
+        startSpeedTimeout();
+
+        Log.d(TAG, String.format(Locale.CHINA,
+                "速度计算: GPS=%.1fkm/h, 计算=%.1fkm/h, 平滑后=%.1fkm/h, 窗口=%d",
+                gpsSpeedKmh, computedSpeedKmh, currentSmoothedSpeedKmh, speedWindow.size()));
+
+        return currentSmoothedSpeedKmh;
+    }
+
+    private void startSpeedTimeout() {
+        stopSpeedTimeout();
+        speedTimeoutRunnable = () -> {
+            currentSmoothedSpeedKmh = 0f;
+            speedWindow.clear();
+            if (gpsSpeedText != null) {
+                gpsSpeedText.setText(String.format(Locale.CHINA, "实速：%.0fkm/h", 0f));
+            }
+            Log.d(TAG, "速度超时未更新，归零");
+        };
+        speedTimeoutHandler.postDelayed(speedTimeoutRunnable, SPEED_TIMEOUT_MS);
+    }
+
+    private void stopSpeedTimeout() {
+        if (speedTimeoutRunnable != null) {
+            speedTimeoutHandler.removeCallbacks(speedTimeoutRunnable);
+            speedTimeoutRunnable = null;
+        }
     }
 
     private void announceStation(String stationName, int stationIndex, int totalStations) {
@@ -1966,6 +2031,10 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         realTimeManager = null;
         if (tipsHandler != null) {
             tipsHandler.removeCallbacksAndMessages(null);
+        }
+        stopSpeedTimeout();
+        if (speedTimeoutHandler != null) {
+            speedTimeoutHandler.removeCallbacksAndMessages(null);
         }
     }
 
