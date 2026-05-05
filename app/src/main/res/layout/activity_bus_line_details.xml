@@ -447,15 +447,15 @@
                                 android:text="站点：白门下村  1071m"
                                 android:textColor="#FF0000"
                                 android:layout_marginEnd="10dp"/>
-                            <org.zjfgh.zhujibus.BorderLabel
-                                android:id="@+id/gps_status_info"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                app:labelText="站内"
-                                app:labelLitColor="#00FF00"
-                                app:labelDimColor="#990000"
-                                app:labelTextSize="10sp" />
                         </LinearLayout>
+                        <TextView
+                            android:id="@+id/gps_eat_info"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textSize="12sp"
+                            android:text="预计：下一站 --，终点 --"
+                            android:textColor="#FFFF00"
+                            android:layout_marginTop="2dp" />
                         <LinearLayout
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
@@ -531,7 +531,7 @@
                 <ImageView
                     android:layout_width="130dp"
                     android:layout_height="200dp"
-                    android:src="@drawable/bus_card_reader_icon"/>
+                    android:src="@mipmap/bus_card_reader_icon"/>
                 <LinearLayout
                     android:layout_width="95dp"
                     android:layout_height="60dp"

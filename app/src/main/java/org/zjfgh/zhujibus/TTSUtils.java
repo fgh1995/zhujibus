@@ -224,7 +224,8 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
                 R.raw.en_02_to, R.raw.en_03_is_arriving_at, R.raw.en_03_starting_stop_departing,
                 R.raw.en_04_the_bus_is_moving_tips, R.raw.en_05_next_station,
                 R.raw.en_06_press_the_bell_to_get_off_tips, R.raw.en_17_terminal_station,R.raw.en_07_passengers_terminal_station,
-                R.raw.en_08_thank_you_for_riding_with_us, R.raw.en_091_we_are_now_at, R.raw.en_092_passengers_getting_off
+                R.raw.en_08_thank_you_for_riding_with_us, R.raw.en_091_we_are_now_at, R.raw.en_092_passengers_getting_off,
+                R.raw.cn_031_starting_stop_departing
         };
         int[] enNumRes = {
                 R.raw.dingdong,
@@ -248,7 +249,7 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
                 R.raw.en_num_85, R.raw.en_num_86, R.raw.en_num_87, R.raw.en_num_88, R.raw.en_num_89,
                 R.raw.en_num_90, R.raw.en_num_91, R.raw.en_num_92, R.raw.en_num_93, R.raw.en_num_94,
                 R.raw.en_num_95, R.raw.en_num_96, R.raw.en_num_97, R.raw.en_num_98, R.raw.en_num_99,
-                R.raw.en_route
+                R.raw.en_route, R.raw.en_031_starting_stop_departing
         };
         for (int resId : cnNumRes) {
             int soundId = soundPool.load(context, resId, 1);
@@ -512,15 +513,23 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
                 items.add(new PlaybackItem(R.raw.cn_17_terminal_station));
             }
             addCnStationName(items, nextStation);
-            items.add(new PlaybackItem(R.raw.cn_06_press_the_bell_to_get_off_tips));
+            if (isTerminal) {
+                items.add(new PlaybackItem(R.raw.cn_031_starting_stop_departing));
+            } else {
+                items.add(new PlaybackItem(R.raw.cn_06_press_the_bell_to_get_off_tips));
+            }
+
             items.add(new PlaybackItem(R.raw.en_04_the_bus_is_moving_tips));
             items.add(new PlaybackItem(R.raw.en_05_next_station));
             if (isTerminal) {
                 items.add(new PlaybackItem(R.raw.en_17_terminal_station));
             }
             addEnStationName(items, nextStation);
-            items.add(new PlaybackItem(R.raw.en_06_press_the_bell_to_get_off_tips));
-
+            if (isTerminal) {
+                items.add(new PlaybackItem(R.raw.en_031_starting_stop_departing));
+            } else {
+                items.add(new PlaybackItem(R.raw.en_06_press_the_bell_to_get_off_tips));
+            }
             buildAndPlayMergedAudio(items);
         });
     }
