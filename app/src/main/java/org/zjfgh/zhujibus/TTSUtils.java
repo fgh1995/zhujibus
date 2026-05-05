@@ -592,13 +592,18 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
                 return;
             }
 
-            int targetSampleRate = wavInfos.get(0).sampleRate;
-            int targetChannels = wavInfos.get(0).channels;
-            int targetBitsPerSample = wavInfos.get(0).bitsPerSample;
+            int targetSampleRate = 22050;
+            int targetChannels = 1;
+            int targetBitsPerSample = 16;
 
-            for (WavInfo info : wavInfos) {
+            for (int i = 1; i < wavInfos.size(); i++) {
+                WavInfo info = wavInfos.get(i);
                 if (info.sampleRate != targetSampleRate || info.channels != targetChannels || info.bitsPerSample != targetBitsPerSample) {
-                    Log.w(TAG, "WAV格式不一致，需要重采样: " + info.sampleRate + "Hz/" + info.channels + "ch vs " + targetSampleRate + "Hz/" + targetChannels + "ch");
+                    Log.w(TAG, "WAV格式不一致，需要重采样: " + info.sampleRate + "Hz/" + info.channels + "ch/" + info.bitsPerSample + "bit -> " + targetSampleRate + "Hz/" + targetChannels + "ch/" + targetBitsPerSample + "bit");
+                    WavInfo resampledInfo = resampleAudio(info, targetSampleRate, targetChannels, targetBitsPerSample);
+                    if (resampledInfo != null) {
+                        wavInfos.set(i, resampledInfo);
+                    }
                 }
             }
 
@@ -817,6 +822,147 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
         buffer.put(new byte[]{'d', 'a', 't', 'a'});
         buffer.putInt(pcmDataLength);
         return buffer.array();
+    }
+
+    private WavInfo resampleAudio(WavInfo source, int targetSampleRate, int targetChannels, int targetBitsPerSample) {
+        try {
+            int sourceBytesPerSample = source.bitsPerSample / 8;
+            int targetBytesPerSample = targetBitsPerSample / 8;
+            int sourceBlockAlign = source.channels * sourceBytesPerSample;
+            int targetBlockAlign = targetChannels * targetBytesPerSample;
+
+            int sourceSamples = source.pcmData.length / sourceBlockAlign;
+            double ratio = (double) targetSampleRate / source.sampleRate;
+            int targetSamples = (int) (sourceSamples * ratio);
+
+            if (targetSamples <= 0) {
+                return null;
+            }
+
+            byte[] targetPcm;
+            if (source.channels == targetChannels && source.bitsPerSample == targetBitsPerSample && source.sampleRate == targetSampleRate) {
+                return source;
+            }
+
+            if (source.channels == 2 && targetChannels == 1) {
+                targetPcm = convertStereoToMono(source.pcmData, source.bitsPerSample, ratio);
+            } else if (source.channels == 1 && targetChannels == 1) {
+                if (source.bitsPerSample == targetBitsPerSample && source.sampleRate == targetSampleRate) {
+                    return source;
+                }
+                targetPcm = resampleOnly(source.pcmData, source.bitsPerSample, source.sampleRate, targetSampleRate);
+            } else {
+                byte[] monoPcm = source.channels == 2 ? convertStereoToMono(source.pcmData, source.bitsPerSample, 1.0) : source.pcmData;
+                targetPcm = resampleOnly(monoPcm, source.bitsPerSample, source.sampleRate, targetSampleRate);
+            }
+
+            if (source.bitsPerSample != targetBitsPerSample) {
+                targetPcm = convertBitDepth(targetPcm, source.bitsPerSample, targetBitsPerSample);
+            }
+
+            return new WavInfo(targetPcm, targetSampleRate, targetChannels, targetBitsPerSample);
+        } catch (Exception e) {
+            Log.e(TAG, "重采样失败", e);
+            return null;
+        }
+    }
+
+    private byte[] convertStereoToMono(byte[] stereoData, int bitsPerSample, double ratio) {
+        int bytesPerSample = bitsPerSample / 8;
+        int stereoSamples = stereoData.length / (2 * bytesPerSample);
+        int targetSamples = (int) (stereoSamples * ratio);
+        byte[] mono = new byte[targetSamples * bytesPerSample];
+
+        for (int i = 0; i < targetSamples; i++) {
+            int srcIdx = (int) (i / ratio);
+            if (srcIdx >= stereoSamples) srcIdx = stereoSamples - 1;
+
+            for (int b = 0; b < bytesPerSample; b++) {
+                int leftIdx = srcIdx * 2 * bytesPerSample + b;
+                int rightIdx = leftIdx + bytesPerSample;
+
+                if (bitsPerSample == 16) {
+                    short left = (short) ((stereoData[leftIdx + 1] << 8) | (stereoData[leftIdx] & 0xFF));
+                    short right = (short) ((stereoData[rightIdx + 1] << 8) | (stereoData[rightIdx] & 0xFF));
+                    short mixed = (short) ((left + right) / 2);
+                    mono[i * bytesPerSample + b] = (byte) (mixed & 0xFF);
+                    mono[i * bytesPerSample + b + 1] = (byte) ((mixed >> 8) & 0xFF);
+                } else if (bitsPerSample == 8) {
+                    int left = stereoData[leftIdx] & 0xFF;
+                    int right = stereoData[rightIdx] & 0xFF;
+                    int mixed = (left + right) / 2;
+                    mono[i * bytesPerSample + b] = (byte) mixed;
+                }
+            }
+        }
+        return mono;
+    }
+
+    private byte[] resampleOnly(byte[] pcmData, int bitsPerSample, int sourceRate, int targetRate) {
+        if (sourceRate == targetRate) {
+            return pcmData;
+        }
+
+        int bytesPerSample = bitsPerSample / 8;
+        int sourceSamples = pcmData.length / bytesPerSample;
+        double ratio = (double) targetRate / sourceRate;
+        int targetSamples = (int) (sourceSamples * ratio);
+
+        if (targetSamples <= 0) {
+            return pcmData;
+        }
+
+        byte[] resampled = new byte[targetSamples * bytesPerSample];
+
+        for (int i = 0; i < targetSamples; i++) {
+            double srcIndex = i / ratio;
+            int srcIdx = (int) srcIndex;
+            double frac = srcIndex - srcIdx;
+
+            if (srcIdx >= sourceSamples - 1) {
+                srcIdx = sourceSamples - 1;
+                frac = 0;
+            }
+
+            if (bitsPerSample == 16) {
+                short sample1 = (short) ((pcmData[srcIdx * bytesPerSample + 1] << 8) | (pcmData[srcIdx * bytesPerSample] & 0xFF));
+                short sample2 = (short) ((pcmData[(srcIdx + 1) * bytesPerSample + 1] << 8) | (pcmData[(srcIdx + 1) * bytesPerSample] & 0xFF));
+                short interpolated = (short) (sample1 + (sample2 - sample1) * frac);
+                resampled[i * bytesPerSample] = (byte) (interpolated & 0xFF);
+                resampled[i * bytesPerSample + 1] = (byte) ((interpolated >> 8) & 0xFF);
+            } else if (bitsPerSample == 8) {
+                int sample1 = pcmData[srcIdx * bytesPerSample] & 0xFF;
+                int sample2 = pcmData[(srcIdx + 1) * bytesPerSample] & 0xFF;
+                int interpolated = (int) (sample1 + (sample2 - sample1) * frac);
+                resampled[i * bytesPerSample] = (byte) interpolated;
+            }
+        }
+        return resampled;
+    }
+
+    private byte[] convertBitDepth(byte[] pcmData, int sourceBits, int targetBits) {
+        int sourceBytes = sourceBits / 8;
+        int targetBytes = targetBits / 8;
+        int sourceSamples = pcmData.length / sourceBytes;
+        byte[] converted = new byte[sourceSamples * targetBytes];
+
+        if (targetBits == 16 && sourceBits == 8) {
+            for (int i = 0; i < sourceSamples; i++) {
+                int sample8 = pcmData[i] & 0xFF;
+                short sample16 = (short) ((sample8 - 128) << 8);
+                converted[i * 2] = (byte) (sample16 & 0xFF);
+                converted[i * 2 + 1] = (byte) ((sample16 >> 8) & 0xFF);
+            }
+        } else if (targetBits == 8 && sourceBits == 16) {
+            for (int i = 0; i < sourceSamples; i++) {
+                short sample16 = (short) ((pcmData[i * 2 + 1] << 8) | (pcmData[i * 2] & 0xFF));
+                int sample8 = (sample16 >> 8) + 128;
+                converted[i] = (byte) sample8;
+            }
+        } else {
+            System.arraycopy(pcmData, 0, converted, 0, Math.min(pcmData.length, converted.length));
+        }
+        return converted;
     }
 
     private static class ByteArrayMediaDataSource extends android.media.MediaDataSource {

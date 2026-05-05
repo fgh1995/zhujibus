@@ -457,7 +457,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 gpsLabel.setVisibility(View.GONE);
             }
             if (gpsCount != null) {
-                gpsCount.setText("-- / --");
+                gpsCount.setText("--/--");
                 gpsCount.setTextColor(0xFF555555);
             }
         }
@@ -2150,7 +2150,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     @Override
     protected void onResume() {
         super.onResume();
-        if (realTimeManager != null) {
+        if (currentAnnounceMode == AnnounceMode.NETWORK && realTimeManager != null) {
             realTimeManager.startTracking(getCurrentDirectionId(), this);
         }
         if (currentAnnounceMode == AnnounceMode.GPS) {
