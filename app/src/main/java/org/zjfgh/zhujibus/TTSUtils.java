@@ -215,7 +215,7 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
                 R.raw.cn_num_90, R.raw.cn_num_91, R.raw.cn_num_92, R.raw.cn_num_93, R.raw.cn_num_94,
                 R.raw.cn_num_95, R.raw.cn_num_96, R.raw.cn_num_97, R.raw.cn_num_98, R.raw.cn_num_99,
                 R.raw.cn_num_100, R.raw.cn_num_yao, R.raw.cn_route,
-                R.raw.cn_00_welcom_zhuji, R.raw.cn_00_bus, R.raw.cn_01_this_bus_is_from,
+                R.raw.cn_00_welcom_zhuji, R.raw.cn_00_bus, R.raw.cn_01_this_bus_is_from,R.raw.cn_this_is_a_driver_only_bus,
                 R.raw.cn_01_zhuji_bus_reminder, R.raw.cn_02_heading_to, R.raw.cn_03_direction,
                 R.raw.cn_03_starting_stop_departing, R.raw.cn_04_arriving, R.raw.cn_04_the_bus_is_moving_tips,
                 R.raw.cn_05_next_station, R.raw.cn_06_press_the_bell_to_get_off_tips,
@@ -249,7 +249,7 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
                 R.raw.en_num_85, R.raw.en_num_86, R.raw.en_num_87, R.raw.en_num_88, R.raw.en_num_89,
                 R.raw.en_num_90, R.raw.en_num_91, R.raw.en_num_92, R.raw.en_num_93, R.raw.en_num_94,
                 R.raw.en_num_95, R.raw.en_num_96, R.raw.en_num_97, R.raw.en_num_98, R.raw.en_num_99,
-                R.raw.en_route, R.raw.en_031_starting_stop_departing
+                R.raw.en_route, R.raw.en_031_starting_stop_departing,R.raw.en_this_is_a_driver_only_bus
         };
         for (int resId : cnNumRes) {
             int soundId = soundPool.load(context, resId, 1);
@@ -450,7 +450,7 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
             List<PlaybackItem> items = new ArrayList<>();
             items.add(new PlaybackItem(R.raw.cn_00_welcom_zhuji));
             addCnLineNumber(items, lineName);
-            items.add(new PlaybackItem(R.raw.cn_00_bus));
+            items.add(new PlaybackItem(R.raw.cn_this_is_a_driver_only_bus));
             items.add(new PlaybackItem(R.raw.cn_01_this_bus_is_from));
             addCnStationName(items, startStation);
             items.add(new PlaybackItem(R.raw.cn_02_heading_to));
@@ -462,6 +462,7 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
             String lineNameEn = lineName.replace("路", "");
             items.add(new PlaybackItem(R.raw.en_00_welcome_aboard_the_zhuji));
             addEnLineNumber(items, lineNameEn);
+            items.add(new PlaybackItem(R.raw.en_this_is_a_driver_only_bus));
             items.add(new PlaybackItem(R.raw.en_01_this_bus_is_from));
             addEnStationName(items, startStation);
             items.add(new PlaybackItem(R.raw.en_02_to));
@@ -507,6 +508,7 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
         stopAll();
         backgroundHandler.post(() -> {
             List<PlaybackItem> items = new ArrayList<>();
+            items.add(new PlaybackItem(R.raw.dingdong));
             items.add(new PlaybackItem(R.raw.cn_04_the_bus_is_moving_tips));
             items.add(new PlaybackItem(R.raw.cn_05_next_station));
             if (isTerminal) {
