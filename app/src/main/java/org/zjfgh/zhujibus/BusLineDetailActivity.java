@@ -168,6 +168,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private double nearestStationDirectDistance = -1;
     private boolean isInsideRadius = false;
     private static final double DEFAULT_STATION_RADIUS = 50.0;
+    private static final double STATION_PROXIMITY_THRESHOLD_METERS = 50.0;
     private double stationRadius = DEFAULT_STATION_RADIUS;
     private Slider radiusSlider;
     private List<io.sgr.geometry.Coordinate> routePoints;
@@ -760,10 +761,34 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
 
         double distanceToNext = 0;
         double distanceToNextDirect = 0;
+        int currentStationIndex = -1;
+        for (int i = 0; i < totalStations; i++) {
+            BusApiClient.BusLineStation s = stations.get(i);
+            if (s.stationName != null && s.stationName.equals(nearestStationName)) {
+                currentStationIndex = i;
+                break;
+            }
+        }
         if (nextStationIndex >= 0) {
             BusApiClient.BusLineStation nextStation = stations.get(nextStationIndex);
             double stationLat = nextStation.poiOriginLat;
             double stationLon = nextStation.poiOriginLon;
+            double segmentDistance = 0;
+            if (currentStationIndex >= 0 && currentStationIndex < totalStations - 1) {
+                BusApiClient.BusLineStation currentStation = stations.get(currentStationIndex);
+                double currentLat = currentStation.poiOriginLat;
+                double currentLon = currentStation.poiOriginLon;
+                if (routePoints != null && !routePoints.isEmpty()) {
+                    io.sgr.geometry.utils.RouteGeometryUtils.RouteDistanceResult segResult =
+                            io.sgr.geometry.utils.RouteGeometryUtils.calculateDistances(
+                                    currentLat, currentLon, stationLat, stationLon, routePoints);
+                    segmentDistance = segResult.alongRouteDistance >= 0 ? segResult.alongRouteDistance : segResult.directDistance;
+                } else {
+                    float[] results = new float[1];
+                    Location.distanceBetween(currentLat, currentLon, stationLat, stationLon, results);
+                    segmentDistance = results[0];
+                }
+            }
             if (routePoints != null && !routePoints.isEmpty()) {
                 io.sgr.geometry.utils.RouteGeometryUtils.RouteDistanceResult distResult =
                         io.sgr.geometry.utils.RouteGeometryUtils.calculateDistances(
@@ -780,6 +805,23 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 distanceToNextDirect = distanceToNext;
                 Log.d(TAG, String.format(Locale.CHINA, "EAT计算: 下一站[%d]%s 直线=%.0fm (无沿线数据)",
                         nextStationIndex, nextStation.stationName, distanceToNext));
+            }
+            if (nearestStationDistance >= STATION_PROXIMITY_THRESHOLD_METERS && segmentDistance > 0) {
+                double calculatedDistance = segmentDistance - nearestStationDistance - 100;
+                if (calculatedDistance > 0) {
+                    distanceToNext = calculatedDistance;
+                    Log.d(TAG, String.format(Locale.CHINA, "EAT修正: 站点[%d]%s->[%d]%s 站间距离=%.0fm, GPS到站点=%.0fm, 修正后=%.0fm",
+                            currentStationIndex, nearestStationName, nextStationIndex, nextStation.stationName,
+                            segmentDistance, nearestStationDistance, distanceToNext));
+                }
+            } else {
+                if (nearestStationDistance < STATION_PROXIMITY_THRESHOLD_METERS) {
+                    distanceToNext = 0;
+                    Log.d(TAG, String.format(Locale.CHINA, "EAT修正: 在站点[%d]%s停靠中，忽略到下一站距离",
+                            currentStationIndex, nearestStationName));
+                } else {
+                    distanceToNext = nearestStationDistance;
+                }
             }
         } else {
             Log.d(TAG, "EAT计算: 未找到有效的nextStationIndex");
@@ -833,9 +875,11 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
 
         Log.d(TAG, String.format(Locale.CHINA, "EAT计算: distanceToNext=%.0fm, distanceToTerminal=%.0fm",
                 distanceToNext, distanceToTerminal));
-
+        Log.d(TAG,String.format(Locale.CHINA, "最近站点: %s (沿线%s/直线%s)",
+                nearestStationName, formatDistance(nearestStationDistance), formatDistance(nearestStationDirectDistance)));
         String nextEat = "--";
         String terminalEat = "--";
+        Log.d(TAG, String.format(Locale.CHINA, "当前站到下一站沿线距离: %s", formatDistance(distanceToNext)));
 
         if (speedKmh > MIN_VALID_SPEED_KMH) {
             double speedMps = speedKmh / 3.6;
@@ -855,7 +899,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 terminalEat = formatDistance(distanceToTerminal);
             }
         }
-
+        
         String result = String.format(Locale.CHINA, "预计：下一站 %s，终点 %s", nextEat, terminalEat);
         Log.d(TAG, "EAT计算结果: " + result);
         return result;
