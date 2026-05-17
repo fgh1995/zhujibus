@@ -136,6 +136,8 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     TextView gpsCount;
     TextView radiusMinText;
     TextView radiusMaxText;
+    TextView exitRadiusMinText;
+    TextView exitRadiusMaxText;
     LinearLayout gpsLabel;
     TextView gpsEatInfo;
     private ValueAnimator errorBlinkAnimator;
@@ -167,11 +169,15 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private double nearestStationLon = 0;
     private double nearestStationDirectDistance = -1;
     private boolean isInsideRadius = false;
-    private static final double DEFAULT_STATION_RADIUS = 50.0;
-    private static final double STATION_PROXIMITY_THRESHOLD_METERS = 50.0;
-    private double stationRadius = DEFAULT_STATION_RADIUS;
-    private Slider radiusSlider;
+    private boolean isBeyondExitRadius = false;
+    private static final double DEFAULT_ENTER_STATION_RADIUS = 30.0;
+    private static final double DEFAULT_EXIT_STATION_RADIUS = 80.0;
+    private double enterStationRadius = DEFAULT_ENTER_STATION_RADIUS;
+    private double exitStationRadius = DEFAULT_EXIT_STATION_RADIUS;
+    private Slider enterRadiusSlider;
+    private Slider exitRadiusSlider;
     private List<io.sgr.geometry.Coordinate> routePoints;
+    private static final double STATION_PROXIMITY_THRESHOLD_METERS = 50.0;
 
     private double lastLocationLat = 0;
     private double lastLocationLon = 0;
@@ -578,6 +584,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         nearestStationLon = 0;
         nearestStationDirectDistance = -1;
         isInsideRadius = false;
+        isBeyondExitRadius = false;
         int currentInsideStationIndex = -1;
 
         for (int i = 0; i < stations.size(); i++) {
@@ -626,34 +633,48 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 nearestStationDirectDistance = directDistance;
             }
 
-            if (distanceForCompare <= stationRadius) {
+            if (distanceForCompare <= enterStationRadius) {
                 isInsideRadius = true;
                 currentInsideStationIndex = i;
                 int totalStations = stations.size();
                 boolean isTerminalStation = i >= totalStations - 1;
+                boolean isStartStation = (i == 0);
 
                 if (isTerminalStation && hasLeftTerminalStation) {
                     Log.d(TAG, "已离开过终点站，忽略此次进入终点站");
                     break;
                 }
 
-                Log.d(TAG, String.format(Locale.CHINA, "触发报站检查: isInsideStationRadius=%b, lastAnnouncedStationIndex=%d, i=%d", isInsideStationRadius, lastAnnouncedStationIndex, i));
-                if (!isInsideStationRadius || lastAnnouncedStationIndex != i) {
-                    isInsideStationRadius = true;
-                    lastAnnouncedStationIndex = i;
-                    announceStation(station.stationName, i, stations.size());
-                    Log.d(TAG, "已触发报站: " + station.stationName);
+                if (isStartStation) {
+                    if (isBeyondExitRadius && lastAnnouncedStationIndex != i) {
+                        lastAnnouncedStationIndex = i;
+                        announceStation(station.stationName, i, stations.size());
+                        Log.d(TAG, "起点站已触发报站(出站): " + station.stationName);
+                    }
+                } else {
+                    Log.d(TAG, String.format(Locale.CHINA, "触发报站检查: isInsideStationRadius=%b, lastAnnouncedStationIndex=%d, i=%d", isInsideStationRadius, lastAnnouncedStationIndex, i));
+                    if (!isInsideStationRadius || lastAnnouncedStationIndex != i) {
+                        isInsideStationRadius = true;
+                        lastAnnouncedStationIndex = i;
+                        announceStation(station.stationName, i, stations.size());
+                        Log.d(TAG, "已触发报站: " + station.stationName);
+                    }
                 }
                 break;
+            }
+
+            if (i == lastInsideStationIndex && distanceForCompare > exitStationRadius) {
+                isBeyondExitRadius = true;
             }
         }
 
         int leavingStationFinal = -1;
         boolean isLeavingTerminal = false;
-        if (!isInsideRadius && lastInsideStationIndex != -1) {
+        if (isBeyondExitRadius && lastInsideStationIndex != -1) {
             int leavingIndex = lastInsideStationIndex;
             int totalStations = stations.size();
             boolean isTerminalStation = leavingIndex >= totalStations - 1;
+            boolean isStartStation = leavingIndex == 0;
 
             if (isTerminalStation) {
                 isLeavingTerminal = true;
@@ -665,7 +686,10 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             leavingStationFinal = leavingIndex;
             gpsCurrentStationIndex = leavingIndex;
 
-            if (!isTerminalStation) {
+            if (isStartStation) {
+                announceStation(stations.get(leavingIndex).stationName, leavingIndex, stations.size());
+                Log.d(TAG, "起点站离开触发报站: " + stations.get(leavingIndex).stationName);
+            } else if (!isTerminalStation) {
                 announceLeavingStation(stations.get(leavingIndex).stationName, leavingIndex, stations.size());
                 Log.d(TAG, "已触发离站报站: " + stations.get(leavingIndex).stationName);
             } else {
@@ -1272,19 +1296,34 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             updateDistanceModeDisplay();
             distanceModeInfo.setOnClickListener(v -> showDistanceModeDialog());
         }
-        radiusSlider = findViewById(R.id.radius_slider);
+        enterRadiusSlider = findViewById(R.id.enter_radius_slider);
+        exitRadiusSlider = findViewById(R.id.exit_radius_slider);
         radiusMinText = findViewById(R.id.radius_min_text);
         radiusMaxText = findViewById(R.id.radius_max_text);
+        exitRadiusMinText = findViewById(R.id.exit_radius_min_text);
+        exitRadiusMaxText = findViewById(R.id.exit_radius_max_text);
         if (radiusMinText != null) {
             radiusMinText.setTypeface(dottedSongti);
         }
         if (radiusMaxText != null) {
             radiusMaxText.setTypeface(dottedSongti);
         }
-        if (radiusSlider != null) {
-            radiusSlider.setValue((float) stationRadius);
-            radiusSlider.addOnChangeListener((slider, value, fromUser) -> {
-                stationRadius = value;
+        if (exitRadiusMinText != null) {
+            exitRadiusMinText.setTypeface(dottedSongti);
+        }
+        if (exitRadiusMaxText != null) {
+            exitRadiusMaxText.setTypeface(dottedSongti);
+        }
+        if (enterRadiusSlider != null) {
+            enterRadiusSlider.setValue((float) enterStationRadius);
+            enterRadiusSlider.addOnChangeListener((slider, value, fromUser) -> {
+                enterStationRadius = value;
+            });
+        }
+        if (exitRadiusSlider != null) {
+            exitRadiusSlider.setValue((float) exitStationRadius);
+            exitRadiusSlider.addOnChangeListener((slider, value, fromUser) -> {
+                exitStationRadius = value;
             });
         }
 
