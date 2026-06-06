@@ -155,11 +155,12 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     }
     private AnnounceMode currentAnnounceMode = AnnounceMode.NETWORK;
 
-    private int lastAnnouncedStationIndex = -1;
-    private boolean isInsideStationRadius = false;
-    private int lastInsideStationIndex = -1;
-    private boolean hasLeftTerminalStation = false;
-    private int gpsCurrentStationIndex = -1;
+    // GPS 模式下的状态变量由后台 HandlerThread 读取/写入，加 volatile 保证可见性
+    private volatile int lastAnnouncedStationIndex = -1;
+    private volatile boolean isInsideStationRadius = false;
+    private volatile int lastInsideStationIndex = -1;
+    private volatile boolean hasLeftTerminalStation = false;
+    private volatile int gpsCurrentStationIndex = -1;
 
     private double currentGpsLat = 0;
     private double currentGpsLon = 0;
@@ -172,11 +173,13 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private boolean isBeyondExitRadius = false;
     private static final double DEFAULT_ENTER_STATION_RADIUS = 30.0;
     private static final double DEFAULT_EXIT_STATION_RADIUS = 80.0;
-    private double enterStationRadius = DEFAULT_ENTER_STATION_RADIUS;
-    private double exitStationRadius = DEFAULT_EXIT_STATION_RADIUS;
+    // 后台 GPS 线程会读，滑块在主线程改，volatile 保证可见性
+    private volatile double enterStationRadius = DEFAULT_ENTER_STATION_RADIUS;
+    private volatile double exitStationRadius = DEFAULT_EXIT_STATION_RADIUS;
     private Slider enterRadiusSlider;
     private Slider exitRadiusSlider;
-    private List<io.sgr.geometry.Coordinate> routePoints;
+    // 后台 GPS 线程会读，主线程在 showDirection 中赋值，volatile 保证可见性
+    private volatile List<io.sgr.geometry.Coordinate> routePoints;
     private static final double STATION_PROXIMITY_THRESHOLD_METERS = 50.0;
 
     private double lastLocationLat = 0;
@@ -192,6 +195,8 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private float currentSmoothedSpeedKmh = 0f;
     private Handler speedTimeoutHandler = new Handler();
     private Runnable speedTimeoutRunnable;
+    // 保护 calculateRealTimeSpeed 涉及的字段：后台 HandlerThread 与主线程并发读写
+    private final Object speedLock = new Object();
 
     public enum DistanceMode {
         ALONG_ROUTE("沿线距离"),
@@ -226,6 +231,9 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private static final String[] TIPS_TEXT_BASE = {"文明排队   上下有序", "严禁携带危险物品上车"};
     private static final int[] TIPS_COLOR_BASE = {0xFFFFFF00, 0xFF00FFFF};
     private static final int TIPS_COLOR_PURPLE = 0xFFAA00FF;
+    // GPS 模式报站文案：中英双语"扫码评价"提示
+    private static final String QR_HINT_CN = "        欢迎扫车内二维码对本次乘车服务进行评价";
+    private static final String QR_HINT_EN = "    Scan the QR code on board to rate your ride. Thank you!";
     private String[] currentTipsText = TIPS_TEXT_BASE;
     private int[] currentTipsColor = TIPS_COLOR_BASE;
     private Handler tipsHandler = new Handler();
@@ -379,12 +387,14 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             lastInsideStationIndex = -1;
             hasLeftTerminalStation = false;
             gpsCurrentStationIndex = -1;
-            lastLocationTimeForSpeed = 0;
-            lastLocationLat = 0;
-            lastLocationLon = 0;
-            locationUpdateCount = 0;
-            speedWindow.clear();
-            currentSmoothedSpeedKmh = 0f;
+            synchronized (speedLock) {
+                lastLocationTimeForSpeed = 0;
+                lastLocationLat = 0;
+                lastLocationLon = 0;
+                locationUpdateCount = 0;
+                speedWindow.clear();
+                currentSmoothedSpeedKmh = 0f;
+            }
             stopSpeedTimeout();
             if (realTimeManager != null) {
                 realTimeManager.stopTracking();
@@ -399,7 +409,9 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             GpsWarmingUp.addSatelliteListener(satelliteCountListener);
             Location lastLocation = GpsWarmingUp.getLastKnownLocation();
             if (lastLocation != null) {
-                handleGpsLocation(lastLocation);
+                // post 到 GPS 后台线程，避免重计算阻塞主线程
+                final Location snapshot = lastLocation;
+                GpsWarmingUp.postToGpsThread(() -> handleGpsLocation(snapshot));
             }
             checkGpsProviderStatus();
             startGpsTimeUpdate();
@@ -516,20 +528,17 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     };
 
     private void handleGpsLocation(Location location) {
+        // 此方法由 GpsWarmingUp 的后台 HandlerThread 调用，重计算全在后台跑，UI 写入统一在主线程。
         if (currentAnnounceMode != AnnounceMode.GPS) {
             return;
         }
         if (realTimeManager == null || realTimeManager.getStationList() == null) {
             return;
         }
-        isGpsSignalNormal = true;
-        updateGpsStatusIndicator(true);
-        if (gpsLabel != null && gpsLabel.getVisibility() != View.VISIBLE) {
-            gpsLabel.setVisibility(View.VISIBLE);
-        }
+
+        // 坐标转换（纯计算）
         currentGpsLat = location.getLatitude();
         currentGpsLon = location.getLongitude();
-
         double gcjLat = currentGpsLat;
         double gcjLon = currentGpsLon;
 
@@ -539,54 +548,75 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 io.sgr.geometry.Coordinate gcjCoordFromWgs = GeometryUtils.wgs2gcj(wgsCoord);
                 gcjLat = gcjCoordFromWgs.getLat();
                 gcjLon = gcjCoordFromWgs.getLng();
-                Log.d(TAG, String.format(Locale.CHINA, "WGS→GCJ转换后: lat=%.6f, lon=%.6f", gcjLat, gcjLon));
                 break;
             case GCJ_TO_WGS:
                 io.sgr.geometry.Coordinate gcjCoordForWgs = new io.sgr.geometry.Coordinate(currentGpsLat, currentGpsLon);
                 io.sgr.geometry.Coordinate wgsCoordFromGcj = GeometryUtils.gcj2wgs(gcjCoordForWgs);
                 gcjLat = wgsCoordFromGcj.getLat();
                 gcjLon = wgsCoordFromGcj.getLng();
-                Log.d(TAG, String.format(Locale.CHINA, "GCJ→WGS转换后: lat=%.6f, lon=%.6f", gcjLat, gcjLon));
                 break;
             case NO_CONVERT:
-                Log.d(TAG, String.format(Locale.CHINA, "不转换，直接使用原始坐标"));
-                break;
-        }
-        Log.d(TAG, String.format(Locale.CHINA, "最终使用: lat=%.6f, lon=%.6f", gcjLat, gcjLon));
-        Log.d(TAG, String.format(Locale.CHINA, "============================"));
-
-        String coordSystemLabel;
-        switch (currentCoordConvertMode) {
-            case NO_CONVERT:
-                coordSystemLabel = "原始";
-                break;
-            case GCJ_TO_WGS:
-                coordSystemLabel = "WGS";
-                break;
             default:
-                coordSystemLabel = "GCJ-02";
+                break;
         }
-        gpsLocationInfo.setText(String.format(Locale.CHINA, "坐标：%.6f, %.6f (%s)", gcjLat, gcjLon, coordSystemLabel));
 
+        // 速度计算（纯计算）
         float speedKmh = calculateRealTimeSpeed(location, gcjLat, gcjLon);
 
-        if (gpsSpeedText != null) {
-            gpsSpeedText.setText(String.format(Locale.CHINA, "实速：%.0fkm/h", speedKmh));
-        }
+        // 主线程：更新"信号正常"指示、坐标显示、速度显示
+        final double finalGcjLat = gcjLat;
+        final double finalGcjLon = gcjLon;
+        final float finalSpeedKmh = speedKmh;
+        runOnUiThread(() -> {
+            if (currentAnnounceMode != AnnounceMode.GPS) {
+                return;
+            }
+            isGpsSignalNormal = true;
+            updateGpsStatusIndicator(true);
+            if (gpsLabel != null && gpsLabel.getVisibility() != View.VISIBLE) {
+                gpsLabel.setVisibility(View.VISIBLE);
+            }
+            String coordSystemLabel;
+            switch (currentCoordConvertMode) {
+                case NO_CONVERT:
+                    coordSystemLabel = "原始";
+                    break;
+                case GCJ_TO_WGS:
+                    coordSystemLabel = "WGS";
+                    break;
+                default:
+                    coordSystemLabel = "GCJ-02";
+            }
+            if (gpsLocationInfo != null) {
+                gpsLocationInfo.setText(String.format(Locale.CHINA, "坐标：%.6f, %.6f (%s)", finalGcjLat, finalGcjLon, coordSystemLabel));
+            }
+            if (gpsSpeedText != null) {
+                gpsSpeedText.setText(String.format(Locale.CHINA, "实速：%.0fkm/h", finalSpeedKmh));
+            }
+        });
 
-        updateGpsStatusIndicator(true);
+        // 快照当前状态（后台线程读，主线程可能并发改，volatile 已保证可见性）
+        final boolean wasInsideStation = isInsideStationRadius;
+        final int snapshotLastAnnounced = lastAnnouncedStationIndex;
+        final int snapshotLastInside = lastInsideStationIndex;
+        final boolean snapshotHasLeftTerminal = hasLeftTerminalStation;
+        final int snapshotGpsCurrent = gpsCurrentStationIndex;
 
-        boolean wasInsideStation = isInsideStationRadius;
+        // 遍历所有站点（重计算）
         List<BusApiClient.BusLineStation> stations = realTimeManager.getStationList();
         nearestStationName = "";
         nearestStationDistance = -1;
         nearestStationLat = 0;
         nearestStationLon = 0;
         nearestStationDirectDistance = -1;
-        isInsideRadius = false;
-        isBeyondExitRadius = false;
+        boolean isInsideRadius = false;
+        boolean isBeyondExitRadius = false;
         int currentInsideStationIndex = -1;
 
+        // 进入半径使用沿线距离；只有"沿线距离接近 enterStationRadius"或"上一帧已接近"的站点才走 calculateDistances，
+        // 其他站点直接用 Android 自带的 Location.distanceBetween（fast path）快算直线距离——剪枝后单帧
+        // calculateDistances 调用次数从 站点数 降到 ≤2 次，主线程压力大幅下降。
+        final float[] tmpResults = new float[1];
         for (int i = 0; i < stations.size(); i++) {
             BusApiClient.BusLineStation station = stations.get(i);
             double stationLat = station.poiOriginLat;
@@ -595,32 +625,35 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 continue;
             }
 
-            double distance;
-            double directDistance = -1;
-            double gpsToRouteDist = -1;
-            double stationToRouteDist = -1;
+            // 先用直线距离做一次 cheap 过滤
+            Location.distanceBetween(gcjLat, gcjLon, stationLat, stationLon, tmpResults);
+            double straightDistance = tmpResults[0];
+            double directDistance = straightDistance;
             double alongRouteDist = -1;
+            double gpsToRouteDist = -1;
+            double distance = straightDistance;
 
-            if (routePoints != null && !routePoints.isEmpty()) {
+            boolean needAlongRoute = routePoints != null && !routePoints.isEmpty();
+            // 剪枝条件：
+            //   1) 直线距离 <= enterStationRadius（候选进站点）
+            //   2) i 是上一帧 inside 的站点且直线距离 <= 2*exitStationRadius（候选离站点，放大以兜底"沿线近但直线远"）
+            //   3) 直线距离 <= STATION_PROXIMITY_THRESHOLD_METERS 且需要 EAT 修正
+            boolean isCandidate = straightDistance <= enterStationRadius
+                    || (i == snapshotLastInside && straightDistance <= exitStationRadius * 2)
+                    || straightDistance <= STATION_PROXIMITY_THRESHOLD_METERS;
+
+            if (needAlongRoute && isCandidate) {
                 io.sgr.geometry.utils.RouteGeometryUtils.RouteDistanceResult distResult =
                         io.sgr.geometry.utils.RouteGeometryUtils.calculateDistances(
                                 gcjLat, gcjLon, stationLat, stationLon, routePoints);
-
                 directDistance = distResult.directDistance;
                 alongRouteDist = distResult.alongRouteDistance;
                 gpsToRouteDist = distResult.gpsToRouteDistance;
-                stationToRouteDist = distResult.stationToRouteDistance;
-
-                distance = alongRouteDist;
-            } else {
-                float[] results = new float[1];
-                Location.distanceBetween(gcjLat, gcjLon, stationLat, stationLon, results);
-                distance = results[0];
-                directDistance = distance;
+                distance = alongRouteDist >= 0 ? alongRouteDist : directDistance;
             }
 
             double distanceForCompare;
-            if (currentDistanceMode == DistanceMode.ALONG_ROUTE && routePoints != null && !routePoints.isEmpty()) {
+            if (currentDistanceMode == DistanceMode.ALONG_ROUTE && needAlongRoute) {
                 distanceForCompare = alongRouteDist >= 0 ? alongRouteDist : directDistance;
             } else {
                 distanceForCompare = directDistance;
@@ -636,110 +669,135 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             if (distanceForCompare <= enterStationRadius) {
                 isInsideRadius = true;
                 currentInsideStationIndex = i;
-                int totalStations = stations.size();
-                boolean isTerminalStation = i >= totalStations - 1;
-                boolean isStartStation = (i == 0);
-
-                if (isTerminalStation && hasLeftTerminalStation) {
-                    Log.d(TAG, "已离开过终点站，忽略此次进入终点站");
-                    break;
-                }
-
-                if (isStartStation) {
-                    if (isBeyondExitRadius && lastAnnouncedStationIndex != i) {
-                        lastAnnouncedStationIndex = i;
-                        announceStation(station.stationName, i, stations.size());
-                        Log.d(TAG, "起点站已触发报站(出站): " + station.stationName);
-                    }
-                } else {
-                    Log.d(TAG, String.format(Locale.CHINA, "触发报站检查: isInsideStationRadius=%b, lastAnnouncedStationIndex=%d, i=%d", isInsideStationRadius, lastAnnouncedStationIndex, i));
-                    if (!isInsideStationRadius || lastAnnouncedStationIndex != i) {
-                        isInsideStationRadius = true;
-                        lastAnnouncedStationIndex = i;
-                        announceStation(station.stationName, i, stations.size());
-                        Log.d(TAG, "已触发报站: " + station.stationName);
-                    }
-                }
                 break;
             }
 
-            if (i == lastInsideStationIndex && distanceForCompare > exitStationRadius) {
+            if (i == snapshotLastInside && distanceForCompare > exitStationRadius) {
                 isBeyondExitRadius = true;
             }
         }
 
         int leavingStationFinal = -1;
         boolean isLeavingTerminal = false;
-        if (isBeyondExitRadius && lastInsideStationIndex != -1) {
-            int leavingIndex = lastInsideStationIndex;
+        if (isBeyondExitRadius && snapshotLastInside != -1) {
+            int leavingIndex = snapshotLastInside;
             int totalStations = stations.size();
             boolean isTerminalStation = leavingIndex >= totalStations - 1;
-            boolean isStartStation = leavingIndex == 0;
 
             if (isTerminalStation) {
                 isLeavingTerminal = true;
-                hasLeftTerminalStation = true;
             }
 
-            isInsideStationRadius = false;
-            lastInsideStationIndex = -1;
             leavingStationFinal = leavingIndex;
-            gpsCurrentStationIndex = leavingIndex;
-
-            if (isStartStation) {
-                announceStation(stations.get(leavingIndex).stationName, leavingIndex, stations.size());
-                Log.d(TAG, "起点站离开触发报站: " + stations.get(leavingIndex).stationName);
-            } else if (!isTerminalStation) {
-                announceLeavingStation(stations.get(leavingIndex).stationName, leavingIndex, stations.size());
-                Log.d(TAG, "已触发离站报站: " + stations.get(leavingIndex).stationName);
-            } else {
-                Log.d(TAG, "已离开终点站，不报站: " + stations.get(leavingIndex).stationName);
-            }
         } else if (isInsideRadius) {
             int totalStations = stations.size();
             boolean isTerminalStation = currentInsideStationIndex >= totalStations - 1;
 
             if (currentInsideStationIndex >= 0 && !isTerminalStation) {
-                hasLeftTerminalStation = false;
-            }
-            if (currentInsideStationIndex >= 0) {
-                gpsCurrentStationIndex = currentInsideStationIndex;
-            }
-
-            if (isTerminalStation && hasLeftTerminalStation) {
-                currentInsideStationIndex = -1;
-                isInsideRadius = false;
-            } else {
-                lastInsideStationIndex = currentInsideStationIndex;
+                // 普通进站会重置 hasLeftTerminalStation
             }
         }
 
-        final boolean isInsideRadiusFinal = isInsideRadius;
-        final int currentInsideStationIndexFinal = currentInsideStationIndex;
-        final int leavingStationIndexFinal = leavingStationFinal;
-        final boolean isLeavingTerminalFinal = isLeavingTerminal;
+        // EAT 计算（纯计算）—— 当前 InsideStationIndex 优先，否则用 leavingStationFinal，否则用 snapshotGpsCurrent
+        int eatRefIndex = currentInsideStationIndex >= 0 ? currentInsideStationIndex :
+                (leavingStationFinal >= 0 ? leavingStationFinal : snapshotGpsCurrent);
+        String eatText = calculateGpsEatText(stations, currentInsideStationIndex, leavingStationFinal, speedKmh, eatRefIndex);
 
-        String eatText = calculateGpsEatText(stations, currentInsideStationIndex, leavingStationFinal, speedKmh, gpsCurrentStationIndex);
+        // 把后台计算的所有结果打成 final 快照，runOnUiThread 块只读快照，避免被下一次 GPS 回调覆盖
+        // 同时这些变量在循环中被重新赋值过，必须 final 拷贝后才能在 lambda 内引用
+        final String resultNearestName = nearestStationName;
+        final double resultNearestDistance = nearestStationDistance;
+        final double resultNearestDirect = nearestStationDirectDistance;
+        final String resultEatText = eatText;
+        final boolean finalIsInsideRadius = isInsideRadius;
+        final boolean finalIsBeyondExitRadius = isBeyondExitRadius;
+        final int finalCurrentInsideStationIndex = currentInsideStationIndex;
+        final int finalLeavingStationFinal = leavingStationFinal;
+        final boolean finalIsLeavingTerminal = isLeavingTerminal;
 
+        // 主线程：状态变量写、报站触发、View 更新（一次性切到主线程，避免多次 post）
         runOnUiThread(() -> {
-            if (nearestStationDistance >= 0) {
-                gpsNearestStationInfo.setText(String.format(Locale.CHINA, "站点: %s (沿线%s/直线%s)",
-                        nearestStationName, formatDistance(nearestStationDistance), formatDistance(nearestStationDirectDistance)));
+            if (currentAnnounceMode != AnnounceMode.GPS) {
+                return;
             }
-            if (gpsEatInfo != null) {
-                gpsEatInfo.setText(eatText);
-            }
-            if (busLineView != null) {
-                if (isLeavingTerminalFinal) {
-                    busLineView.updateGpsPosition(-1, false);
-                } else if (isInsideRadiusFinal && currentInsideStationIndexFinal >= 0) {
-                    busLineView.updateGpsPosition(currentInsideStationIndexFinal, true);
-                } else if (!isInsideRadiusFinal && leavingStationIndexFinal >= 0) {
-                    busLineView.updateGpsPosition(leavingStationIndexFinal, false);
+            int totalStations = stations.size();
+
+            // ---- 状态变量更新（保证主线程串行写）----
+            if (finalIsBeyondExitRadius && snapshotLastInside != -1) {
+                int leavingIndex = snapshotLastInside;
+                boolean isTerminalStation = leavingIndex >= totalStations - 1;
+                boolean isStartStation = leavingIndex == 0;
+
+                if (isTerminalStation) {
+                    hasLeftTerminalStation = true;
+                }
+                isInsideStationRadius = false;
+                lastInsideStationIndex = -1;
+                gpsCurrentStationIndex = leavingIndex;
+
+                if (isStartStation) {
+                    lastAnnouncedStationIndex = leavingIndex;
+                    announceStation(stations.get(leavingIndex).stationName, leavingIndex, totalStations);
+                    Log.d(TAG, "起点站离开触发报站: " + stations.get(leavingIndex).stationName);
+                } else if (!isTerminalStation) {
+                    announceLeavingStation(stations.get(leavingIndex).stationName, leavingIndex, totalStations);
+                    Log.d(TAG, "已触发离站报站: " + stations.get(leavingIndex).stationName);
+                } else {
+                    Log.d(TAG, "已离开终点站，不报站: " + stations.get(leavingIndex).stationName);
+                }
+            } else if (finalIsInsideRadius) {
+                boolean isTerminalStation = finalCurrentInsideStationIndex >= totalStations - 1;
+                boolean isStartStation = finalCurrentInsideStationIndex == 0;
+
+                if (isTerminalStation && snapshotHasLeftTerminal) {
+                    // 忽略
+                } else if (isStartStation) {
+                    if (snapshotLastAnnounced != finalCurrentInsideStationIndex) {
+                        lastAnnouncedStationIndex = finalCurrentInsideStationIndex;
+                        announceStation(stations.get(finalCurrentInsideStationIndex).stationName, finalCurrentInsideStationIndex, totalStations);
+                        Log.d(TAG, "起点站已触发报站(出站): " + stations.get(finalCurrentInsideStationIndex).stationName);
+                    }
+                } else {
+                    if (!isInsideStationRadius || snapshotLastAnnounced != finalCurrentInsideStationIndex) {
+                        isInsideStationRadius = true;
+                        lastAnnouncedStationIndex = finalCurrentInsideStationIndex;
+                        announceStation(stations.get(finalCurrentInsideStationIndex).stationName, finalCurrentInsideStationIndex, totalStations);
+                        Log.d(TAG, "已触发报站: " + stations.get(finalCurrentInsideStationIndex).stationName);
+                    }
+                }
+                if (finalCurrentInsideStationIndex >= 0 && !isTerminalStation) {
+                    hasLeftTerminalStation = false;
+                }
+                if (finalCurrentInsideStationIndex >= 0) {
+                    gpsCurrentStationIndex = finalCurrentInsideStationIndex;
+                }
+                if (isTerminalStation && snapshotHasLeftTerminal) {
+                    // already handled above
+                } else {
+                    lastInsideStationIndex = finalCurrentInsideStationIndex;
                 }
             }
-            if (isLeavingTerminalFinal) {
-            } else if (isInsideRadiusFinal) {
+
+            // ---- View 更新（使用 final 快照，避免被下一次 GPS 回调覆盖）----
+            if (resultNearestDistance >= 0 && gpsNearestStationInfo != null) {
+                gpsNearestStationInfo.setText(String.format(Locale.CHINA, "站点: %s (沿线%s/直线%s)",
+                        resultNearestName, formatDistance(resultNearestDistance), formatDistance(resultNearestDirect)));
+            }
+            if (gpsEatInfo != null) {
+                gpsEatInfo.setText(resultEatText);
+            }
+            if (busLineView != null) {
+                if (finalIsLeavingTerminal) {
+                    busLineView.updateGpsPosition(-1, false);
+                } else if (finalIsInsideRadius && finalCurrentInsideStationIndex >= 0) {
+                    busLineView.updateGpsPosition(finalCurrentInsideStationIndex, true);
+                } else if (!finalIsInsideRadius && finalLeavingStationFinal >= 0) {
+                    busLineView.updateGpsPosition(finalLeavingStationFinal, false);
+                }
+            }
+            if (finalIsLeavingTerminal) {
+                // nothing
+            } else if (finalIsInsideRadius) {
                 if (!wasInsideStation) {
                     isInsideStationRadius = true;
                 }
@@ -952,68 +1010,67 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     }
 
     private float calculateRealTimeSpeed(Location location, double gcjLat, double gcjLon) {
-        long currentTime = System.currentTimeMillis();
-        float speedKmh = 0f;
+        // 整个方法体在 speedLock 内执行，确保后台 HandlerThread 跑计算时与主线程 reset/clear 互斥
+        synchronized (speedLock) {
+            long currentTime = System.currentTimeMillis();
+            float speedKmh = 0f;
 
-        boolean hasGpsSpeed = location.hasSpeed();
-        float gpsSpeedMps = hasGpsSpeed ? location.getSpeed() : 0f;
-        float gpsSpeedKmh = gpsSpeedMps * 3.6f;
+            boolean hasGpsSpeed = location.hasSpeed();
+            float gpsSpeedMps = hasGpsSpeed ? location.getSpeed() : 0f;
+            float gpsSpeedKmh = gpsSpeedMps * 3.6f;
 
-        float computedSpeedKmh = 0f;
-        boolean hasComputedSpeed = false;
-        if (locationUpdateCount >= 1 && lastLocationTimeForSpeed > 0) {
-            long timeDiff = currentTime - lastLocationTimeForSpeed;
-            if (timeDiff > 0 && timeDiff < 10000) {
-                float[] results = new float[1];
-                android.location.Location.distanceBetween(lastLocationLat, lastLocationLon, gcjLat, gcjLon, results);
-                double distanceMoved = results[0];
-                if (distanceMoved < 0.5) {
-                    computedSpeedKmh = 0f;
-                    hasComputedSpeed = true;
-                } else {
-                    computedSpeedKmh = (float) (distanceMoved / (timeDiff / 1000.0)) * 3.6f;
-                    hasComputedSpeed = true;
+            float computedSpeedKmh = 0f;
+            boolean hasComputedSpeed = false;
+            if (locationUpdateCount >= 1 && lastLocationTimeForSpeed > 0) {
+                long timeDiff = currentTime - lastLocationTimeForSpeed;
+                if (timeDiff > 0 && timeDiff < 10000) {
+                    float[] results = new float[1];
+                    android.location.Location.distanceBetween(lastLocationLat, lastLocationLon, gcjLat, gcjLon, results);
+                    double distanceMoved = results[0];
+                    if (distanceMoved < 0.5) {
+                        computedSpeedKmh = 0f;
+                        hasComputedSpeed = true;
+                    } else {
+                        computedSpeedKmh = (float) (distanceMoved / (timeDiff / 1000.0)) * 3.6f;
+                        hasComputedSpeed = true;
+                    }
                 }
             }
-        }
-        locationUpdateCount++;
-        lastLocationLat = gcjLat;
-        lastLocationLon = gcjLon;
-        lastLocationTimeForSpeed = currentTime;
+            locationUpdateCount++;
+            lastLocationLat = gcjLat;
+            lastLocationLon = gcjLon;
+            lastLocationTimeForSpeed = currentTime;
 
-        if (hasGpsSpeed) {
-            if (hasComputedSpeed && computedSpeedKmh < MIN_VALID_SPEED_KMH && gpsSpeedKmh < MIN_VALID_SPEED_KMH) {
+            if (hasGpsSpeed) {
+                if (hasComputedSpeed && computedSpeedKmh < MIN_VALID_SPEED_KMH && gpsSpeedKmh < MIN_VALID_SPEED_KMH) {
+                    speedKmh = 0f;
+                } else {
+                    speedKmh = gpsSpeedKmh;
+                }
+            } else if (hasComputedSpeed) {
+                speedKmh = computedSpeedKmh;
+            }
+
+            if (speedKmh < MIN_VALID_SPEED_KMH) {
                 speedKmh = 0f;
+            }
+
+            speedWindow.add(speedKmh);
+            if (speedWindow.size() > SPEED_WINDOW_SIZE) {
+                speedWindow.remove(0);
+            }
+            if (!speedWindow.isEmpty()) {
+                float sum = 0f;
+                for (float s : speedWindow) {
+                    sum += s;
+                }
+                currentSmoothedSpeedKmh = sum / speedWindow.size();
             } else {
-                speedKmh = gpsSpeedKmh;
+                currentSmoothedSpeedKmh = speedKmh;
             }
-        } else if (hasComputedSpeed) {
-            speedKmh = computedSpeedKmh;
-        }
-
-        if (speedKmh < MIN_VALID_SPEED_KMH) {
-            speedKmh = 0f;
-        }
-
-        speedWindow.add(speedKmh);
-        if (speedWindow.size() > SPEED_WINDOW_SIZE) {
-            speedWindow.remove(0);
-        }
-        if (!speedWindow.isEmpty()) {
-            float sum = 0f;
-            for (float s : speedWindow) {
-                sum += s;
-            }
-            currentSmoothedSpeedKmh = sum / speedWindow.size();
-        } else {
-            currentSmoothedSpeedKmh = speedKmh;
         }
 
         startSpeedTimeout();
-
-        Log.d(TAG, String.format(Locale.CHINA,
-                "速度计算: GPS=%.1fkm/h, 计算=%.1fkm/h, 平滑后=%.1fkm/h, 窗口=%d",
-                gpsSpeedKmh, computedSpeedKmh, currentSmoothedSpeedKmh, speedWindow.size()));
 
         return currentSmoothedSpeedKmh;
     }
@@ -1021,8 +1078,10 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private void startSpeedTimeout() {
         stopSpeedTimeout();
         speedTimeoutRunnable = () -> {
-            currentSmoothedSpeedKmh = 0f;
-            speedWindow.clear();
+            synchronized (speedLock) {
+                currentSmoothedSpeedKmh = 0f;
+                speedWindow.clear();
+            }
             if (gpsSpeedText != null) {
                 gpsSpeedText.setText(String.format(Locale.CHINA, "实速：%.0fkm/h", 0f));
             }
@@ -1050,13 +1109,13 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 nextStationName = stations.get(stationIndex + 1).stationName;
             }
             tts.playGpsStartStationAnnouncement(lineName, startStation, endStation, nextStationName);
-            nextStationInfo.setText("下一站：" + nextStationName + "    Next Station:" + nextStationName);
+            setNextStationInfoText(nextStationName);
         } else if (isTerminalStation) {
             tts.playGpsTerminalStationAnnouncement(stationName);
-            nextStationInfo.setText(stationName + " 到了！We are now at " + stationName + " !");
+            nextStationInfo.setText(stationName + " 到了！  We are now at " + stationName + " !");
         } else {
             tts.playGpsMiddleStationAnnouncement(stationName);
-            nextStationInfo.setText(stationName + " 到了！We are now at " + stationName + " !");
+            nextStationInfo.setText(stationName + " 到了！  We are now at " + stationName + " !");
         }
     }
 
@@ -1064,13 +1123,24 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         TTSUtils tts = TTSUtils.getInstance(this);
         boolean isTerminalStation = stationIndex + 1 >= totalStations - 1;
         String nextStationName = "";
-
         if (stationIndex + 1 < totalStations) {
             List<BusApiClient.BusLineStation> stations = realTimeManager.getStationList();
             nextStationName = stations.get(stationIndex + 1).stationName;
         }
         tts.playGpsLeavingStationAnnouncement(nextStationName, isTerminalStation);
-        nextStationInfo.setText("下一站：" + nextStationName + "    Next Station:" + nextStationName);
+        setNextStationInfoText(nextStationName);
+    }
+
+    /**
+     * 设置"下一站"信息文本。
+     * GPS 模式追加"扫码评价"中英双语提示，网络模式保持原版文案。
+     */
+    private void setNextStationInfoText(String stationName) {
+        if (currentAnnounceMode == AnnounceMode.GPS) {
+            nextStationInfo.setText("下一站：" + stationName + QR_HINT_CN + "    Next Station:" + stationName + QR_HINT_EN);
+        } else {
+            nextStationInfo.setText("下一站：" + stationName + "    Next Station:" + stationName);
+        }
     }
 
     private void updatePriceTips(BusApiClient.BusLineDirection lineDirection) {
@@ -1530,7 +1600,9 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             GpsWarmingUp.addSatelliteListener(satelliteCountListener);
             Location lastLocation = GpsWarmingUp.getLastKnownLocation();
             if (lastLocation != null) {
-                handleGpsLocation(lastLocation);
+                // post 到 GPS 后台线程，避免重计算阻塞主线程
+                final Location snapshot = lastLocation;
+                GpsWarmingUp.postToGpsThread(() -> handleGpsLocation(snapshot));
             }
         }
     }
@@ -2032,10 +2104,9 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             int nextStationIndex = nearestVehicle.currentStationOrder + 1;
             if (nextStationIndex > 0 && nextStationIndex <= realTimeManager.getStationList().size()) {
                 BusApiClient.BusLineStation nextStation = realTimeManager.getStationList().get(nextStationIndex - 1);
-
                 TTSUtils tts = TTSUtils.getInstance(this);
                 tts.playLineDetailAnnouncement(lineName, startStation, endStation, nextStation.stationName);
-                nextStationInfo.setText("下一站：" + nextStation.stationName + "    Next Station:" + nextStation.stationName);
+                setNextStationInfoText(nextStation.stationName);
                 lastVoiceStationOrder = nearestVehicle.currentStationOrder;
             }
         }

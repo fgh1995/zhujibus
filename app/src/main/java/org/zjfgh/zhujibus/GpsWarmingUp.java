@@ -8,6 +8,7 @@ import android.location.LocationManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.HandlerThread;
 import android.os.Looper;
 
 import java.util.ArrayList;
@@ -23,13 +24,19 @@ public class GpsWarmingUp {
     private static LocationListener locationListener;
     private static Object gnssCallback;
     private static boolean isWarmingUp = false;
-    private static Location lastKnownLocation;
-    private static long lastLocationTime = 0;
-    private static int usedSatelliteCount = 0;
-    private static int totalSatelliteCount = 0;
+    // 由后台 HandlerThread 写入、主线程读取，必须 volatile
+    private static volatile Location lastKnownLocation;
+    private static volatile long lastLocationTime = 0;
+    private static volatile int usedSatelliteCount = 0;
+    private static volatile int totalSatelliteCount = 0;
     private static final List<LocationListener> listeners = new ArrayList<>();
     private static final List<SatelliteCountListener> satelliteListeners = new ArrayList<>();
     private static Handler mainHandler;
+
+    // 后台线程：所有 onLocationChanged / onSatelliteStatusChanged 都跑在这里，
+    // 避免 GPS 1Hz 刷新时把高耗时计算挤到 UI 线程。
+    private static HandlerThread gpsHandlerThread;
+    private static volatile Looper gpsLooper;
 
     @SuppressLint("MissingPermission")
     public static void startWarmingUp(Context context) {
@@ -63,6 +70,13 @@ public class GpsWarmingUp {
             };
         }
 
+        // 启动后台 HandlerThread，专门用于 GPS 回调，避免主线程被耗时计算阻塞
+        if (gpsHandlerThread == null || !gpsHandlerThread.isAlive()) {
+            gpsHandlerThread = new HandlerThread("GpsWarmingUp-Handler");
+            gpsHandlerThread.start();
+            gpsLooper = gpsHandlerThread.getLooper();
+        }
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             if (gnssCallback == null) {
                 gnssCallback = new android.location.GnssStatus.Callback() {
@@ -81,10 +95,12 @@ public class GpsWarmingUp {
                     }
                 };
             }
+            // GnssStatus 回调仍交给主线程（卫星数量 UI 更新频率不高且对实时性不敏感）
             locationManager.registerGnssStatusCallback((android.location.GnssStatus.Callback) gnssCallback, mainHandler);
         }
 
-        locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000, 0, locationListener, Looper.getMainLooper());
+        // 关键改动：使用后台 Looper 注册，1 秒刷新保持不变
+        locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000, 0, locationListener, gpsLooper);
         isWarmingUp = true;
     }
 
@@ -97,6 +113,11 @@ public class GpsWarmingUp {
                 locationManager.unregisterGnssStatusCallback((android.location.GnssStatus.Callback) gnssCallback);
             }
         }
+        if (gpsHandlerThread != null) {
+            gpsHandlerThread.quitSafely();
+            gpsHandlerThread = null;
+        }
+        gpsLooper = null;
         isWarmingUp = false;
     }
 
@@ -156,5 +177,18 @@ public class GpsWarmingUp {
         lastKnownLocation = location;
         lastLocationTime = System.currentTimeMillis();
         notifyListeners(location);
+    }
+
+    /**
+     * 把任务 post 到 GPS 后台线程执行，用于在主线程上需要主动触发 GPS 相关计算时
+     * （例如刚切到 GPS 模式后用最近一次 location 立即刷新一次 UI），避免重计算阻塞 UI。
+     */
+    public static void postToGpsThread(Runnable r) {
+        if (gpsHandlerThread == null || !gpsHandlerThread.isAlive() || gpsLooper == null) {
+            // GPS 后台线程尚未启动时，直接在调用线程执行
+            r.run();
+            return;
+        }
+        new Handler(gpsLooper).post(r);
     }
 }
