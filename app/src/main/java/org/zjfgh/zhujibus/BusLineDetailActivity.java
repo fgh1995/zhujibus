@@ -55,6 +55,7 @@ import java.text.SimpleDateFormat;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.Collections;
 import java.util.Date;
 import java.util.List;
@@ -104,6 +105,12 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     TextView currentTime;
     private Handler timeHandler = new Handler();
     private int timeDisplayPhase = 0;
+    // 导航模块时间显示（独立更新，不受主时间显示影响）
+    private TextView timeHour;
+    private TextView timeMinute;
+    private TextView timeSecond;
+    private Handler navigationTimeHandler = new Handler();
+    private Runnable navigationTimeRunnable;
     private final Runnable timeScrollRunnable = new Runnable() {
         @Override
         public void run() {
@@ -123,6 +130,27 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             }
         }
     };
+
+    /**
+     * 导航模块时间更新方法
+     */
+    private void updateNavigationTime() {
+        Calendar calendar = Calendar.getInstance();
+        int hour = calendar.get(Calendar.HOUR_OF_DAY);
+        int minute = calendar.get(Calendar.MINUTE);
+        int second = calendar.get(Calendar.SECOND);
+
+        if (timeHour != null) {
+            timeHour.setText(String.format("%02d", hour));
+        }
+        if (timeMinute != null) {
+            timeMinute.setText(String.format("%02d", minute));
+        }
+        if (timeSecond != null) {
+            timeSecond.setText(String.format("%02d", second));
+        }
+    }
+
     TextView refreshTime;
     TextView errorIndicator;
     TextView networkModeText;
@@ -591,7 +619,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 gpsLocationInfo.setText(String.format(Locale.CHINA, "坐标：%.6f, %.6f (%s)", finalGcjLat, finalGcjLon, coordSystemLabel));
             }
             if (gpsSpeedText != null) {
-                gpsSpeedText.setText(String.format(Locale.CHINA, "实速：%.0fkm/h", finalSpeedKmh));
+                gpsSpeedText.setText(String.format(Locale.CHINA, "%.0f", finalSpeedKmh));
             }
         });
 
@@ -1083,7 +1111,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 speedWindow.clear();
             }
             if (gpsSpeedText != null) {
-                gpsSpeedText.setText(String.format(Locale.CHINA, "实速：%.0fkm/h", 0f));
+                gpsSpeedText.setText(String.format(Locale.CHINA, "%.0f", 0f));
             }
             Log.d(TAG, "速度超时未更新，归零");
         };
@@ -1307,6 +1335,22 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         currentTime.setTypeface(digiFont, Typeface.NORMAL);
         timeHandler.post(timeScrollRunnable);
 
+        // 初始化导航模块时间显示
+        timeHour = findViewById(R.id.time_hour);
+        timeMinute = findViewById(R.id.time_minute);
+        timeSecond = findViewById(R.id.time_second);
+
+        // 创建独立的导航时间更新 Runnable（每秒更新，不受主时间显示影响）
+        navigationTimeRunnable = new Runnable() {
+            @Override
+            public void run() {
+                updateNavigationTime();
+                navigationTimeHandler.postDelayed(this, 1000);
+            }
+        };
+        // 启动独立时间更新
+        navigationTimeHandler.post(navigationTimeRunnable);
+
         errorIndicator = findViewById(R.id.error_indicator);
         errorIndicator.setOnClickListener(v -> {
             if (lastErrorDetail != null && !lastErrorDetail.isEmpty()) {
@@ -1356,8 +1400,9 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         }
         gpsSpeedText = findViewById(R.id.gps_speed_text);
         gpsCount = findViewById(R.id.gps_count);
+        Typeface digitalTypeface = Typeface.createFromAsset(getAssets(), "fonts/DS-DIGIB-2.ttf");
         if (gpsCount != null) {
-            Typeface digitalTypeface = Typeface.createFromAsset(getAssets(), "fonts/DS-DIGIB-2.ttf");
+            digitalTypeface = Typeface.createFromAsset(getAssets(), "fonts/DS-DIGIB-2.ttf");
             gpsCount.setTypeface(digitalTypeface);
         }
         gpsLabel = findViewById(R.id.gps_label);
@@ -1399,7 +1444,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
 
         networkModeText.setTypeface(dottedSongti);
         gpsModeText.setTypeface(dottedSongti);
-        gpsSpeedText.setTypeface(dottedSongti);
+        gpsSpeedText.setTypeface(digitalTypeface);
 
         startErrorBlinkAnimation();
 
@@ -2349,6 +2394,10 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         stopSpeedTimeout();
         if (speedTimeoutHandler != null) {
             speedTimeoutHandler.removeCallbacksAndMessages(null);
+        }
+        // 停止导航模块独立时间更新
+        if (navigationTimeHandler != null) {
+            navigationTimeHandler.removeCallbacksAndMessages(null);
         }
     }
 

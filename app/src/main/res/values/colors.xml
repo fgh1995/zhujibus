@@ -6,4 +6,6 @@
     <color name="text_primary">#212121</color>
     <color name="text_secondary">#757575</color>
     <color name="icon_tint">#9E9E9E</color>
+    <!--导航中控默认字体颜色-->
+    <color name="nav_white_font">#FDFDFD</color>
 </resources>

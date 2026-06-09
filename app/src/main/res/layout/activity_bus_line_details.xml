@@ -420,7 +420,7 @@
                         android:orientation="vertical"
                         android:layout_gravity="start">
                         <TextView
-                            android:id="@+id/gps_speed_text"
+                            android:id="@+id/gps_speed_text_1"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:text="时速：0km/h"
@@ -556,7 +556,6 @@
                                         android:textColor="#00FFFF" />
                                 </LinearLayout>
                             </LinearLayout>
-
                         </LinearLayout>
 
                     </LinearLayout>
@@ -677,7 +676,12 @@
                     android:layout_gravity="center_horizontal|bottom"/>
             </FrameLayout>
         </LinearLayout>
-
+        <!-- 导航模块 -->
+        <include
+            android:id="@+id/navigation_section"
+            layout="@layout/activity_navigation"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
 
         <!-- 标签容器 -->
         <LinearLayout
