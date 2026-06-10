@@ -106,11 +106,17 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private Handler timeHandler = new Handler();
     private int timeDisplayPhase = 0;
     // 导航模块时间显示（独立更新，不受主时间显示影响）
-    private TextView timeHour;
-    private TextView timeMinute;
-    private TextView timeSecond;
+    private TextView navTimeHM;
+    private TextView navTimeSecond;
+    private TextView navDateText;
+    private TextView navRouteNo;
+    private TextView navNextStation;
+    private TextView navDirection;
     private Handler navigationTimeHandler = new Handler();
     private Runnable navigationTimeRunnable;
+    // 腾讯地图导航
+    private com.tencent.tencentmap.mapsdk.maps.TextureMapView tencentMapView;
+    private TencentNavigationView tencentNavigation;
     private final Runnable timeScrollRunnable = new Runnable() {
         @Override
         public void run() {
@@ -140,14 +146,19 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         int minute = calendar.get(Calendar.MINUTE);
         int second = calendar.get(Calendar.SECOND);
 
-        if (timeHour != null) {
-            timeHour.setText(String.format("%02d", hour));
+        if (navTimeHM != null) {
+            navTimeHM.setText(String.format(Locale.getDefault(), "%02d:%02d", hour, minute));
         }
-        if (timeMinute != null) {
-            timeMinute.setText(String.format("%02d", minute));
+        if (navTimeSecond != null) {
+            navTimeSecond.setText(String.format(Locale.getDefault(), "%02d", second));
         }
-        if (timeSecond != null) {
-            timeSecond.setText(String.format("%02d", second));
+        if (navDateText != null) {
+            int month = calendar.get(Calendar.MONTH) + 1;
+            int day = calendar.get(Calendar.DAY_OF_MONTH);
+            int dayOfWeek = calendar.get(Calendar.DAY_OF_WEEK);
+            String[] weekDays = {"周日", "周一", "周二", "周三", "周四", "周五", "周六"};
+            navDateText.setText(String.format(Locale.getDefault(),
+                    "%d月%d日 %s", month, day, weekDays[dayOfWeek - 1]));
         }
     }
 
@@ -590,6 +601,12 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
 
         // 速度计算（纯计算）
         float speedKmh = calculateRealTimeSpeed(location, gcjLat, gcjLon);
+
+        // 更新腾讯地图位置（后台线程调用，TencentNavigationView 内部已使用 LocationSource 回调）
+        if (tencentNavigation != null) {
+            float bearing = location.hasBearing() ? location.getBearing() : 0f;
+            tencentNavigation.updateMyLocation(gcjLat, gcjLon, bearing);
+        }
 
         // 主线程：更新"信号正常"指示、坐标显示、速度显示
         final double finalGcjLat = gcjLat;
@@ -1169,6 +1186,9 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         } else {
             nextStationInfo.setText("下一站：" + stationName + "    Next Station:" + stationName);
         }
+        if (navNextStation != null && stationName != null) {
+            navNextStation.setText("下一站: " + stationName);
+        }
     }
 
     private void updatePriceTips(BusApiClient.BusLineDirection lineDirection) {
@@ -1280,6 +1300,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         routeNumber.setGravity(0);
         routeNumber.setScrollSpeed(220f);
         Typeface dottedSongti = Typeface.createFromAsset(getAssets(), "fonts/DottedSongtiSquareRegular.otf");
+        Typeface digitalTypeface = Typeface.createFromAsset(getAssets(), "fonts/DS-DIGIB-2.ttf");
         routeNumber.setTypeface(dottedSongti);
         swapOrientationLabel.setTypeface(dottedSongti);
         scheduleButton.setText("时刻表");
@@ -1324,23 +1345,47 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         accessibilityIcon = findViewById(R.id.accessibility_icon);
         accessibilityIcon.setVisibility(View.GONE);
         refreshTime = findViewById(R.id.refresh_time);
-        Typeface digiFont = Typeface.createFromAsset(getAssets(), "fonts/DS-DIGIB-2.ttf");
-        refreshTime.setTypeface(digiFont);
+        refreshTime.setTypeface(digitalTypeface);
 
         ticket = findViewById(R.id.ticket);
-        ticket.setTypeface(digiFont, Typeface.NORMAL);
+        ticket.setTypeface(digitalTypeface, Typeface.NORMAL);
         updateTicketPrice();
 
         currentTime = findViewById(R.id.current_time);
-        currentTime.setTypeface(digiFont, Typeface.NORMAL);
+        currentTime.setTypeface(digitalTypeface, Typeface.NORMAL);
         timeHandler.post(timeScrollRunnable);
 
         // 初始化导航模块时间显示
-        timeHour = findViewById(R.id.time_hour);
-        timeMinute = findViewById(R.id.time_minute);
-        timeSecond = findViewById(R.id.time_second);
-
-        // 创建独立的导航时间更新 Runnable（每秒更新，不受主时间显示影响）
+        navTimeHM = findViewById(R.id.nav_time_hm);
+        navTimeSecond = findViewById(R.id.nav_time_second);
+        navDateText = findViewById(R.id.nav_date_text);
+        if (navTimeHM != null && digitalTypeface != null) {
+            navTimeHM.setTypeface(digitalTypeface);
+        }
+        if (navTimeSecond != null && digitalTypeface != null) {
+            navTimeSecond.setTypeface(digitalTypeface);
+        }
+        // 初始化导航卡片：线路号（载入时就有）
+        navRouteNo = findViewById(R.id.nav_route_no);
+        navNextStation = findViewById(R.id.nav_next_station);
+        navDirection = findViewById(R.id.nav_direction);
+        if (navRouteNo != null && lineName != null) {
+            navRouteNo.setText(lineName);
+        }
+        if (navNextStation != null) {
+            navNextStation.setText("下一站: 加载中");
+            // 如果站点列表已经可用，立即设置第一站为下一站
+            if (realTimeManager != null && realTimeManager.getStationList() != null && !realTimeManager.getStationList().isEmpty()) {
+                String firstStation = realTimeManager.getStationList().get(0).stationName;
+                if (firstStation != null) {
+                    navNextStation.setText("进场");
+                }
+            }
+        }
+        if (navDirection != null && endStation != null) {
+            navDirection.setText("往 " + endStation + "方向");
+        }
+        // 创建独立的导航时间更新 Runnable
         navigationTimeRunnable = new Runnable() {
             @Override
             public void run() {
@@ -1350,6 +1395,22 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         };
         // 启动独立时间更新
         navigationTimeHandler.post(navigationTimeRunnable);
+
+        // 初始化腾讯地图导航
+        // 注意：<include> 标签下的子 View id 会被作用域隔离，
+        // 必须先拿到 include 根布局，再从内部 findViewById
+        View navigationSection = findViewById(R.id.navigation_section);
+        android.util.Log.d("BusLineDetailActivity", "[NAV] navigationSection = " + navigationSection);
+        tencentMapView = navigationSection != null
+                ? navigationSection.findViewById(R.id.tencent_map_view)
+                : findViewById(R.id.tencent_map_view);
+        android.util.Log.d("BusLineDetailActivity", "[NAV] tencentMapView = " + tencentMapView);
+        if (tencentMapView != null) {
+            tencentNavigation = new TencentNavigationView(this, tencentMapView);
+            tencentNavigation.setCompassMode(true);
+        } else {
+            android.util.Log.e("BusLineDetailActivity", "[NAV] tencentMapView is null!");
+        }
 
         errorIndicator = findViewById(R.id.error_indicator);
         errorIndicator.setOnClickListener(v -> {
@@ -1400,7 +1461,6 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         }
         gpsSpeedText = findViewById(R.id.gps_speed_text);
         gpsCount = findViewById(R.id.gps_count);
-        Typeface digitalTypeface = Typeface.createFromAsset(getAssets(), "fonts/DS-DIGIB-2.ttf");
         if (gpsCount != null) {
             digitalTypeface = Typeface.createFromAsset(getAssets(), "fonts/DS-DIGIB-2.ttf");
             gpsCount.setTypeface(digitalTypeface);
@@ -1663,6 +1723,9 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 endStationName.setText(lineDirection.endStation);
                 startStation = lineDirection.startStation;
                 endStation = lineDirection.endStation;
+                if (navDirection != null) {
+                    navDirection.setText("往 " + lineDirection.endStation  + "方向");
+                }
             });
         }
     }
@@ -1688,6 +1751,11 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             return;
         }
 
+        // 更新导航卡片的方向（终点站）
+        if (navDirection != null && lineDirection.endStation != null) {
+            navDirection.setText("往 " + lineDirection.endStation + "方向");
+        }
+
         scheduleButton.setOnClickListener(v -> showScheduleForDirection(lineDirection));
 
         if (realTimeManager != null) {
@@ -1695,6 +1763,16 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         }
 
         routePoints = io.sgr.geometry.utils.RouteGeometryUtils.parseGeometry(lineDirection.geometry);
+
+        // 在腾讯地图上绘制路线（GCJ-02 坐标）
+        if (tencentNavigation != null && routePoints != null && !routePoints.isEmpty()) {
+            java.util.List<com.tencent.tencentmap.mapsdk.maps.model.LatLng> mapPoints = new java.util.ArrayList<>();
+            for (io.sgr.geometry.Coordinate c : routePoints) {
+                // routePoints 已经是 GCJ-02 坐标，可直接使用
+                mapPoints.add(new com.tencent.tencentmap.mapsdk.maps.model.LatLng(c.getLat(), c.getLng()));
+            }
+            tencentNavigation.drawRoute(mapPoints);
+        }
 
         updateAccessibilityTag(lineDirection);
         updateBusTimes(lineDirection);
@@ -1821,7 +1899,20 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 
                 realTimeManager = new BusRealTimeManager(handler, lineDirection.stationList);
                 realTimeManager.startTracking(lineDirection.id, BusLineDetailActivity.this);
-                
+
+                // 初始化导航卡片的下一站
+                if (navNextStation != null && lineDirection.stationList != null && !lineDirection.stationList.isEmpty()) {
+                    String firstStation = lineDirection.stationList.get(0).stationName;
+                    if (firstStation != null) {
+                        navNextStation.setText("下一站: " + firstStation);
+                    }
+                }
+
+                // 初始化导航卡片的方向（终点站）
+                if (navDirection != null && lineDirection.endStation != null) {
+                    navDirection.setText("往 " + lineDirection.endStation + "方向");
+                }
+
                 String stationId = getIntent().getStringExtra("station_id");
                 if (stationId != null && !stationId.isEmpty()) {
                     int position = findStationPositionById(stationId);
@@ -2330,6 +2421,19 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                     realTimeManager = new BusRealTimeManager(handler, testStations);
                     realTimeManager.startTracking("test_line_001", BusLineDetailActivity.this);
 
+                    // 初始化导航卡片的下一站
+                    if (navNextStation != null && !testStations.isEmpty()) {
+                        String firstStation = testStations.get(0).stationName;
+                        if (firstStation != null) {
+                            navNextStation.setText("下一站: " + firstStation);
+                        }
+                    }
+
+                    // 初始化导航卡片的方向（终点站）
+                    if (navDirection != null && endStation != null) {
+                        navDirection.setText("往 " + endStation + "方向");
+                    }
+
                     String stationId = getIntent().getStringExtra("station_id");
                     if (stationId != null && !stationId.isEmpty()) {
                         int position = 4;
@@ -2356,6 +2460,10 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             GpsWarmingUp.addListener(gpsActivityListener);
             GpsWarmingUp.addSatelliteListener(satelliteCountListener);
         }
+        // 恢复腾讯地图
+        if (tencentNavigation != null) {
+            tencentNavigation.onResume();
+        }
     }
 
     @Override
@@ -2367,6 +2475,10 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         if (currentAnnounceMode == AnnounceMode.GPS) {
             GpsWarmingUp.removeListener(gpsActivityListener);
             GpsWarmingUp.removeSatelliteListener(satelliteCountListener);
+        }
+        // 暂停腾讯地图
+        if (tencentNavigation != null) {
+            tencentNavigation.onPause();
         }
     }
 
@@ -2398,6 +2510,11 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         // 停止导航模块独立时间更新
         if (navigationTimeHandler != null) {
             navigationTimeHandler.removeCallbacksAndMessages(null);
+        }
+        // 释放腾讯地图
+        if (tencentNavigation != null) {
+            tencentNavigation.onDestroy();
+            tencentNavigation = null;
         }
     }
 

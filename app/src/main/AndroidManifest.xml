@@ -5,6 +5,12 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- 腾讯地图额外权限 -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
     <queries>
         <!-- 查询已安装的TTS引擎 -->
         <intent>
@@ -21,6 +27,13 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.诸暨公交"
         tools:targetApi="31">
+        <!-- 腾讯地图 API Key（请替换为您自己的 Key） -->
+        <meta-data
+            android:name="TencentMapSDK"
+            android:value="GGMBZ-WNO6U-CJEVY-GR4PO-KUFLF-V5F6T" />
+        <meta-data
+            android:name="TencentLocationSDK"
+            android:value="GGMBZ-WNO6U-CJEVY-GR4PO-KUFLF-V5F6T" />
         <activity
             android:name=".BusLineDetailActivity"
             android:exported="false"

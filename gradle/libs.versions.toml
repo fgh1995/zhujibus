@@ -13,6 +13,8 @@ okhttp = "4.9.1"
 navigationFragment = "2.6.0"
 navigationUi = "2.6.0"
 pinyin4j = "2.5.1"
+tencentMapSdk = "6.11.0.260507.ab2310c2.209828299"
+tencentMapFoundation = "0.9.0.e5ea763"
 
 [libraries]
 jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "jacksonDatabind" }
@@ -28,6 +30,8 @@ okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
 navigation-fragment = { group = "androidx.navigation", name = "navigation-fragment", version.ref = "navigationFragment" }
 navigation-ui = { group = "androidx.navigation", name = "navigation-ui", version.ref = "navigationUi" }
 pinyin4j = { module = "com.belerweb:pinyin4j", version.ref = "pinyin4j" }
+tencent-map-sdk = { group = "com.tencent.map", name = "tencent-map-vector-sdk", version.ref = "tencentMapSdk" }
+tencent-map-foundation = { group = "com.tencent.openmap", name = "foundation", version.ref = "tencentMapFoundation" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
