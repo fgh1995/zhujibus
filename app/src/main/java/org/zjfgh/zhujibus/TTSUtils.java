@@ -194,6 +194,7 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
     private void loadSounds() {
         int[] cnNumRes = {
                 R.raw.dingdong,
+                R.raw.network_stop_chime,
                 R.raw.cn_num_0, R.raw.cn_num_1, R.raw.cn_num_2, R.raw.cn_num_3, R.raw.cn_num_4,
                 R.raw.cn_num_5, R.raw.cn_num_6, R.raw.cn_num_7, R.raw.cn_num_8, R.raw.cn_num_9,
                 R.raw.cn_num_10, R.raw.cn_num_11, R.raw.cn_num_12, R.raw.cn_num_13, R.raw.cn_num_14,
@@ -357,6 +358,7 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
     }
 
     private void buildArrivalAnnouncementWithDirection(List<PlaybackItem> items, String lineName, String endStation, String nextStationName) {
+        items.add(new PlaybackItem(R.raw.network_stop_chime));
         items.add(new PlaybackItem(R.raw.cn_01_zhuji_bus_reminder));
         items.add(new PlaybackItem(R.raw.cn_02_heading_to));
         addCnStationName(items, endStation);

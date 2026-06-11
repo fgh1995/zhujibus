@@ -1,5 +1,10 @@
 pluginManagement {
     repositories {
+        // 国内镜像（优先使用）
+        maven { url 'https://maven.aliyun.com/repository/google' }
+        maven { url 'https://maven.aliyun.com/repository/public' }
+        maven { url 'https://maven.aliyun.com/repository/gradle-plugin' }
+        // 官方源（兜底）
         google {
             content {
                 includeGroupByRegex("com\\.android.*")
@@ -14,6 +19,14 @@ pluginManagement {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
+        // 国内镜像（优先使用）
+        maven { url 'https://maven.aliyun.com/repository/google' }
+        maven { url 'https://maven.aliyun.com/repository/public' }
+        maven { url 'https://maven.aliyun.com/repository/releases' }
+        maven { url 'https://maven.aliyun.com/repository/jcenter' }
+        // 高德地图 SDK 仓库
+        maven { url 'https://maven.aliyun.com/repository/public' }
+        // 官方源（兜底）
         google()
         mavenCentral()
     }

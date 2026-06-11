@@ -5,12 +5,17 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-    <!-- 腾讯地图额外权限 -->
+    <!-- 高德地图/定位额外权限 -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- 高德 SDK 9.3.0 内部会向 Settings.System 写入状态/隐私协议标记，必须声明此权限 -->
+    <uses-permission android:name="android.permission.WRITE_SETTINGS" />
+    <!-- MIUI 蓝牙定位（MiuiBlueLocationManager#noteOpUseMyIdentity）需要声明，否则日志会刷屏警告 -->
+    <uses-permission android:name="miui.permission.USE_MY_IDENTITY" />
     <queries>
         <!-- 查询已安装的TTS引擎 -->
         <intent>
@@ -27,13 +32,14 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.诸暨公交"
         tools:targetApi="31">
-        <!-- 腾讯地图 API Key（请替换为您自己的 Key） -->
+        <!-- 高德地图 API Key（需要替换为你自己的高德 Key） -->
         <meta-data
-            android:name="TencentMapSDK"
-            android:value="GGMBZ-WNO6U-CJEVY-GR4PO-KUFLF-V5F6T" />
-        <meta-data
-            android:name="TencentLocationSDK"
-            android:value="GGMBZ-WNO6U-CJEVY-GR4PO-KUFLF-V5F6T" />
+            android:name="com.amap.api.v2.apikey"
+            android:value="288dfa7bca2d4a51c94b4420fee4f633" />
+        <!-- 高德定位服务（必须声明，否则定位 SDK 无法使用） -->
+        <service
+            android:name="com.amap.api.location.APSService"
+            android:exported="false" />
         <activity
             android:name=".BusLineDetailActivity"
             android:exported="false"

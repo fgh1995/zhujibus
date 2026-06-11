@@ -23,4 +23,22 @@
         <item name="android:backgroundDimEnabled">false</item>
 
     </style>
+
+    <!-- 底部弹窗：透明背景、贴底、半透明遮罩、配合 BottomSheetAnim 实现滑入滑出 -->
+    <style name="BottomSheetDialog" parent="Theme.AppCompat.Dialog">
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:colorBackgroundCacheHint">@null</item>
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowIsFloating">false</item>
+        <item name="android:backgroundDimEnabled">true</item>
+        <item name="android:backgroundDimAmount">0.6</item>
+        <item name="android:windowAnimationStyle">@style/BottomSheetAnim</item>
+    </style>
+
+    <!-- 底部弹窗的窗口动画：滑入 + 滑出 -->
+    <style name="BottomSheetAnim" parent="@android:style/Animation">
+        <item name="android:windowEnterAnimation">@anim/slide_in_bottom</item>
+        <item name="android:windowExitAnimation">@anim/slide_out_bottom</item>
+    </style>
 </resources>

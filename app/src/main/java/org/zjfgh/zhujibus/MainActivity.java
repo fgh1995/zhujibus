@@ -8,7 +8,9 @@ import android.graphics.Color;
 import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
+import android.net.Uri;
 import android.os.Bundle;
+import android.provider.Settings;
 import io.sgr.geometry.Coordinate;
 import io.sgr.geometry.utils.GeometryUtils;
 import android.text.TextUtils;
@@ -52,6 +54,9 @@ public class MainActivity extends AppCompatActivity {
             tv_search_line = findViewById(R.id.tv_search_line);
             viewFlipper = findViewById(R.id.view_flipper);
             tvNoData = findViewById(R.id.tv_no_data);
+            // ⭐ 关键修复：先挂一个空 adapter，避免首次 layout 时报 "No adapter attached"
+            // 数据加载完后会被真正的 StationRouteAdapter 替换
+            recyclerView.setAdapter(new BusStationAdapter());
             client = new BusApiClient();
             if (PermissionUtils.hasLocationPermission(this)) {
                 startGpsIfNeeded();

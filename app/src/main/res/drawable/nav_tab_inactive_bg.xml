@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 未激活态 Tab：圆角深色填充 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#252A45" />
+    <corners android:radius="6dp" />
+</shape>

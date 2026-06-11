@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <!-- 滚动内容区域 -->
+    <androidx.core.widget.NestedScrollView
+        android:id="@+id/offline_root_scroll"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@drawable/nav_panel_bg"
+        android:fillViewport="true"
+        android:scrollbars="vertical"
+        android:overScrollMode="ifContentScrolls">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="12dp">
+
+            <!-- 标题 -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="地图设置"
+                android:textColor="#FFFFFF"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+
+            <!-- 副标题：离线地图包 -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="离线地图包"
+                android:textColor="#9AA0BC"
+                android:textSize="11sp" />
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginTop="10dp"
+                android:background="#252A45" />
+            <!-- 搜索框 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="36dp"
+                android:layout_marginTop="10dp"
+                android:orientation="horizontal"
+                android:background="@drawable/nav_search_bg"
+                android:gravity="center_vertical"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp">
+
+                <ImageView
+                    android:layout_width="14dp"
+                    android:layout_height="14dp"
+                    android:src="@android:drawable/ic_menu_search"
+                    app:tint="#9AA0BC" />
+
+                <EditText
+                    android:id="@+id/offline_search_input"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    android:layout_marginStart="6dp"
+                    android:background="@null"
+                    android:hint="搜索城市/省份"
+                    android:textColor="#FFFFFF"
+                    android:textColorHint="#6A6F90"
+                    android:textSize="13sp"
+                    android:singleLine="true"
+                    android:imeOptions="actionSearch"
+                    android:inputType="text" />
+            </LinearLayout>
+
+            <!-- 标签栏：城市列表 / 已下载 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:id="@+id/offline_tab_cities"
+                    android:layout_width="0dp"
+                    android:layout_height="32dp"
+                    android:layout_weight="1"
+                    android:gravity="center"
+                    android:text="城市列表"
+                    android:textColor="#FFFFFF"
+                    android:textSize="13sp"
+                    android:textStyle="bold"
+                    android:background="@drawable/nav_tab_active_bg" />
+
+                <TextView
+                    android:id="@+id/offline_tab_downloaded"
+                    android:layout_width="0dp"
+                    android:layout_height="32dp"
+                    android:layout_weight="1"
+                    android:layout_marginStart="6dp"
+                    android:gravity="center"
+                    android:text="已下载"
+                    android:textColor="#9AA0BC"
+                    android:textSize="13sp"
+                    android:background="@drawable/nav_tab_inactive_bg" />
+            </LinearLayout>
+
+            <!-- 加载提示 -->
+            <TextView
+                android:id="@+id/offline_loading_hint"
+                android:layout_width="match_parent"
+                android:layout_height="40dp"
+                android:layout_marginTop="6dp"
+                android:gravity="center"
+                android:text="正在加载城市列表..."
+                android:textColor="#9AA0BC"
+                android:textSize="12sp"
+                android:visibility="visible" />
+
+            <!-- 分组列表：省份 + 城市 -->
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/offline_city_list"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:nestedScrollingEnabled="false"
+                android:overScrollMode="never" />
+
+        </LinearLayout>
+
+    </androidx.core.widget.NestedScrollView>
+
+    <!-- 动态弹窗容器 - 与滚动区域平级，覆盖整个屏幕 -->
+    <FrameLayout
+        android:id="@+id/dialog_container"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone"
+        android:clickable="true"
+        android:focusable="true" />
+
+</FrameLayout>

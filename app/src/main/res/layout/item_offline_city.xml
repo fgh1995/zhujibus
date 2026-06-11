@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 城市行：左侧城市名，中间大小，右侧状态文字，整行可点击触发操作 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/offline_city_row"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingTop="2dp"
+    android:paddingBottom="2dp"
+    android:paddingStart="20dp"
+    android:paddingEnd="12dp"
+    android:background="?android:attr/selectableItemBackground">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingTop="6dp"
+        android:paddingBottom="6dp">
+
+        <TextView
+            android:id="@+id/offline_city_name"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="城市"
+            android:textColor="#FFFFFF"
+            android:textSize="14sp"
+            android:singleLine="true"
+            android:ellipsize="end" />
+
+        <!-- 中间：大小 -->
+        <TextView
+            android:id="@+id/offline_city_size"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="10dp"
+            android:text="0.0 MB"
+            android:textColor="#9AA0BC"
+            android:textSize="11sp" />
+
+        <!-- 状态文字（"未下载"/"下载中 N%"/"等待中"/"已暂停 N%"/"已下载"） -->
+        <TextView
+            android:id="@+id/offline_city_status"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="未下载"
+            android:textColor="#37D4F4"
+            android:textSize="12sp" />
+    </LinearLayout>
+
+    <!-- 第二行下载进度（默认隐藏） -->
+    <ProgressBar
+        android:id="@+id/offline_city_progress"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent"
+        android:layout_height="4dp"
+        android:max="100"
+        android:progress="0"
+        android:visibility="gone"
+        android:progressTint="#37D4F4"
+        android:progressBackgroundTint="#252A45" />
+</LinearLayout>

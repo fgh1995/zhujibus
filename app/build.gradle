@@ -10,7 +10,7 @@ android {
         applicationId "org.zjfgh.zhujibus"
         minSdk 24
         targetSdk 35
-        versionCode 102001
+        versionCode 102002
         versionName "1.2.0-beta"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
@@ -46,10 +46,6 @@ dependencies {
     implementation libs.okhttp       // OkHttp
     implementation libs.jackson.databind // Jackson
     implementation libs.kotlinx.coroutines.android
-    // 腾讯地图 SDK
-    implementation libs.tencent.map.sdk
-    // 腾讯地图基础库
-    implementation libs.tencent.map.foundation
-    // 腾讯定位 SDK
-    implementation 'com.tencent.map.geolocation:TencentLocationSdk-openplatform:7.5.4.3'
+    // 高德地图 3D SDK
+    implementation libs.amap3dmap
 }
