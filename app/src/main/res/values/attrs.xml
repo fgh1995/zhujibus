@@ -48,4 +48,22 @@
         <!-- 圆角半径 -->
         <attr name="radius" format="dimension" />
     </declare-styleable>
+    <declare-styleable name="VerticalScrollTextView">
+        <attr name="vsText" format="string" />
+        <attr name="vsTextColor" format="color" />
+        <attr name="vsTextSize" format="dimension" />
+        <attr name="vsScrollSpeed" format="float" />
+        <attr name="vsAutoStart" format="boolean" />
+        <attr name="vsGravity">
+            <enum name="top" value="0" />
+            <enum name="center" value="1" />
+            <enum name="bottom" value="2" />
+        </attr>
+        <attr name="vsTextGap" format="dimension" />
+        <attr name="vsAnimationMode">
+            <enum name="infinite" value="0" />
+            <enum name="bounce" value="1" />
+        </attr>
+        <attr name="vsTurnPauseDuration" format="integer" />
+    </declare-styleable>
 </resources>

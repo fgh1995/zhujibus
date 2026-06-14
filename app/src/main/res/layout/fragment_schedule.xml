@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/nav_panel_bg">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:paddingHorizontal="8dp"
+        android:paddingTop="12dp"
+        android:paddingBottom="6dp">
+
+        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="序号" android:textColor="#FFFFFF" android:textSize="12sp" android:gravity="center" android:includeFontPadding="false"/>
+        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="发车" android:textColor="#FFFFFF" android:textSize="12sp" android:gravity="center" android:includeFontPadding="false"/>
+        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="到达" android:textColor="#FFFFFF" android:textSize="12sp" android:gravity="center" android:includeFontPadding="false"/>
+        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="线路" android:textColor="#FFFFFF" android:textSize="12sp" android:gravity="center" android:includeFontPadding="false"/>
+        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="调度" android:textColor="#FFFFFF" android:textSize="12sp" android:gravity="center" android:includeFontPadding="false"/>
+        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="起点站" android:textColor="#FFFFFF" android:textSize="12sp" android:gravity="center" android:includeFontPadding="false"/>
+        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="终点站" android:textColor="#FFFFFF" android:textSize="12sp" android:gravity="center" android:includeFontPadding="false"/>
+    </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"/>
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
+
+        <LinearLayout
+            android:id="@+id/schedule_table_container"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingHorizontal="8dp" />
+    </ScrollView>
+</LinearLayout>

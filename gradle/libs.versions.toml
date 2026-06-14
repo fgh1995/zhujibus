@@ -14,8 +14,9 @@ navigationFragment = "2.6.0"
 navigationUi = "2.6.0"
 pinyin4j = "2.5.1"
 amap3dMap = "9.3.0"
-amapLocation = "6.5.0"
 glide = "5.0.7"
+gridlayout = "1.0.0"
+
 [libraries]
 jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "jacksonDatabind" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
@@ -31,8 +32,8 @@ navigation-fragment = { group = "androidx.navigation", name = "navigation-fragme
 navigation-ui = { group = "androidx.navigation", name = "navigation-ui", version.ref = "navigationUi" }
 pinyin4j = { module = "com.belerweb:pinyin4j", version.ref = "pinyin4j" }
 amap3dmap = { group = "com.amap.api", name = "3dmap", version.ref = "amap3dMap" }
-amapLocation = { group = "com.amap.api", name = "location", version.ref = "amapLocation" }
 glide = { module = "com.github.bumptech.glide:glide", version.ref = "glide" }
+gridlayout = { group = "androidx.gridlayout", name = "gridlayout", version.ref = "gridlayout" }
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 

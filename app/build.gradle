@@ -10,8 +10,8 @@ android {
         applicationId "org.zjfgh.zhujibus"
         minSdk 24
         targetSdk 35
-        versionCode 102003
-        versionName "1.2.0-beta"
+        versionCode 102010
+        versionName "1.2.1-beta"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -49,5 +49,5 @@ dependencies {
     // 高德地图 3D SDK
     implementation libs.amap3dmap
     implementation libs.glide
-    implementation 'androidx.gridlayout:gridlayout:1.0.0'
+    implementation libs.gridlayout
 }

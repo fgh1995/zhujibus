@@ -439,6 +439,9 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             if (gpsCount != null) {
                 gpsCount.setTextColor(0xFF00FF00);
             }
+            if (navigationMainFragment != null) {
+                navigationMainFragment.setGpsMode(true);
+            }
         } else {
             networkModeText.setTextColor(0xFFFF0000);
             gpsModeText.setTextColor(0xFF555555);
@@ -448,6 +451,9 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             if (gpsCount != null) {
                 gpsCount.setText("--/--");
                 gpsCount.setTextColor(0xFF555555);
+            }
+            if (navigationMainFragment != null) {
+                navigationMainFragment.setGpsMode(false);
             }
         }
     }
@@ -584,10 +590,9 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         boolean isInsideRadius = false;
         boolean isBeyondExitRadius = false;
         int currentInsideStationIndex = -1;
+        int leavingStationFinal = -1;
+        boolean isLeavingTerminal = false;
 
-        // 进入半径使用沿线距离；只有"沿线距离接近 enterStationRadius"或"上一帧已接近"的站点才走 calculateDistances，
-        // 其他站点直接用 Android 自带的 Location.distanceBetween（fast path）快算直线距离——剪枝后单帧
-        // calculateDistances 调用次数从 站点数 降到 ≤2 次，主线程压力大幅下降。
         final float[] tmpResults = new float[1];
         for (int i = 0; i < stations.size(); i++) {
             BusApiClient.BusLineStation station = stations.get(i);
@@ -647,8 +652,6 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             }
         }
 
-        int leavingStationFinal = -1;
-        boolean isLeavingTerminal = false;
         if (isBeyondExitRadius && snapshotLastInside != -1) {
             int leavingIndex = snapshotLastInside;
             int totalStations = stations.size();
@@ -668,13 +671,12 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             }
         }
 
-        // EAT 计算（纯计算）—— 当前 InsideStationIndex 优先，否则用 leavingStationFinal，否则用 snapshotGpsCurrent
+        // EAT 计算
         int eatRefIndex = currentInsideStationIndex >= 0 ? currentInsideStationIndex :
                 (leavingStationFinal >= 0 ? leavingStationFinal : snapshotGpsCurrent);
         String eatText = calculateGpsEatText(stations, currentInsideStationIndex, leavingStationFinal, speedKmh, eatRefIndex);
 
-        // 把后台计算的所有结果打成 final 快照，runOnUiThread 块只读快照，避免被下一次 GPS 回调覆盖
-        // 同时这些变量在循环中被重新赋值过，必须 final 拷贝后才能在 lambda 内引用
+        // 把后台计算的所有结果打成 final 快照
         final String resultNearestName = nearestStationName;
         final double resultNearestDistance = nearestStationDistance;
         final double resultNearestDirect = nearestStationDirectDistance;
@@ -685,14 +687,14 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         final int finalLeavingStationFinal = leavingStationFinal;
         final boolean finalIsLeavingTerminal = isLeavingTerminal;
 
-        // 主线程：状态变量写、报站触发、View 更新（一次性切到主线程，避免多次 post）
+        // 主线程：状态变量写、报站触发、View 更新
         runOnUiThread(() -> {
             if (currentAnnounceMode != AnnounceMode.GPS) {
                 return;
             }
             int totalStations = stations.size();
 
-            // ---- 状态变量更新（保证主线程串行写）----
+            // ---- 状态变量更新 ----
             if (finalIsBeyondExitRadius && snapshotLastInside != -1) {
                 int leavingIndex = snapshotLastInside;
                 boolean isTerminalStation = leavingIndex >= totalStations - 1;
@@ -748,22 +750,19 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 }
             }
 
-            // ---- View 更新（使用 final 快照，避免被下一次 GPS 回调覆盖）----
+            // ---- View 更新 ----
             // 转发到 SpeakFragment
             if (speakFragment != null) {
-                // GPS 可见性
                 boolean gpsVisible = currentAnnounceMode == AnnounceMode.GPS;
                 speakFragment.setGpsVisible(gpsVisible);
-                // 坐标信息（由 runOnUiThread 中的 gcjLat/gcjLon 更新，这里用最新值）
-                // 最近站点
                 if (resultNearestDistance >= 0) {
                     speakFragment.updateNearestStation(resultNearestName, resultNearestDistance, resultNearestDirect);
                 }
-                // 预计信息
                 speakFragment.updateEstimatedInfo(resultEatText);
-                // 距离模式
                 speakFragment.setDistanceMode(currentDistanceMode == DistanceMode.STRAIGHT_LINE);
             }
+
+            // 更新原有的 BusLineView
             if (busLineView != null) {
                 if (finalIsLeavingTerminal) {
                     busLineView.updateGpsPosition(-1, false);
@@ -773,6 +772,19 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                     busLineView.updateGpsPosition(finalLeavingStationFinal, false);
                 }
             }
+
+            // ========== 新增：同步 GPS 位置到 NavigationMainFragment ==========
+            if (navigationMainFragment != null) {
+                if (finalIsLeavingTerminal) {
+                    navigationMainFragment.updateGpsPosition(-1, false);
+                } else if (finalIsInsideRadius && finalCurrentInsideStationIndex >= 0) {
+                    navigationMainFragment.updateGpsPosition(finalCurrentInsideStationIndex, true);
+                } else if (!finalIsInsideRadius && finalLeavingStationFinal >= 0) {
+                    navigationMainFragment.updateGpsPosition(finalLeavingStationFinal, false);
+                }
+            }
+            // ============================================================
+
             if (finalIsLeavingTerminal) {
                 // nothing
             } else if (finalIsInsideRadius) {
@@ -1254,7 +1266,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         nextStationInfo.setTypeface(dottedSongti);
         nextStationInfo.setTextColor(0xFFFF0000);
         nextStationInfo.setTextSize(30f);
-        nextStationInfo.setText("欢迎乘坐" + lineName + "公交车" + "    " + "Welcome aboard the No." + lineName +  "bus.");
+        nextStationInfo.setText("欢迎乘坐 " + lineName + " 公交车" + "    " + "Welcome aboard the No." + formatLineNameForEnglish(lineName) +  " bus.");
         nextStationInfo.setScrollSpeed(180f);
         accessibilityIcon = findViewById(R.id.accessibility_icon);
         accessibilityIcon.setVisibility(View.GONE);
@@ -1323,7 +1335,24 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private void setupListeners() {
         navigationMainFragment.setSwapOrientation(v -> swapDirection());
     }
+    // 添加一个辅助方法来处理线路名称
+    private String formatLineNameForEnglish(String lineName) {
+        if (lineName == null || lineName.isEmpty()) {
+            return lineName;
+        }
+        // 正则匹配：以数字结尾，后面跟"路"，然后可能还有内容
+        // 匹配模式：数字 + "路"
+        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("^(\\d+)路(.*)$");
+        java.util.regex.Matcher matcher = pattern.matcher(lineName);
 
+        if (matcher.find()) {
+            // 如果是数字+路的格式，去掉"路"，保留数字和后面的内容
+            String number = matcher.group(1);  // 数字部分
+            String rest = matcher.group(2);     // 后面的内容（如"公交车"等）
+            return number + rest;
+        }
+        return lineName;
+    }
     /**
      * 加载导航内容：
      *   - NavigationMainFragment 一次性添加，**常驻**（不销毁，保持地图状态）
@@ -1884,6 +1913,9 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         }
         Log.d(TAG, "lineDirection.id = " + lineDirection.id);
         Log.d(TAG, "lineDirection.stationList size = " + (lineDirection.stationList == null ? "null" : lineDirection.stationList.size()));
+        if (navigationMainFragment != null) {
+            navigationMainFragment.setLineData(lineDirection, isTwoWayLine, currentDirection);
+        }
         // 更新导航卡片的方向（终点站）
         if (navigationMainFragment != null && lineDirection.endStation != null) {
             navigationMainFragment.updateDirection(lineDirection.endStation);
@@ -2120,7 +2152,19 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                         Log.d(TAG, "定位到指定站点: position=" + position + ", stationId=" + stationId);
                     }
                 }
+                if (navigationMainFragment != null) {
+                    navigationMainFragment.setOnStationClickListener(this::showStationDetails);
+                    navigationMainFragment.setOnGpsArrivalListener(this::scrollToStation);
 
+                    // 如果有指定站点，选中它
+                    stationId = getIntent().getStringExtra("station_id");
+                    if (stationId != null && !stationId.isEmpty()) {
+                        int position = findStationPositionById(stationId);
+                        if (position != -1) {
+                            navigationMainFragment.setSelectedPosition(position);
+                        }
+                    }
+                }
                 setupEtaList();
                 Log.d(TAG, "=== setupStationList 完成 ===");
 
@@ -2318,10 +2362,12 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             updateNetworkStatusIndicator(true);
 
             if (!positions.isEmpty()) {
+                if (navigationMainFragment != null) {
+                    navigationMainFragment.updateBusPositions(positions);
+                }
                 if (busLineView != null) {
                     busLineView.updateBusPositions(positions);
                 }
-
                 int selectedStationIndex = busLineView != null ? busLineView.getSelectedPosition() : -1;
                 if (selectedStationIndex != -1) {
                     if (trackedVehiclePlate == null) {
