@@ -9,6 +9,6 @@
         android:color="#FF0000" />
     <!-- 确保是标准圆形，需在布局中设置宽高相等 -->
     <size
-        android:width="60dp"
-        android:height="60dp" />
+        android:width="55dp"
+        android:height="55dp" />
 </shape>

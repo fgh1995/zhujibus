@@ -1,5 +1,6 @@
 package org.zjfgh.zhujibus;
 
+import android.graphics.Color;
 import android.graphics.Typeface;
 import android.os.Bundle;
 import android.os.Handler;
@@ -52,9 +53,13 @@ public class NavigationMainFragment extends Fragment {
     private TextView navTimeHM;
     private TextView navTimeSecond;
     private TextView navDateText;
-    private TextView navRouteNo;
-    private TextView navNextStation;
-    private TextView navDirection;
+    private HorizontalScrollTextView navRouteNo;
+    // 在 NavigationMainFragment 中
+    private View.OnClickListener swapOrientationListener;
+    private TextView navSwapOrientation;
+    private boolean isLoopLine;
+    private HorizontalScrollTextView navNextStation;
+    private HorizontalScrollTextView navDirection;
     private TextView gpsSpeedText;
 
     // ---- 地图导航管理 ----
@@ -67,7 +72,11 @@ public class NavigationMainFragment extends Fragment {
 
     /** Activity 是否已 resumed：用于在 onGlobalLayout 完成后补一次 onResume */
     private boolean isHostResumed = false;
-
+    // 在 NavigationMainFragment 类中添加字段
+    private TextView firstBusTime;   // 首班车
+    private TextView lastBusTime;    // 末班车
+    private TextView routeSummary;   // 总里程
+    private TextView ticket;   // 总里程
     public static NavigationMainFragment newInstance(String lineName, String endStation) {
         NavigationMainFragment f = new NavigationMainFragment();
         Bundle args = new Bundle();
@@ -105,10 +114,16 @@ public class NavigationMainFragment extends Fragment {
             navTimeSecond = view.findViewById(R.id.nav_time_second);
             navDateText = view.findViewById(R.id.nav_date_text);
             navRouteNo = view.findViewById(R.id.nav_route_no);
+            navSwapOrientation = view.findViewById(R.id.nav_swap_orientation);
+
             navNextStation = view.findViewById(R.id.nav_next_station);
             navDirection = view.findViewById(R.id.nav_direction);
             gpsSpeedText = view.findViewById(R.id.gps_speed_text);
-
+            // 注意：你需要先在 fragment_navigation_main.xml 中为这些 TextView 添加 id
+            firstBusTime = view.findViewById(R.id.first_bus_time);
+            lastBusTime = view.findViewById(R.id.last_bus_time);
+            routeSummary = view.findViewById(R.id.route_summary);
+            ticket = view.findViewById(R.id.ticket);
             // 2. 加载数码字体（与 Activity 保持一致）
             try {
                 digitalTypeface = Typeface.createFromAsset(requireContext().getAssets(), "fonts/DS-DIGIB-2.ttf");
@@ -124,7 +139,7 @@ public class NavigationMainFragment extends Fragment {
                 navRouteNo.setText(lineName);
             }
             if (navNextStation != null) {
-                navNextStation.setText("下一站: 加载中");
+                navNextStation.setText("加载中");
             }
             if (navDirection != null && endStation != null) {
                 navDirection.setText("往 " + endStation + "方向");
@@ -142,7 +157,16 @@ public class NavigationMainFragment extends Fragment {
                 }
             };
             navigationTimeHandler.post(navigationTimeRunnable);
-
+            if (swapOrientationListener != null && navSwapOrientation != null) {
+                navSwapOrientation.setOnClickListener(swapOrientationListener);
+            }
+            if (navSwapOrientation != null){
+                if (isLoopLine){
+                    navSwapOrientation.setVisibility(View.GONE);
+                }else{
+                    navSwapOrientation.setVisibility(View.VISIBLE);
+                }
+            }
             // 5. 初始化高德地图（延迟到 layout 完成）
             initMapWhenReady(savedInstanceState);
         } catch (Exception e) {
@@ -199,7 +223,26 @@ public class NavigationMainFragment extends Fragment {
     public void setGpsMode(boolean gpsMode) {
         if (navigation != null) navigation.setGpsMode(gpsMode);
     }
-
+    public void setSwapOrientation(View.OnClickListener listener){
+        Log.d(TAG, "setSwapOrientation called, navSwapOrientation=" + navSwapOrientation);
+        this.swapOrientationListener = listener;
+        if (navSwapOrientation != null && listener != null) {
+            Log.d(TAG, "Setting click listener on navSwapOrientation");
+            navSwapOrientation.setOnClickListener(listener);
+        } else {
+            Log.d(TAG, "navSwapOrientation is null, listener saved for later");
+        }
+    }
+    public void setLoopLine(boolean isLoopLine){
+        if (navSwapOrientation != null){
+            this.isLoopLine = isLoopLine;
+            if (isLoopLine){
+                navSwapOrientation.setVisibility(View.GONE);
+            }else{
+                navSwapOrientation.setVisibility(View.VISIBLE);
+            }
+        }
+    }
     /** 更新实时速度（单位 km/h） */
     public void updateSpeed(float speedKmh) {
         if (gpsSpeedText != null) {
@@ -234,7 +277,6 @@ public class NavigationMainFragment extends Fragment {
             navRouteNo.setText(lineName);
         }
     }
-
     /** 进场提示 */
     public void showEnteringHint() {
         if (navNextStation != null) navNextStation.setText("进场");
@@ -285,6 +327,40 @@ public class NavigationMainFragment extends Fragment {
             }
         } catch (Throwable t) {
             Log.w(TAG, "updateNavigationTime failed: " + t.getMessage());
+        }
+    }
+    /**
+     * 更新首班车时间
+     */
+    public void updateFirstBusTime(String time) {
+        if (firstBusTime != null && time != null) {
+            firstBusTime.setText("首：" + time);
+        }
+    }
+
+    /**
+     * 更新末班车时间
+     */
+    public void updateLastBusTime(String time) {
+        if (lastBusTime != null && time != null) {
+            lastBusTime.setText("末：" + time);
+        }
+    }
+
+    /**
+     * 更新总里程
+     */
+    public void updateRouteSummary(String mileage) {
+        if (routeSummary != null && mileage != null) {
+            routeSummary.setText("总里程：" + mileage + " 公里");
+        }
+    }
+    /**
+     * 更新票价
+     */
+    public void updatePriceText(String priceText) {
+        if (ticket != null && priceText != null) {
+            ticket.setText("票价：" + priceText + " 元");
         }
     }
 

@@ -11,22 +11,41 @@
         <attr name="dotMatrixDotSize" format="dimension" />
     </declare-styleable>
     <declare-styleable name="HorizontalScrollTextView">
+        <!-- 原有属性 -->
         <attr name="hsText" format="string" />
         <attr name="hsTextColor" format="color" />
         <attr name="hsTextSize" format="dimension" />
         <attr name="hsScrollSpeed" format="float" />
         <attr name="hsAutoStart" format="boolean" />
         <attr name="hsGravity" format="enum">
-            <enum name="start" value="0" />
+            <enum name="left" value="0" />
             <enum name="center" value="1" />
-            <enum name="end" value="2" />
+            <enum name="right" value="2" />
         </attr>
         <attr name="hsTextGap" format="dimension" />
+
+        <!-- 新增属性 -->
+        <attr name="hsAnimationMode" format="enum">
+            <enum name="infinite" value="0" />
+            <enum name="bounce_with_pause" value="1" />
+        </attr>
+        <attr name="hsTurnPauseDuration" format="integer" />
+        <attr name="hsCharPerSecond" format="float" />
     </declare-styleable>
     <declare-styleable name="BorderLabel">
         <attr name="labelText" format="string" />
         <attr name="labelLitColor" format="color" />
         <attr name="labelDimColor" format="color" />
         <attr name="labelTextSize" format="dimension" />
+    </declare-styleable>
+    <declare-styleable name="SegmentedProgressBar">
+        <!-- 背景颜色 (浅色部分) -->
+        <attr name="lightColor" format="color" />
+        <!-- 进度颜色 (深色部分) -->
+        <attr name="darkColor" format="color" />
+        <!-- 进度值 (0.0 ~ 1.0) -->
+        <attr name="progress" format="float" />
+        <!-- 圆角半径 -->
+        <attr name="radius" format="dimension" />
     </declare-styleable>
 </resources>

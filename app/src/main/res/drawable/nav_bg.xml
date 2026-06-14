@@ -1,0 +1,13 @@
+<!-- 圆角布局示例 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 设置背景色为 #28303E -->
+    <solid android:color="#28303E" />
+    <!-- 设置圆角半径，可根据需要修改 -->
+    <corners android:radius="6dp" />
+    <!-- 可选：设置描边，如需边框可取消注释并调整 -->
+    <!--
+    <stroke
+        android:width="1dp"
+        android:color="#FFFFFF" />
+    -->
+</shape>

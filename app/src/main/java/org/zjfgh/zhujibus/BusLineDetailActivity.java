@@ -1,12 +1,8 @@
 package org.zjfgh.zhujibus;
 
-import static com.google.android.material.internal.ViewUtils.dpToPx;
-
-import android.Manifest;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.Intent;
-import android.content.pm.PackageManager;
 import android.graphics.Rect;
 import android.graphics.Typeface;
 import android.location.Location;
@@ -14,9 +10,6 @@ import android.location.LocationListener;
 import android.location.LocationProvider;
 import android.location.LocationManager;
 import android.os.Bundle;
-import android.os.Looper;
-
-import androidx.core.app.ActivityCompat;
 
 import androidx.annotation.NonNull;
 import androidx.fragment.app.Fragment;
@@ -31,34 +24,26 @@ import android.text.Html;
 import android.text.Spanned;
 import android.text.SpannableStringBuilder;
 import android.text.style.ForegroundColorSpan;
-import android.text.style.RelativeSizeSpan;
 import android.text.style.StyleSpan;
 import android.util.Log;
-import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
-import android.widget.Button;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
-import com.google.android.material.slider.Slider;
 import android.widget.Toast;
 
-import androidx.navigation.ui.AppBarConfiguration;
-import androidx.recyclerview.widget.DividerItemDecoration;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
-import java.time.LocalTime;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.Calendar;
 import java.util.Collections;
 import java.util.Date;
 import java.util.List;
@@ -67,7 +52,6 @@ import java.util.Locale;
 import android.graphics.Color;
 
 import io.sgr.geometry.utils.GeometryUtils;
-import io.sgr.geometry.utils.RouteGeometryUtils;
 
 public class BusLineDetailActivity extends AppCompatActivity implements BusRealTimeManager.RealTimeUpdateListener {
     private String lineID;
@@ -76,12 +60,13 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private String endStation;
     private BusApiClient busApiClient;
     private HorizontalScrollTextView routeNumber;
+    private TextView navHasNotification;
     private TextView noticeText;
-    private LinearLayout swapOrientation;
     private DotMatrixView accessibilityIcon;
     private HorizontalScrollTextView nextStationInfo;
     private HorizontalScrollTextView tips;
-
+    private ImageView navIconMessageImg;
+    private TextView navIconMessageText;
     // 当前显示的方向 (1:上行, 2:下行)
     private int currentDirection = 1;
     // 线路是否有双向
@@ -89,25 +74,14 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     // 缓存线路数据
     private BusApiClient.BusLineDetailResponse cachedResponse;
     private BusRealTimeManager realTimeManager;
-    private Handler handler = new Handler();
-    private RecyclerView stationListRecyclerView;
-    private StationAdapter stationAdapter;
+    private final Handler handler = new Handler();
     private BusLineView busLineView;
     private ScrollView stationScrollView;
-    private List<BusEtaItem> etaItems = new ArrayList<>();
+    private final List<BusEtaItem> etaItems = new ArrayList<>();
     private BusEtaAdapter busEtaAdapter;
-    private BorderLabel scheduleButton;
-    private BorderLabel hideBusCardReader;
-    private FrameLayout busCardReaderView;
-    private TextView swapOrientationLabel;
-    private TextView firstBusMarker;
-    private TextView lastBusMarker;
-    private TextView routeSummary;
     private static final String TAG = "BusLineDetailActivity";
-    TextView ticket;
-    TextView currentTime;
-    private Handler timeHandler = new Handler();
-    private int timeDisplayPhase = 0;
+    MoreFragment moreFragment;
+    String priceText = "0.00";
     // ⭐ 导航模块视图引用已迁移到 NavigationMainFragment，Activity 不再持有：
     //   navTimeHM / navTimeSecond / navDateText / navRouteNo / navNextStation / navDirection
     //   navigationTimeHandler / navigationTimeRunnable / updateNavigationTime()
@@ -119,30 +93,18 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private boolean isActivityResumed = false;
     /** 当前 NavigationMainFragment 实例（用于通过它访问 navigation/调用更新方法） */
     private NavigationMainFragment navigationMainFragment;
+    /** 当前 SpeakFragment 实例（用于转发 GPS 数据更新） */
+    private SpeakFragment speakFragment;
     /** 当前是否在地图设置页（用于图标切换显示） */
     private boolean isShowingMapSettings = false;
+    /** 当前是否显示排班页 */
+    private boolean isShowingSchedule = false;
     /** 地图图标原始资源（点击切换时换图标用） */
     private android.widget.ImageView navIconMapImg;
     private android.widget.TextView navIconMapText;
-    private final Runnable timeScrollRunnable = new Runnable() {
-        @Override
-        public void run() {
-            if (currentTime != null) {
-                SimpleDateFormat formatter;
-                if (timeDisplayPhase == 0) {
-                    formatter = new SimpleDateFormat("yy.MM.dd", Locale.getDefault());
-                    currentTime.setText(formatter.format(new Date()));
-                    timeDisplayPhase = 1;
-                    timeHandler.postDelayed(this, 2000);
-                } else {
-                    formatter = new SimpleDateFormat("HH.mm.ss", Locale.getDefault());
-                    currentTime.setText(formatter.format(new Date()));
-                    timeDisplayPhase = (timeDisplayPhase == 1) ? 2 : 0;
-                    timeHandler.postDelayed(this, 1000);
-                }
-            }
-        }
-    };
+    /** 排班图标 */
+    private android.widget.ImageView navIconScheduleImg;
+    private android.widget.TextView navIconScheduleText;
 
     /**
      * 导航模块时间更新方法
@@ -156,17 +118,8 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     TextView gpsModeText;
     TextView networkStatusIndicator;
     TextView gpsStatusIndicator;
-    TextView gpsLocationInfo;
-    TextView gpsNearestStationInfo;
-    BorderLabel distanceModeInfo;
     // ⭐ gpsSpeedText 已迁移到 NavigationMainFragment
     TextView gpsCount;
-    TextView radiusMinText;
-    TextView radiusMaxText;
-    TextView exitRadiusMinText;
-    TextView exitRadiusMaxText;
-    LinearLayout gpsLabel;
-    TextView gpsEatInfo;
     private ValueAnimator errorBlinkAnimator;
     private ValueAnimator gpsBlinkAnimator;
     private boolean isGpsSignalNormal = false;
@@ -193,18 +146,12 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private double currentGpsLon = 0;
     private String nearestStationName = "";
     private double nearestStationDistance = -1;
-    private double nearestStationLat = 0;
-    private double nearestStationLon = 0;
     private double nearestStationDirectDistance = -1;
-    private boolean isInsideRadius = false;
-    private boolean isBeyondExitRadius = false;
     private static final double DEFAULT_ENTER_STATION_RADIUS = 30.0;
     private static final double DEFAULT_EXIT_STATION_RADIUS = 80.0;
     // 后台 GPS 线程会读，滑块在主线程改，volatile 保证可见性
     private volatile double enterStationRadius = DEFAULT_ENTER_STATION_RADIUS;
     private volatile double exitStationRadius = DEFAULT_EXIT_STATION_RADIUS;
-    private Slider enterRadiusSlider;
-    private Slider exitRadiusSlider;
     // 后台 GPS 线程会读，主线程在 showDirection 中赋值，volatile 保证可见性
     private volatile List<io.sgr.geometry.Coordinate> routePoints;
     private static final double STATION_PROXIMITY_THRESHOLD_METERS = 50.0;
@@ -224,7 +171,8 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private Runnable speedTimeoutRunnable;
     // 保护 calculateRealTimeSpeed 涉及的字段：后台 HandlerThread 与主线程并发读写
     private final Object speedLock = new Object();
-
+    /** 消息图标 */
+    private LinearLayout navIconMessage;
     public enum DistanceMode {
         ALONG_ROUTE("沿线距离"),
         STRAIGHT_LINE("直线距离");
@@ -259,13 +207,25 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private static final int[] TIPS_COLOR_BASE = {0xFFFFFF00, 0xFF00FFFF};
     private static final int TIPS_COLOR_PURPLE = 0xFFAA00FF;
     // GPS 模式报站文案：中英双语"扫码评价"提示
-    private static final String QR_HINT_CN = "        欢迎扫车内二维码对本次乘车服务进行评价";
+    private static final String QR_HINT_CN = "        欢迎扫车内二维码对本次乘车服务进行评价。";
     private static final String QR_HINT_EN = "    Scan the QR code on board to rate your ride. Thank you!";
     private String[] currentTipsText = TIPS_TEXT_BASE;
     private int[] currentTipsColor = TIPS_COLOR_BASE;
     private Handler tipsHandler = new Handler();
     private int tipsAnimationIndex = 0;
 
+
+    /** 当前是否显示喊话页 */
+    private boolean isShowingSpeak = false;
+    /** 当前是否显示更多应用页 */
+    private boolean isShowingMore = false;
+
+    /** 喊话图标 */
+    private android.widget.ImageView navIconSpeakImg;
+    private android.widget.TextView navIconSpeakText;
+
+    /** 更多应用图标 */
+    private android.widget.ImageView navIconMoreImg;
     private final Runnable tipsRunnable = new Runnable() {
         @Override
         public void run() {
@@ -302,23 +262,6 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                     if (newMode != currentAnnounceMode) {
                         currentAnnounceMode = newMode;
                         updateAnnounceModeState();
-                    }
-                    dialog.dismiss();
-                })
-                .setNegativeButton("取消", null)
-                .show();
-    }
-
-    private void showDistanceModeDialog() {
-        String[] modes = {DistanceMode.STRAIGHT_LINE.getDisplayName(), DistanceMode.ALONG_ROUTE.getDisplayName()};
-        int selectedIndex = currentDistanceMode == DistanceMode.STRAIGHT_LINE ? 0 : 1;
-        new AlertDialog.Builder(this)
-                .setTitle("选择距离计算方式")
-                .setSingleChoiceItems(modes, selectedIndex, (dialog, which) -> {
-                    DistanceMode newMode = (which == 0) ? DistanceMode.STRAIGHT_LINE : DistanceMode.ALONG_ROUTE;
-                    if (newMode != currentDistanceMode) {
-                        currentDistanceMode = newMode;
-                        updateDistanceModeState();
                     }
                     dialog.dismiss();
                 })
@@ -376,19 +319,6 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         Log.d(TAG, "坐标转换模式显示: " + currentCoordConvertMode.getDisplayName());
     }
 
-    private void updateDistanceModeState() {
-        String modeText = currentDistanceMode == DistanceMode.STRAIGHT_LINE ? "直线" : "沿线";
-        Log.d(TAG, "距离模式已切换为: " + modeText);
-        updateDistanceModeDisplay();
-    }
-
-    private void updateDistanceModeDisplay() {
-        if (distanceModeInfo != null) {
-            String modeText = currentDistanceMode == DistanceMode.STRAIGHT_LINE ? "直线距离" : "沿线距离";
-            distanceModeInfo.setText(String.format(Locale.CHINA, "报站判定: %s", modeText));
-        }
-    }
-
     private void updateAnnounceModeState() {
         if (currentAnnounceMode == AnnounceMode.GPS) {
             if (!PermissionUtils.hasLocationPermission(this)) {
@@ -442,6 +372,10 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             }
             checkGpsProviderStatus();
             startGpsTimeUpdate();
+            // GPS 模式：显示 SpeakFragment 中的 GPS 信息
+            if (speakFragment != null) {
+                speakFragment.setGpsVisible(true);
+            }
             // ⭐ GPS 模式：开启地图罗盘模式（3D 贴地视角）
             if (navigationMainFragment != null) {
                 navigationMainFragment.setGpsMode(true);
@@ -466,6 +400,10 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 busLineView.setGpsMode(false);
             }
             stopGpsTimeUpdate();
+            // GPS 模式：隐藏 SpeakFragment 中的 GPS 信息
+            if (speakFragment != null) {
+                speakFragment.setGpsVisible(false);
+            }
         }
         updateAnnounceModeDisplay();
     }
@@ -507,9 +445,6 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             gpsModeText.setText("GPS");
             isGpsSignalNormal = false;
             updateGpsStatusIndicator(false);
-            if (gpsLabel != null) {
-                gpsLabel.setVisibility(View.GONE);
-            }
             if (gpsCount != null) {
                 gpsCount.setText("--/--");
                 gpsCount.setTextColor(0xFF555555);
@@ -604,7 +539,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             navigationMainFragment.updateMyLocation(gcjLat, gcjLon, bearing);
         }
 
-        // 主线程：更新"信号正常"指示、坐标显示、速度显示
+        // 主线程：更新"信号正常"指示、速度显示、坐标
         final double finalGcjLat = gcjLat;
         final double finalGcjLon = gcjLon;
         final float finalSpeedKmh = speedKmh;
@@ -614,25 +549,23 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             }
             isGpsSignalNormal = true;
             updateGpsStatusIndicator(true);
-            if (gpsLabel != null && gpsLabel.getVisibility() != View.VISIBLE) {
-                gpsLabel.setVisibility(View.VISIBLE);
-            }
-            String coordSystemLabel;
-            switch (currentCoordConvertMode) {
-                case NO_CONVERT:
-                    coordSystemLabel = "原始";
-                    break;
-                case GCJ_TO_WGS:
-                    coordSystemLabel = "WGS";
-                    break;
-                default:
-                    coordSystemLabel = "GCJ-02";
-            }
-            if (gpsLocationInfo != null) {
-                gpsLocationInfo.setText(String.format(Locale.CHINA, "坐标：%.6f, %.6f (%s)", finalGcjLat, finalGcjLon, coordSystemLabel));
-            }
             if (navigationMainFragment != null) {
                 navigationMainFragment.updateSpeed(finalSpeedKmh);
+            }
+            // 坐标信息
+            if (speakFragment != null) {
+                String coordSystemLabel;
+                switch (currentCoordConvertMode) {
+                    case NO_CONVERT:
+                        coordSystemLabel = "原始";
+                        break;
+                    case GCJ_TO_WGS:
+                        coordSystemLabel = "WGS";
+                        break;
+                    default:
+                        coordSystemLabel = "GCJ-02";
+                }
+                speakFragment.updateGpsLocation(finalGcjLat, finalGcjLon, coordSystemLabel);
             }
         });
 
@@ -647,8 +580,6 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         List<BusApiClient.BusLineStation> stations = realTimeManager.getStationList();
         nearestStationName = "";
         nearestStationDistance = -1;
-        nearestStationLat = 0;
-        nearestStationLon = 0;
         nearestStationDirectDistance = -1;
         boolean isInsideRadius = false;
         boolean isBeyondExitRadius = false;
@@ -702,8 +633,6 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             if (nearestStationDistance < 0 || distanceForCompare < nearestStationDistance) {
                 nearestStationDistance = distanceForCompare;
                 nearestStationName = station.stationName;
-                nearestStationLat = stationLat;
-                nearestStationLon = stationLon;
                 nearestStationDirectDistance = directDistance;
             }
 
@@ -820,12 +749,20 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             }
 
             // ---- View 更新（使用 final 快照，避免被下一次 GPS 回调覆盖）----
-            if (resultNearestDistance >= 0 && gpsNearestStationInfo != null) {
-                gpsNearestStationInfo.setText(String.format(Locale.CHINA, "站点: %s (沿线%s/直线%s)",
-                        resultNearestName, formatDistance(resultNearestDistance), formatDistance(resultNearestDirect)));
-            }
-            if (gpsEatInfo != null) {
-                gpsEatInfo.setText(resultEatText);
+            // 转发到 SpeakFragment
+            if (speakFragment != null) {
+                // GPS 可见性
+                boolean gpsVisible = currentAnnounceMode == AnnounceMode.GPS;
+                speakFragment.setGpsVisible(gpsVisible);
+                // 坐标信息（由 runOnUiThread 中的 gcjLat/gcjLon 更新，这里用最新值）
+                // 最近站点
+                if (resultNearestDistance >= 0) {
+                    speakFragment.updateNearestStation(resultNearestName, resultNearestDistance, resultNearestDirect);
+                }
+                // 预计信息
+                speakFragment.updateEstimatedInfo(resultEatText);
+                // 距离模式
+                speakFragment.setDistanceMode(currentDistanceMode == DistanceMode.STRAIGHT_LINE);
             }
             if (busLineView != null) {
                 if (finalIsLeavingTerminal) {
@@ -1022,7 +959,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 terminalEat = formatDistance(distanceToTerminal);
             }
         }
-        
+
         String result = String.format(Locale.CHINA, "预计：下一站 %s，终点 %s", nextEat, terminalEat);
         Log.d(TAG, "EAT计算结果: " + result);
         return result;
@@ -1283,14 +1220,8 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     }
 
     private void initViews(Bundle savedInstanceState) {
-        scheduleButton = findViewById(R.id.schedule_button);
-        hideBusCardReader = findViewById(R.id.hide_bus_card_reader);
-        busCardReaderView = findViewById(R.id.bus_card_reader_view);
-        firstBusMarker = findViewById(R.id.first_bus_marker);
-        lastBusMarker = findViewById(R.id.last_bus_marker);
-        routeSummary = findViewById(R.id.route_summary);
+
         routeNumber = findViewById(R.id.route_number);
-        swapOrientationLabel = findViewById(R.id.swap_orientation_label);
         routeNumber.setText(lineName);
         routeNumber.setTextColor(0xFF00FF00);
         routeNumber.setGravity(0);
@@ -1298,14 +1229,6 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         Typeface dottedSongti = Typeface.createFromAsset(getAssets(), "fonts/DottedSongtiSquareRegular.otf");
         Typeface digitalTypeface = Typeface.createFromAsset(getAssets(), "fonts/DS-DIGIB-2.ttf");
         routeNumber.setTypeface(dottedSongti);
-        swapOrientationLabel.setTypeface(dottedSongti);
-        scheduleButton.setText("时刻表");
-        scheduleButton.setTypeface(dottedSongti);
-        hideBusCardReader.setTypeface(dottedSongti);
-        firstBusMarker.setTypeface(dottedSongti);
-        lastBusMarker.setTypeface(dottedSongti);
-        routeSummary.setTypeface(dottedSongti);
-
         int maxWidth = (int) (120 * getResources().getDisplayMetrics().density);
         int textWidth = (int) routeNumber.getTextWidth();
         if (textWidth > 0 && textWidth < maxWidth) {
@@ -1313,13 +1236,16 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         }
 
         LinearLayout noticeBar = findViewById(R.id.notice_bar);
+        navHasNotification = findViewById(R.id.nav_has_notification);
+        navHasNotification.setText("0");
+        navHasNotification.setVisibility(View.GONE);
         noticeText = findViewById(R.id.notice_text);
         noticeBar.setVisibility(View.GONE);
         HorizontalScrollTextView endStationName = findViewById(R.id.end_station_name);
         endStationName.setGravity(2);
         endStationName.setText(endStation);
         endStationName.setTypeface(dottedSongti);
-        endStationName.setScrollSpeed(220f);
+        endStationName.setScrollSpeed(180f);
         tips = findViewById(R.id.tips);
         tips.setTypeface(dottedSongti);
         tips.setGravity(1);
@@ -1328,29 +1254,13 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         nextStationInfo.setTypeface(dottedSongti);
         nextStationInfo.setTextColor(0xFFFF0000);
         nextStationInfo.setTextSize(30f);
-        nextStationInfo.setText("欢迎乘坐" + lineName + "公交车");
-        nextStationInfo.setScrollSpeed(220f);
-        swapOrientation = findViewById(R.id.swap_orientation);
-        swapOrientation.setVisibility(View.GONE);
-
-        BorderLabel loopLineLabel = findViewById(R.id.loop_line_label);
-        loopLineLabel.setVisibility(View.GONE);
-        loopLineLabel.setTypeface(dottedSongti);
-        loopLineLabel.setText("环线");
-        loopLineLabel.setColor(0xFFFF0000);
+        nextStationInfo.setText("欢迎乘坐" + lineName + "公交车" + "    " + "Welcome aboard the No." + lineName +  "bus.");
+        nextStationInfo.setScrollSpeed(180f);
         accessibilityIcon = findViewById(R.id.accessibility_icon);
         accessibilityIcon.setVisibility(View.GONE);
         refreshTime = findViewById(R.id.refresh_time);
         refreshTime.setTypeface(digitalTypeface);
-
-        ticket = findViewById(R.id.ticket);
-        ticket.setTypeface(digitalTypeface, Typeface.NORMAL);
         updateTicketPrice();
-
-        currentTime = findViewById(R.id.current_time);
-        currentTime.setTypeface(digitalTypeface, Typeface.NORMAL);
-        timeHandler.post(timeScrollRunnable);
-
         // ⭐ 初始化导航模块：旧版在 Activity 内 findViewById，
         // 现已迁移到 NavigationMainFragment，由 FragmentManager 加载并通过公开 API 交互。
         setupNavigationContent();
@@ -1390,61 +1300,11 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         networkModeText.setOnClickListener(modeSwitchListener);
         gpsModeText.setOnClickListener(modeSwitchListener);
         updateAnnounceModeDisplay();
-        gpsLocationInfo = findViewById(R.id.gps_location_info);
-        gpsLocationInfo.setTypeface(dottedSongti);
-        gpsLocationInfo.setOnClickListener(v -> showCoordConvertModeDialog());
-        gpsNearestStationInfo = findViewById(R.id.gps_nearest_station_info);
-        gpsNearestStationInfo.setTypeface(dottedSongti);
-        gpsEatInfo = findViewById(R.id.gps_eat_info);
-        if (gpsEatInfo != null) {
-            gpsEatInfo.setTypeface(dottedSongti);
-        }
-
-        distanceModeInfo = findViewById(R.id.distance_mode_info);
-        if (distanceModeInfo != null) {
-            distanceModeInfo.setTypeface(dottedSongti);
-        }
         // gpsSpeedText 已迁移到 NavigationMainFragment（gps_speed_text 在 fragment 布局里）
         gpsCount = findViewById(R.id.gps_count);
         if (gpsCount != null) {
             digitalTypeface = Typeface.createFromAsset(getAssets(), "fonts/DS-DIGIB-2.ttf");
             gpsCount.setTypeface(digitalTypeface);
-        }
-        gpsLabel = findViewById(R.id.gps_label);
-        gpsLabel.setVisibility(View.GONE);
-        if (distanceModeInfo != null) {
-            updateDistanceModeDisplay();
-            distanceModeInfo.setOnClickListener(v -> showDistanceModeDialog());
-        }
-        enterRadiusSlider = findViewById(R.id.enter_radius_slider);
-        exitRadiusSlider = findViewById(R.id.exit_radius_slider);
-        radiusMinText = findViewById(R.id.radius_min_text);
-        radiusMaxText = findViewById(R.id.radius_max_text);
-        exitRadiusMinText = findViewById(R.id.exit_radius_min_text);
-        exitRadiusMaxText = findViewById(R.id.exit_radius_max_text);
-        if (radiusMinText != null) {
-            radiusMinText.setTypeface(dottedSongti);
-        }
-        if (radiusMaxText != null) {
-            radiusMaxText.setTypeface(dottedSongti);
-        }
-        if (exitRadiusMinText != null) {
-            exitRadiusMinText.setTypeface(dottedSongti);
-        }
-        if (exitRadiusMaxText != null) {
-            exitRadiusMaxText.setTypeface(dottedSongti);
-        }
-        if (enterRadiusSlider != null) {
-            enterRadiusSlider.setValue((float) enterStationRadius);
-            enterRadiusSlider.addOnChangeListener((slider, value, fromUser) -> {
-                enterStationRadius = value;
-            });
-        }
-        if (exitRadiusSlider != null) {
-            exitRadiusSlider.setValue((float) exitStationRadius);
-            exitRadiusSlider.addOnChangeListener((slider, value, fromUser) -> {
-                exitStationRadius = value;
-            });
         }
 
         networkModeText.setTypeface(dottedSongti);
@@ -1461,36 +1321,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     }
 
     private void setupListeners() {
-        swapOrientation.setOnClickListener(v -> swapDirection());
-        hideBusCardReader.setOnClickListener(v -> {
-            if (busCardReaderView.getVisibility() == View.VISIBLE) {
-                hideBusCardReader.setLit(false);
-                busCardReaderView.setVisibility(View.GONE);
-            } else {
-                hideBusCardReader.setLit(true);
-                busCardReaderView.setVisibility(View.VISIBLE);
-            }
-        });
-
-        View paymentSuccessfulView = findViewById(R.id.payment_successful);
-        if (paymentSuccessfulView != null) {
-            paymentSuccessfulView.setOnClickListener(v -> {
-                TTSUtils ttsUtils = TTSUtils.getInstance(this);
-                if (ttsUtils != null) {
-                    ttsUtils.playScanCodeSuccessSound();
-                }
-            });
-        }
-
-        View cardAcceptedView = findViewById(R.id.card_accepted);
-        if (cardAcceptedView != null) {
-            cardAcceptedView.setOnClickListener(v -> {
-                TTSUtils ttsUtils = TTSUtils.getInstance(this);
-                if (ttsUtils != null) {
-                    ttsUtils.playCardSwipeSuccessSound();
-                }
-            });
-        }
+        navigationMainFragment.setSwapOrientation(v -> swapDirection());
     }
 
     /**
@@ -1516,14 +1347,243 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         if (navIconMap != null) {
             navIconMap.setOnClickListener(v -> toggleNavigationPage());
         }
+
+        // 3. 绑定左侧"排班"图标点击
+        View navIconSchedule = findViewById(R.id.nav_icon_schedule);
+        navIconScheduleImg = findViewById(R.id.nav_icon_schedule_img);
+        navIconScheduleText = findViewById(R.id.nav_icon_schedule_text);
+        if (navIconSchedule != null) {
+            navIconSchedule.setOnClickListener(v -> toggleSchedulePage());
+        }
+        // 4. 绑定左侧"消息"图标点击
+        View navIconMessageView = findViewById(R.id.nav_icon_message);
+        if (navIconMessageView != null) {
+            navIconMessageImg = navIconMessageView.findViewById(R.id.nav_icon_message_img);
+            navIconMessageText = navIconMessageView.findViewById(R.id.nav_icon_message_text);
+            navIconMessageView.setOnClickListener(v -> toggleMessagePage());
+        }
+        // 5. 绑定左侧"喊话"图标点击
+        View navIconSpeakView = findViewById(R.id.nav_icon_speak);
+        if (navIconSpeakView != null) {
+            navIconSpeakImg = navIconSpeakView.findViewById(R.id.nav_icon_speak_img);
+            navIconSpeakText = navIconSpeakView.findViewById(R.id.nav_icon_speak_text);
+            navIconSpeakView.setOnClickListener(v -> toggleSpeakPage());
+        }
+
+        // 6. 绑定左侧"更多应用"图标点击
+                View navIconMoreView = findViewById(R.id.nav_icon_more);
+                if (navIconMoreView != null) {
+                    navIconMoreImg = navIconMoreView.findViewById(R.id.nav_icon_more_img);
+                    navIconMoreView.setOnClickListener(v -> toggleMorePage());
+                }
     }
 
     /**
-     * 切换导航内容：主页 ↔ 地图设置页
-     * <p>
-     * 主页策略：**只 hide，不移除**（地图/相机/时间/定位状态全部保留）
-     * 设置页策略：**按需创建 + 退出即移除**（每次进入都是全新实例，避免内存堆积）
+     * 切换更多应用页：显示/隐藏 MoreFragment
      */
+    private void toggleMorePage() {
+        FragmentManager fm = getSupportFragmentManager();
+        Fragment mainFrag = fm.findFragmentByTag("NAV_MAIN");
+        if (mainFrag == null) {
+            Log.w(TAG, "toggleMorePage: main fragment missing, abort");
+            return;
+        }
+        FragmentTransaction tx = fm.beginTransaction();
+
+        // 如果当前在更多应用页，则关闭它
+        if (isShowingMore) {
+            Fragment moreFrag = fm.findFragmentByTag("MORE");
+            if (moreFrag != null) {
+                tx.remove(moreFrag);
+            }
+            isShowingMore = false;
+            // 恢复更多应用图标
+            if (navIconMoreImg != null) navIconMoreImg.setImageResource(R.drawable.yingyong);
+
+            // 同时清理其他非主页页面
+            cleanupOtherPages(tx);
+
+            tx.show(mainFrag);
+            tx.commit();
+        } else {
+            // 不在更多应用页：先处理其他非主页页面
+            cleanupOtherPages(tx);
+
+            // 隐藏主页
+            tx.hide(mainFrag);
+            // 创建更多应用页
+            moreFragment = MoreFragment.newInstance();
+            moreFragment.updatePriceText(priceText);
+            tx.add(R.id.nav_content_container, moreFragment, "MORE");
+            // 更多应用图标变为主页图标
+            if (navIconMoreImg != null) navIconMoreImg.setImageResource(R.drawable.ic_nav_home);
+            isShowingMore = true;
+            tx.commit();
+        }
+    }
+    /**
+     * 清理所有非主页页面（地图设置页、排班页、消息页、喊话页、更多应用页）
+     */
+    private void cleanupOtherPages(FragmentTransaction tx) {
+        // 清理地图设置页
+        if (isShowingMapSettings) {
+            Fragment settingsFrag = getSupportFragmentManager().findFragmentByTag("MAP_SETTINGS");
+            if (settingsFrag != null) {
+                tx.remove(settingsFrag);
+            }
+            if (navIconMapImg != null) navIconMapImg.setImageResource(R.drawable.huibao);
+            if (navIconMapText != null) navIconMapText.setText("地图");
+            isShowingMapSettings = false;
+        }
+        // 清理排班页
+        if (isShowingSchedule) {
+            Fragment scheduleFrag = getSupportFragmentManager().findFragmentByTag("SCHEDULE");
+            if (scheduleFrag != null) {
+                tx.remove(scheduleFrag);
+            }
+            if (navIconScheduleImg != null) navIconScheduleImg.setImageResource(R.drawable.paiban);
+            if (navIconScheduleText != null) navIconScheduleText.setText("排班");
+            isShowingSchedule = false;
+        }
+        // 清理消息页
+        if (isShowingMessage) {
+            Fragment messageFrag = getSupportFragmentManager().findFragmentByTag("MESSAGE");
+            if (messageFrag != null) {
+                tx.remove(messageFrag);
+            }
+            if (navIconMessageImg != null) navIconMessageImg.setImageResource(R.drawable.xiaoxi);
+            if (navIconMessageText != null) navIconMessageText.setText("消息");
+            isShowingMessage = false;
+        }
+        // 清理喊话页
+        if (isShowingSpeak) {
+            Fragment speakFrag = getSupportFragmentManager().findFragmentByTag("SPEAK");
+            if (speakFrag != null) {
+                tx.remove(speakFrag);
+            }
+            if (navIconSpeakImg != null) navIconSpeakImg.setImageResource(R.drawable.hanhua);
+            if (navIconSpeakText != null) navIconSpeakText.setText("报站");
+            isShowingSpeak = false;
+        }
+        // 清理更多应用页
+        if (isShowingMore) {
+            Fragment moreFrag = getSupportFragmentManager().findFragmentByTag("MORE");
+            if (moreFrag != null) {
+                tx.remove(moreFrag);
+            }
+            if (navIconMoreImg != null) navIconMoreImg.setImageResource(R.drawable.yingyong);
+            isShowingMore = false;
+        }
+    }
+    /**
+     * 切换喊话页：显示/隐藏 SpeakFragment
+     */
+    private void toggleSpeakPage() {
+        FragmentManager fm = getSupportFragmentManager();
+        Fragment mainFrag = fm.findFragmentByTag("NAV_MAIN");
+        if (mainFrag == null) {
+            Log.w(TAG, "toggleSpeakPage: main fragment missing, abort");
+            return;
+        }
+        FragmentTransaction tx = fm.beginTransaction();
+
+        // 如果当前在喊话页，则关闭它
+        if (isShowingSpeak) {
+            Fragment speakFrag = fm.findFragmentByTag("SPEAK");
+            if (speakFrag != null) {
+                tx.remove(speakFrag);
+                speakFragment = null;
+            }
+            isShowingSpeak = false;
+            // 恢复喊话图标
+            if (navIconSpeakImg != null) navIconSpeakImg.setImageResource(R.drawable.hanhua);
+            if (navIconSpeakText != null) navIconSpeakText.setText("报站");
+
+            // 同时清理其他非主页页面
+            cleanupOtherPages(tx);
+
+            tx.show(mainFrag);
+            tx.commit();
+        } else {
+            // 不在喊话页：先处理其他非主页页面
+            cleanupOtherPages(tx);
+
+            // 隐藏主页
+            tx.hide(mainFrag);
+            // 创建喊话页
+            speakFragment = SpeakFragment.newInstance();
+            tx.add(R.id.nav_content_container, speakFragment, "SPEAK");
+            // 同步半径值到 Fragment
+            speakFragment.setEnterStationRadius((float) enterStationRadius);
+            speakFragment.setExitStationRadius((float) exitStationRadius);
+            // 监听半径变化，同步回 Activity
+            speakFragment.setOnRadiusChangedListener(new SpeakFragment.OnRadiusChangedListener() {
+                @Override
+                public void onEnterRadiusChanged(float radius) {
+                    enterStationRadius = radius;
+                }
+
+                @Override
+                public void onExitRadiusChanged(float radius) {
+                    exitStationRadius = radius;
+                }
+            });
+            // 监听距离模式点击
+            speakFragment.initDistanceModeToggle(isStraightLine -> {
+                currentDistanceMode = isStraightLine ? DistanceMode.STRAIGHT_LINE : DistanceMode.ALONG_ROUTE;
+            });
+            // 喊话图标变为主页图标
+            if (navIconSpeakImg != null) navIconSpeakImg.setImageResource(R.drawable.ic_nav_home);
+            if (navIconSpeakText != null) navIconSpeakText.setText("主页");
+            isShowingSpeak = true;
+            tx.commit();
+        }
+    }
+
+    /** 当前是否显示消息页 */
+    private boolean isShowingMessage = false;
+
+    /**
+     * 切换消息页：显示/隐藏 MessageFragment
+     */
+    private void toggleMessagePage() {
+        FragmentManager fm = getSupportFragmentManager();
+        Fragment mainFrag = fm.findFragmentByTag("NAV_MAIN");
+        if (mainFrag == null) {
+            Log.w(TAG, "toggleMessagePage: main fragment missing, abort");
+            return;
+        }
+        FragmentTransaction tx = fm.beginTransaction();
+
+        if (isShowingMessage) {
+            // 关闭消息页
+            Fragment messageFrag = fm.findFragmentByTag("MESSAGE");
+            if (messageFrag != null) {
+                tx.remove(messageFrag);
+            }
+            isShowingMessage = false;
+            if (navIconMessageImg != null) navIconMessageImg.setImageResource(R.drawable.xiaoxi);
+            if (navIconMessageText != null) navIconMessageText.setText("消息");
+
+            // ✅ 清理所有其他页面
+            cleanupOtherPages(tx);
+
+            tx.show(mainFrag);
+            tx.commitNow();
+        } else {
+            // 打开消息页前先清理所有其他页面
+            cleanupOtherPages(tx);
+
+            tx.hide(mainFrag);
+            MessageFragment messageFragment = MessageFragment.newInstance(currentNotificationText);
+            tx.add(R.id.nav_content_container, messageFragment, "MESSAGE");
+            if (navIconMessageImg != null) navIconMessageImg.setImageResource(R.drawable.ic_nav_home);
+            if (navIconMessageText != null) navIconMessageText.setText("主页");
+            isShowingMessage = true;
+            tx.commitNow();
+        }
+    }
+
     private void toggleNavigationPage() {
         FragmentManager fm = getSupportFragmentManager();
         Fragment mainFrag = fm.findFragmentByTag("NAV_MAIN");
@@ -1532,26 +1592,77 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             return;
         }
         FragmentTransaction tx = fm.beginTransaction();
+
         if (isShowingMapSettings) {
-            // 切回主页：移除设置页（彻底销毁），显示主页
+            // 切回主页
             Fragment settingsFrag = fm.findFragmentByTag("MAP_SETTINGS");
             if (settingsFrag != null) {
-                tx.remove(settingsFrag);  // ⭐ 退出即消除
+                tx.remove(settingsFrag);
             }
             tx.show(mainFrag);
+            // 恢复地图图标
             if (navIconMapImg != null) navIconMapImg.setImageResource(R.drawable.huibao);
             if (navIconMapText != null) navIconMapText.setText("地图");
             isShowingMapSettings = false;
         } else {
-            // 切到地图设置页：隐藏主页，创建全新的设置页
+            // 先清理其他非主页页面
+            cleanupOtherPages(tx);
+
+            // 切到地图设置页
             tx.hide(mainFrag);
             MapSettingsFragment mapSettingsFragment = new MapSettingsFragment();
             tx.add(R.id.nav_content_container, mapSettingsFragment, "MAP_SETTINGS");
+            // 地图图标变为主页图标
             if (navIconMapImg != null) navIconMapImg.setImageResource(R.drawable.ic_nav_home);
             if (navIconMapText != null) navIconMapText.setText("主页");
             isShowingMapSettings = true;
         }
         tx.commit();
+    }
+    /** 当前线路公告内容 */
+    private String currentNotificationText = null;
+    /**
+     * 切换排班页：显示/隐藏 ScheduleFragment
+     */
+    private void toggleSchedulePage() {
+        FragmentManager fm = getSupportFragmentManager();
+        Fragment mainFrag = fm.findFragmentByTag("NAV_MAIN");
+        if (mainFrag == null) {
+            Log.w(TAG, "toggleSchedulePage: main fragment missing, abort");
+            return;
+        }
+        FragmentTransaction tx = fm.beginTransaction();
+
+        if (isShowingSchedule) {
+            // 当前在排班页：销毁排班页，显示主页，恢复排班图标
+            Fragment scheduleFrag = fm.findFragmentByTag("SCHEDULE");
+            if (scheduleFrag != null) {
+                tx.remove(scheduleFrag);
+            }
+            tx.show(mainFrag);
+            // 恢复排班图标
+            if (navIconScheduleImg != null) navIconScheduleImg.setImageResource(R.drawable.paiban);
+            if (navIconScheduleText != null) navIconScheduleText.setText("排班");
+            isShowingSchedule = false;
+            tx.commit();
+        } else {
+            // 先清理其他非主页页面
+            cleanupOtherPages(tx);
+
+            // 隐藏主页
+            tx.hide(mainFrag);
+            ScheduleFragment scheduleFragment = ScheduleFragment.newInstance();
+            tx.add(R.id.nav_content_container, scheduleFragment, "SCHEDULE");
+            // 排班图标变为主页图标
+            if (navIconScheduleImg != null) navIconScheduleImg.setImageResource(R.drawable.ic_nav_home);
+            if (navIconScheduleText != null) navIconScheduleText.setText("主页");
+            isShowingSchedule = true;
+            // 执行事务
+            tx.commit();
+            // 确保 Fragment 视图创建后加载数据
+            fm.executePendingTransactions();
+            scheduleFragment.loadData(busApiClient, getCurrentDirectionData(), lineName);
+        }
     }
 
     private void initData() {
@@ -1578,7 +1689,11 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                             Log.e(TAG + "-BusInfo-", "公告-状态码错误：" + response.code);
                             return;
                         }
+                        // 保存公告内容
+                        currentNotificationText = response.data.text;
                         if (response.data.hasNotification) {
+                            navHasNotification.setText("1");
+                            navHasNotification.setVisibility(View.VISIBLE);
                             runOnUiThread(() -> {
                                 try {
                                     LinearLayout noticeBar = findViewById(R.id.notice_bar);
@@ -1617,7 +1732,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 loadTestData();
                 return;
             }
-            
+
             busApiClient.queryBusLineDetail(lineName, 1, new BusApiClient.ApiCallback<>() {
                 @Override
                 public void onSuccess(BusApiClient.BusLineDetailResponse response) {
@@ -1658,14 +1773,10 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                         runOnUiThread(() -> {
                             try {
                                 if (isTwoWayLine) {
-                                    swapOrientation.setVisibility(View.VISIBLE);
+                                    navigationMainFragment.setLoopLine(false);
                                 } else {
-                                    BorderLabel loopLineLabel = findViewById(R.id.loop_line_label);
-                                    Typeface dottedSongti = Typeface.createFromAsset(getAssets(), "fonts/DottedSongtiSquareRegular.otf");
-                                    loopLineLabel.setVisibility(View.VISIBLE);
-                                    loopLineLabel.setTypeface(dottedSongti);
-                                    loopLineLabel.setText("环线");
-                                    loopLineLabel.setColor(0xFFFF0000);
+                                    navigationMainFragment.setLoopLine(true);
+                                    navigationMainFragment.updateRouteNo(lineName + "（环线）");
                                 }
 
                                 showDirection();
@@ -1737,32 +1848,46 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     }
 
     private BusApiClient.BusLineDirection getCurrentDirectionData() {
+        Log.d(TAG, "getCurrentDirectionData: currentDirection=" + currentDirection);
+
         if (cachedResponse == null || cachedResponse.data == null) {
+            Log.w(TAG, "getCurrentDirectionData: cachedResponse或data为null");
             return null;
         }
 
         if (currentDirection == 1 && cachedResponse.data.up != null) {
+            Log.d(TAG, "返回上行数据，stationList size=" +
+                    (cachedResponse.data.up.stationList == null ? "null" : cachedResponse.data.up.stationList.size()));
             return cachedResponse.data.up;
         } else if (currentDirection == 2 && cachedResponse.data.down != null) {
+            Log.d(TAG, "返回下行数据，stationList size=" +
+                    (cachedResponse.data.down.stationList == null ? "null" : cachedResponse.data.down.stationList.size()));
             return cachedResponse.data.down;
         }
+
+        Log.w(TAG, "getCurrentDirectionData: 未找到对应方向的数据");
         return null;
     }
 
     @SuppressLint("SetTextI18n")
     private void showDirection() {
         BusApiClient.BusLineDirection lineDirection = getCurrentDirectionData();
+        // 添加日志
+        Log.d(TAG, "=== showDirection 开始 ===");
+        Log.d(TAG, "currentDirection = " + currentDirection);
+        Log.d(TAG, "cachedResponse = " + (cachedResponse == null ? "null" : "not null"));
         if (lineDirection == null) {
             Log.e(TAG + "-BusInfo-", "显示方向失败: 方向数据为空");
+            Log.d(TAG, "cachedResponse.data.up = " + (cachedResponse != null && cachedResponse.data.up != null ? "not null" : "null"));
+            Log.d(TAG, "cachedResponse.data.down = " + (cachedResponse != null && cachedResponse.data.down != null ? "not null" : "null"));
             return;
         }
-
+        Log.d(TAG, "lineDirection.id = " + lineDirection.id);
+        Log.d(TAG, "lineDirection.stationList size = " + (lineDirection.stationList == null ? "null" : lineDirection.stationList.size()));
         // 更新导航卡片的方向（终点站）
         if (navigationMainFragment != null && lineDirection.endStation != null) {
             navigationMainFragment.updateDirection(lineDirection.endStation);
         }
-
-        scheduleButton.setOnClickListener(v -> showScheduleForDirection(lineDirection));
 
         if (realTimeManager != null) {
             realTimeManager.stopTracking();
@@ -1789,6 +1914,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         updatePriceTips(lineDirection);
         startTipsAnimation();
         setupStationList(lineDirection);
+        Log.d(TAG, "setupStationList 调用完成");
     }
 
     private void showScheduleForDirection(BusApiClient.BusLineDirection lineDirection) {
@@ -1843,37 +1969,39 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     }
 
     private void updateBusTimes(BusApiClient.BusLineDirection lineDirection) {
-        runOnUiThread(() -> {
-            TextView firstBusTime = findViewById(R.id.first_bus_time);
-            TextView lastBusTime = findViewById(R.id.last_bus_time);
-            Typeface dottedSongti = Typeface.createFromAsset(getAssets(), "fonts/DottedSongtiSquareRegular.otf");
-            firstBusTime.setTypeface(dottedSongti);
-            lastBusTime.setTypeface(dottedSongti);
-            try {
-                // 解析原始时间 00:00:00
-                SimpleDateFormat inputFormat = new SimpleDateFormat("HH:mm:ss", Locale.getDefault());
-                // 输出格式 00:00
-                SimpleDateFormat outputFormat = new SimpleDateFormat("HH:mm", Locale.getDefault());
+        // 不再需要 findViewById，改为通过 Fragment 更新
+        try {
+            // 解析原始时间 00:00:00
+            SimpleDateFormat inputFormat = new SimpleDateFormat("HH:mm:ss", Locale.getDefault());
+            // 输出格式 00:00
+            SimpleDateFormat outputFormat = new SimpleDateFormat("HH:mm", Locale.getDefault());
 
-                Date firstDate = inputFormat.parse(lineDirection.startFirst);
-                Date lastDate = inputFormat.parse(lineDirection.startLast);
+            Date firstDate = inputFormat.parse(lineDirection.startFirst);
+            Date lastDate = inputFormat.parse(lineDirection.startLast);
 
-                firstBusTime.setText(outputFormat.format(firstDate));
-                lastBusTime.setText(outputFormat.format(lastDate));
-            } catch (ParseException e) {
-                e.printStackTrace();
-                // 解析失败时使用原值或截取
-                firstBusTime.setText(lineDirection.startFirst);
-                lastBusTime.setText(lineDirection.startLast);
+            String firstBusTimeStr = outputFormat.format(firstDate);
+            String lastBusTimeStr = outputFormat.format(lastDate);
+
+            // 通过 Fragment 更新首末班车时间
+            if (navigationMainFragment != null) {
+                navigationMainFragment.updateFirstBusTime(firstBusTimeStr);
+                navigationMainFragment.updateLastBusTime(lastBusTimeStr);
             }
-        });
+        } catch (ParseException e) {
+            e.printStackTrace();
+            // 解析失败时使用原值或截取
+            if (navigationMainFragment != null) {
+                navigationMainFragment.updateFirstBusTime(lineDirection.startFirst);
+                navigationMainFragment.updateLastBusTime(lineDirection.startLast);
+            }
+        }
     }
 
     private void updateRouteSummary(BusApiClient.BusLineDirection lineDirection) {
-        runOnUiThread(() -> {
-            TextView routeSummary = findViewById(R.id.route_summary);
-            routeSummary.setText("总里程：" + lineDirection.lineLength + " 公里");
-        });
+        // 通过 Fragment 更新总里程
+        if (navigationMainFragment != null && lineDirection.lineLength > 0) {
+            navigationMainFragment.updateRouteSummary(String.valueOf(lineDirection.lineLength));
+        }
     }
 
     private void updateTicketPrice() {
@@ -1882,29 +2010,85 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         if (lineDirection != null && lineDirection.totalPrice > 0) {
             price = lineDirection.totalPrice;
         }
-        final String priceText = String.format(Locale.getDefault(), "%.2f", price);
-        runOnUiThread(() -> {
-            if (ticket != null) {
-                ticket.setText(priceText);
-            }
-        });
+        priceText = String.format(Locale.getDefault(), "%.2f", price);
+        if (navigationMainFragment != null) {
+            navigationMainFragment.updatePriceText(priceText);
+        }
     }
 
     private void setupStationList(BusApiClient.BusLineDirection lineDirection) {
-        if (lineDirection.stationList == null) {
-            Log.w(TAG + "-BusInfo-", "无站点数据");
+        // 添加日志1: 检查传入数据
+        Log.d(TAG, "=== setupStationList 开始 ===");
+        Log.d(TAG, "lineDirection = " + (lineDirection == null ? "null" : "not null"));
+
+        if (lineDirection == null) {
+            Log.e(TAG, "setupStationList: lineDirection 为 null");
+            return;
+        }
+
+        Log.d(TAG, "lineDirection.id = " + lineDirection.id);
+        Log.d(TAG, "lineDirection.stationList = " + (lineDirection.stationList == null ? "null" : "size=" + lineDirection.stationList.size()));
+
+        if (lineDirection.stationList == null || lineDirection.stationList.isEmpty()) {
+            Log.w(TAG + "-BusInfo-", "无站点数据，stationList size=" +
+                    (lineDirection.stationList == null ? "null" : lineDirection.stationList.size()));
             return;
         }
 
         runOnUiThread(() -> {
             try {
+                Log.d(TAG, "runOnUiThread: 开始更新UI");
+
                 busLineView = findViewById(R.id.bus_line_view);
                 stationScrollView = findViewById(R.id.station_scroll_view);
 
+                Log.d(TAG, "busLineView = " + busLineView);
+                Log.d(TAG, "stationScrollView = " + stationScrollView);
+
+                if (busLineView == null) {
+                    Log.e(TAG, "busLineView 为 null，请检查布局文件 activity_bus_line_details.xml");
+                }
+                if (stationScrollView == null) {
+                    Log.e(TAG, "stationScrollView 为 null，请检查布局文件 activity_bus_line_details.xml");
+                }
+
+                // 打印前3个站点信息
+                for (int i = 0; i < Math.min(3, lineDirection.stationList.size()); i++) {
+                    BusApiClient.BusLineStation station = lineDirection.stationList.get(i);
+                    Log.d(TAG, String.format("站点[%d]: id=%s, name=%s, lat=%f, lon=%f, order=%d",
+                            i, station.id, station.stationName, station.poiOriginLat, station.poiOriginLon, station.stationOrder));
+                }
+
                 busLineView.setStations(lineDirection.stationList);
+                Log.d(TAG, "busLineView.setStations 完成");
+                busLineView.post(() -> {
+                    Log.d(TAG, "post: 强制重新测量布局");
+
+                    // 方法1: 请求重新布局
+                    stationScrollView.requestLayout();
+                    busLineView.requestLayout();
+
+                    // 方法2: 强制测量
+                    int widthSpec = View.MeasureSpec.makeMeasureSpec(stationScrollView.getWidth(), View.MeasureSpec.EXACTLY);
+                    int heightSpec = View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED);
+                    busLineView.measure(widthSpec, heightSpec);
+
+                    Log.d(TAG, "post完成: busLineView测量高度=" + busLineView.getMeasuredHeight());
+
+                    // 方法3: 如果高度还是0，尝试使用WRAP_CONTENT
+                    if (busLineView.getMeasuredHeight() == 0) {
+                        Log.w(TAG, "busLineView高度为0，尝试设置LayoutParams");
+                        android.view.ViewGroup.LayoutParams params = busLineView.getLayoutParams();
+                        if (params != null) {
+                            params.height = android.view.ViewGroup.LayoutParams.WRAP_CONTENT;
+                            busLineView.setLayoutParams(params);
+                            busLineView.requestLayout();
+                        }
+                    }
+                });
                 busLineView.setOnStationClickListener(this::showStationDetails);
                 busLineView.setOnGpsArrivalListener(this::scrollToStation);
-                
+
                 realTimeManager = new BusRealTimeManager(handler, lineDirection.stationList);
                 realTimeManager.startTracking(lineDirection.id, BusLineDetailActivity.this);
 
@@ -1913,12 +2097,14 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                     String firstStation = lineDirection.stationList.get(0).stationName;
                     if (firstStation != null) {
                         navigationMainFragment.updateNextStation(firstStation);
+                        Log.d(TAG, "更新下一站: " + firstStation);
                     }
                 }
 
                 // 初始化导航卡片的方向（终点站）
                 if (navigationMainFragment != null && lineDirection.endStation != null) {
                     navigationMainFragment.updateDirection(lineDirection.endStation);
+                    Log.d(TAG, "更新方向(终点站): " + lineDirection.endStation);
                 }
 
                 String stationId = getIntent().getStringExtra("station_id");
@@ -1931,10 +2117,13 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                             int scrollY = position * stationHeight - busLineView.getHeight() / 2;
                             stationScrollView.smoothScrollTo(0, scrollY);
                         });
+                        Log.d(TAG, "定位到指定站点: position=" + position + ", stationId=" + stationId);
                     }
                 }
-                
+
                 setupEtaList();
+                Log.d(TAG, "=== setupStationList 完成 ===");
+
             } catch (Exception e) {
                 Log.e(TAG, "设置站点列表失败", e);
             }
@@ -1977,7 +2166,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 window.setDimAmount(0.4f);
                 WindowManager.LayoutParams lp = new WindowManager.LayoutParams();
                 lp.copyFrom(window.getAttributes());
-                lp.width = (int) (getResources().getDisplayMetrics().widthPixels);
+                lp.width = (getResources().getDisplayMetrics().widthPixels);
                 lp.height = WindowManager.LayoutParams.WRAP_CONTENT;
                 window.setAttributes(lp);
             }
@@ -2017,7 +2206,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
 
         int itemsPerRow = 3;
         String timePadding = "   ";
-        
+
         SpannableStringBuilder spannableBuilder = new SpannableStringBuilder();
         int itemsInCurrentRow = 0;
         boolean nextBusFound = false;
@@ -2180,7 +2369,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         if (busEtaAdapter == null) {
             return;
         }
-        
+
         etaItems.clear();
         List<BusEtaItem> tempList = new ArrayList<>();
 
@@ -2225,25 +2414,25 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         }
         if (nearestVehicle != null && lastVoiceStationOrder > 0 && (nearestVehicle.currentStationOrder - lastVoiceStationOrder) > 1) {
             boolean shouldAnnounceSkip = false;
-            
+
             if (lastVehicleWasArrived && !nearestVehicle.isArrived) {
                 shouldAnnounceSkip = true;
             }
-            
+
             if (shouldAnnounceSkip) {
                 String skipStationCn = "因网络延迟导致站点更新跳站，请注意确认车辆位置。";
                 String skipStationEn = "Due to network delay, station updates may skip. Please verify vehicle location.";
                 String skipStationCombined = skipStationCn + " " + skipStationEn;
-                
+
                 TTSUtils tts = TTSUtils.getInstance(this);
                 tts.speak(skipStationCombined, "skip_announcement");
             }
         }
-        
+
         if (nearestVehicle != null) {
             lastVehicleWasArrived = nearestVehicle.isArrived;
         }
-        
+
         if (nearestVehicle != null && lastVoiceStationOrder != nearestVehicle.currentStationOrder) {
             int nextStationIndex = nearestVehicle.currentStationOrder + 1;
             if (nextStationIndex > 0 && nextStationIndex <= realTimeManager.getStationList().size()) {
@@ -2402,7 +2591,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 station.stationName = "测试站点" + i + "号";
                 station.stationOrder = i;
                 station.lastDistance = 500;
-                
+
                 if (i == 4) {
                     station.status = BusApiClient.BusLineStation.StationStatus.NEXT_STATION;
                     station.plateNumber = "京A12345";
@@ -2411,7 +2600,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 } else {
                     station.status = BusApiClient.BusLineStation.StationStatus.NORMAL;
                 }
-                
+
                 testStations.add(station);
             }
 
@@ -2422,7 +2611,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                     endStationName.setText(endStation);
                     busLineView = findViewById(R.id.bus_line_view);
                     stationScrollView = findViewById(R.id.station_scroll_view);
-                    
+
                     busLineView.setStations(testStations);
                     busLineView.setOnStationClickListener(this::showStationDetails);
 
@@ -2529,6 +2718,10 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         stopSpeedTimeout();
         if (speedTimeoutHandler != null) {
             speedTimeoutHandler.removeCallbacksAndMessages(null);
+        }
+        // 取消所有网络请求
+        if (busApiClient != null) {
+            busApiClient.cancelAllRequests();
         }
         // ⭐ Fragment.onDestroyView() 会自动调用 tencentNavigation.onDestroy() 并清空实例引用
         navigationMainFragment = null;

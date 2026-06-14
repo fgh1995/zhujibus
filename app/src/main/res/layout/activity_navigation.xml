@@ -2,12 +2,12 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="horizontal"
-    android:background="#171923"
+    android:background="@drawable/nav_bg"
     android:padding="6dp">
 
     <!-- ========== 左侧图标栏 ========== -->
     <LinearLayout
-        android:layout_width="70dp"
+        android:layout_width="50dp"
         android:layout_height="match_parent"
         android:orientation="vertical"
         android:gravity="center"
@@ -61,38 +61,47 @@
 
         <!-- 喊话 -->
         <LinearLayout
+            android:id="@+id/nav_icon_speak"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
             android:gravity="center"
             android:layout_marginBottom="5dp">
             <ImageView
+                android:id="@+id/nav_icon_speak_img"
                 android:layout_width="20dp"
                 android:layout_height="20dp"
                 android:src="@drawable/hanhua"
                 android:background="@drawable/nav_icon_speak" />
             <TextView
+                android:id="@+id/nav_icon_speak_text"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="3dp"
-                android:text="喊话"
+                android:text="报站"
                 android:textColor="#FFFFFF"
                 android:textSize="11sp" />
         </LinearLayout>
 
         <!-- 排班 -->
         <LinearLayout
+            android:id="@+id/nav_icon_schedule"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
             android:gravity="center"
-            android:layout_marginBottom="5dp">
+            android:layout_marginBottom="5dp"
+            android:clickable="true"
+            android:focusable="true"
+            android:background="?attr/selectableItemBackground">
             <ImageView
+                android:id="@+id/nav_icon_schedule_img"
                 android:layout_width="20dp"
                 android:layout_height="20dp"
                 android:src="@drawable/paiban"
                 android:background="@drawable/nav_icon_speak" />
             <TextView
+                android:id="@+id/nav_icon_schedule_text"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="3dp"
@@ -106,17 +115,20 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content">
             <LinearLayout
+                android:id="@+id/nav_icon_message"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
                 android:gravity="center"
                 android:layout_marginBottom="5dp">
                 <ImageView
+                    android:id="@+id/nav_icon_message_img"
                     android:layout_width="20dp"
                     android:layout_height="20dp"
                     android:src="@drawable/xiaoxi"
                     android:background="@drawable/nav_icon_speak" />
                 <TextView
+                    android:id="@+id/nav_icon_message_text"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="3dp"
@@ -125,29 +137,35 @@
                     android:textSize="11sp" />
             </LinearLayout>
             <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
+                android:id="@+id/nav_has_notification"
+                android:layout_width="13dp"
+                android:layout_height="13dp"
                 android:layout_gravity="top|end"
                 android:gravity="center"
-                android:text="999"
+                android:text="-1"
                 android:padding="2dp"
                 android:textColor="#FFFFFF"
-                android:textSize="8sp"
-                android:layout_marginEnd="5dp"
+                android:textSize="6sp"
+                android:layout_marginEnd="2dp"
                 android:background="@drawable/nav_badge_bg" />
         </FrameLayout>
 
         <!-- 更多应用 -->
         <LinearLayout
+            android:id="@+id/nav_icon_more"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:gravity="center">
+            android:gravity="center"
+            android:clickable="true"
+            android:focusable="true"
+            android:background="?attr/selectableItemBackground">
             <ImageView
+                android:id="@+id/nav_icon_more_img"
                 android:layout_width="20dp"
                 android:layout_height="20dp"
                 android:src="@drawable/yingyong"
-                android:background="@drawable/nav_icon_speak"  />
+                android:background="@drawable/nav_icon_speak" />
         </LinearLayout>
     </LinearLayout>
 
@@ -157,6 +175,5 @@
         android:layout_width="0dp"
         android:layout_height="match_parent"
         android:layout_weight="1"
-        android:layout_marginStart="6dp"
-        android:layout_marginEnd="6dp" />
+        android:layout_marginStart="6dp"/>
 </LinearLayout>

@@ -6,6 +6,8 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
     android:orientation="horizontal">
 
     <!-- ========== 中间地图区 + 线路信息 ========== -->
@@ -39,34 +41,85 @@
             android:background="@drawable/nav_panel_bg"
             android:padding="10dp"
             android:layout_marginTop="6dp">
-
-            <TextView
-                android:id="@+id/nav_direction"
-                android:layout_width="wrap_content"
+            <LinearLayout
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="加载中..."
-                android:textColor="#FFFFFF"
-                android:textSize="12sp"
-                android:textStyle="bold"
-                android:layout_marginBottom="4dp" />
+                android:layout_marginBottom="5dp"
+                android:gravity="center_vertical">
+                <org.zjfgh.zhujibus.HorizontalScrollTextView
+                    android:id="@+id/nav_direction"
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="5dp"
+                    app:hsText="加载中..."
+                    app:hsAnimationMode="bounce_with_pause"
+                    app:hsTurnPauseDuration="1500"
+                    app:hsScrollSpeed="60"
+                    app:hsTextSize="14sp"
+                    app:hsCharPerSecond="1.5"
+                    app:hsTextColor="#FFFFFF"
+                    app:hsGravity="left" />
+                <TextView
+                    android:id="@+id/nav_swap_orientation"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="换向"
+                    android:textColor="#FFFFFF"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:paddingStart="5dp"
+                    android:paddingEnd="5dp"
+                    android:background="@drawable/nav_tab_active_bg" />
+            </LinearLayout>
 
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginBottom="5dp">
+                <TextView
+                    android:id="@+id/first_bus_time"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="首：--:--"
+                    android:textColor="#FFFFFF"
+                    android:textSize="9sp"
+                    android:layout_marginEnd="5dp"/>
+
+                <TextView
+                    android:id="@+id/last_bus_time"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="末：--:--"
+                    android:textColor="#FFFFFF"
+                    android:textSize="9sp" />
+                <TextView
+                    android:id="@+id/ticket"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:textAlignment="textEnd"
+                    android:text="票价：--.--"
+                    android:textColor="#FFFFFF"
+                    android:textSize="9sp" />
+            </LinearLayout>
             <!-- 线路图占位 -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="74dp"
                 android:orientation="horizontal">
-                <View
-                    android:layout_width="0dp"
-                    android:layout_height="2dp"
-                    android:layout_weight="1"
-                    android:background="#5A6090" />
+                <org.zjfgh.zhujibus.IBusCloudLineView
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"/>
             </LinearLayout>
         </LinearLayout>
     </LinearLayout>
 
     <!-- ========== 右侧信息栏 ========== -->
     <LinearLayout
-        android:layout_width="100dp"
+        android:layout_width="110dp"
         android:layout_height="match_parent"
         android:orientation="vertical"
         android:layout_marginStart="6dp">
@@ -77,8 +130,7 @@
             android:layout_height="wrap_content"
             android:orientation="vertical"
             android:gravity="center"
-            android:paddingTop="5dp"
-            android:paddingBottom="5dp"
+            android:padding="5dp"
             android:background="@drawable/nav_panel_bg">
 
             <LinearLayout
@@ -137,28 +189,47 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
+                android:padding="5dp"
                 android:gravity="center_horizontal">
 
-                <TextView
+                <org.zjfgh.zhujibus.HorizontalScrollTextView
                     android:id="@+id/nav_route_no"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="237路"
-                    android:textColor="#FFFFFF"
-                    android:textSize="15sp"
-                    android:textStyle="bold" />
-
+                    app:hsText="---"
+                    app:hsTextSize="15sp"
+                    app:hsAnimationMode="bounce_with_pause"
+                    app:hsTurnPauseDuration="1500"
+                    app:hsScrollSpeed="60"
+                    app:hsCharPerSecond="1.5"
+                    app:hsTextColor="#FFFFFF"
+                    app:hsGravity="center"/>
                 <TextView
-                    android:id="@+id/nav_next_station"
+                    android:id="@+id/route_summary"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:textAlignment="center"
-                    android:paddingStart="5dp"
-                    android:paddingEnd="5dp"
-                    android:layout_marginTop="4dp"
-                    android:text="下一站: 东方路五一路"
+                    android:text="总里程：-11公里"
                     android:textColor="#FFFFFF"
                     android:textSize="9sp" />
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+                    <org.zjfgh.zhujibus.HorizontalScrollTextView
+                        android:id="@+id/nav_next_station"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        app:hsTextSize="9sp"
+                        app:hsText="--------"
+                        app:hsAnimationMode="bounce_with_pause"
+                        app:hsTurnPauseDuration="1500"
+                        app:hsScrollSpeed="60"
+                        app:hsCharPerSecond="1.5"
+                        app:hsTextColor="#FFFFFF"
+                        app:hsGravity="center"/>
+                </LinearLayout>
+
             </LinearLayout>
 
             <!-- 中间分割线 -->
@@ -177,12 +248,12 @@
                 android:layout_height="0dp"
                 android:layout_weight="1"
                 android:orientation="vertical"
-                android:gravity="center">
+                android:gravity="bottom">
 
                 <!-- 限速圆标 -->
                 <FrameLayout
-                    android:layout_width="66dp"
-                    android:layout_height="66dp"
+                    android:layout_width="55dp"
+                    android:layout_height="55dp"
                     android:layout_gravity="center_horizontal">
                     <ImageView
                         android:layout_width="match_parent"
@@ -194,7 +265,7 @@
                         android:layout_gravity="center"
                         android:text="55"
                         android:textColor="#000000"
-                        android:textSize="42sp"
+                        android:textSize="35sp"
                         android:textStyle="bold" />
                 </FrameLayout>
 
