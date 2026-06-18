@@ -12,7 +12,7 @@ android {
         targetSdk 35
         versionCode 102010
         versionName "1.2.1-beta"
-        //remote={"has_notice":ture,"notice":"公告测试内容","has_update":ture,"update":"1.基本完成设想中的数知梦报站器模仿UI和相关功能\n2.小bug未修复"}
+        //remote={"has_notice":ture,"notice":"公告测试内容","has_update":ture,"update_log":"1.基本完成设想中的数知梦报站器模仿UI和相关功能\n2.小bug未修复"}
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 
