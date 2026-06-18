@@ -90,7 +90,7 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    app:hsAnimationMode="bounce_with_pause"
+                    app:hsAnimationMode="infinite"
                     app:hsAutoStart="true"
                     app:hsScrollSpeed="60"
                     app:hsTextColor="#ffffff"

@@ -10,9 +10,9 @@ android {
         applicationId "org.zjfgh.zhujibus"
         minSdk 24
         targetSdk 35
-        versionCode 102020
+        versionCode 102021
         versionName "1.2.2"
-        //remote={"has_notice":ture,"notice":"值此端午佳节，开发者向您致以最诚挚的问候。感谢您一直以来的信任与支持，愿您和家人平安喜乐，万事顺遂。","has_update":ture,"update_log":"1.新增：在线更新和安装功能。\n2.新增：公告功能。"}
+        //remote={"has_notice":ture,"notice":"值此端午佳节，开发者向您致以最诚挚的问候。感谢您一直以来的信任与支持，愿您和家人平安喜乐，万事顺遂。","has_update":ture,"update_log":"1.修改公告滚动方式。"}
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 
