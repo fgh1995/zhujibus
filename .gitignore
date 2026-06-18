@@ -17,5 +17,6 @@ local.properties
 /诸暨公交语音合成
 /bus_card_reader_icon.psd
 /log.txt
-/app/release/
+/app/release/*
+!/app/release/.gitkeep
 /ApkUpload.py
