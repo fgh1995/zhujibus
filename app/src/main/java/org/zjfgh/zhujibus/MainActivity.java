@@ -2,7 +2,8 @@ package org.zjfgh.zhujibus;
 
 import android.Manifest;
 import android.annotation.SuppressLint;
-import android.app.ProgressDialog;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
@@ -12,9 +13,6 @@ import android.location.LocationManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.Environment;
-import android.provider.Settings;
-import androidx.core.content.FileProvider;
 import io.sgr.geometry.Coordinate;
 import io.sgr.geometry.utils.GeometryUtils;
 import android.text.TextUtils;
@@ -40,10 +38,7 @@ import androidx.recyclerview.widget.RecyclerView;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
@@ -52,7 +47,6 @@ import java.util.regex.Pattern;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
-import okhttp3.ResponseBody;
 
 public class MainActivity extends AppCompatActivity {
     private static final String TAG = "MainActivity";
@@ -60,7 +54,6 @@ public class MainActivity extends AppCompatActivity {
             "https://github.360967.xyz/https://raw.githubusercontent.com/fgh1995/zhujibus/refs/heads/master/app/build.gradle";
     private static final String APK_DOWNLOAD_BASE =
             "https://github.360967.xyz/https://github.com/fgh1995/zhujibus/releases/download/Release/zhujibus-";
-    private static final int REQ_INSTALL_APK = 9001;
 
     private RecyclerView recyclerView;
     private TextView tv_search_line;
@@ -479,20 +472,32 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * 弹出更新对话框：显示更新日志，点击确认后开始下载
+     * 弹出更新对话框：显示更新日志，用户点击确认后复制下载地址自行下载安装。
+     * 已不再在应用内做下载 / 安装调用，规避 Android 各厂商系统安装器兼容性差异。
      */
     private void showUpdateDialog() {
         if (remoteConfig == null) return;
+        if (isFinishing() || isDestroyed()) return;
         String versionInfo = "当前版本：v" + getLocalVersionName()
                 + "\n最新版本：v" + remoteConfig.remoteVersionName
                 + " (build " + remoteConfig.remoteVersionCode + ")";
         String log = TextUtils.isEmpty(remoteConfig.updateLog)
                 ? "（未提供更新日志）" : remoteConfig.updateLog;
+        String url = getRemoteApkUrl();
+        if (url == null) {
+            Toast.makeText(this, "更新信息丢失，请稍后重试", Toast.LENGTH_SHORT).show();
+            return;
+        }
 
         new AlertDialog.Builder(this)
                 .setTitle("发现新版本")
-                .setMessage(versionInfo + "\n\n更新日志：\n" + log)
-                .setPositiveButton("立即更新", (d, w) -> startDownloadApk())
+                .setMessage(versionInfo
+                        + "\n\n更新日志：\n" + log
+                        + "\n\n请复制下方链接到浏览器中下载，"
+                        + "下载完成后在系统文件管理器或下载列表中点击 APK 手动安装：\n\n"
+                        + url)
+                .setPositiveButton("复制下载链接", (d, w) -> copyDownloadUrlToClipboard())
+                .setNeutralButton("在浏览器中打开", (d, w) -> openInBrowser(url))
                 .setNegativeButton("稍后再说", null)
                 .setCancelable(true)
                 .show();
@@ -507,142 +512,48 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * 下载远程 APK
+     * 拼接远程 APK 的下载地址
      */
-    private void startDownloadApk() {
-        if (remoteConfig == null) {
-            Toast.makeText(this, "更新信息丢失，请稍后重试", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        final String apkUrl = APK_DOWNLOAD_BASE + remoteConfig.remoteVersionCode + "-release.apk";
-        final String fileName = "zhujibus-" + remoteConfig.remoteVersionCode + "-release.apk";
-
-        final ProgressDialog progressDialog = new ProgressDialog(this);
-        progressDialog.setTitle("正在下载更新");
-        progressDialog.setMessage("准备中...");
-        progressDialog.setProgressStyle(ProgressDialog.STYLE_HORIZONTAL);
-        progressDialog.setCancelable(false);
-        progressDialog.setMax(100);
-        progressDialog.show();
-
-        new Thread(() -> {
-            OkHttpClient http = new OkHttpClient();
-            Request req = new Request.Builder().url(apkUrl).build();
-            try (Response resp = http.newCall(req).execute()) {
-                if (!resp.isSuccessful() || resp.body() == null) {
-                    runOnUiThread(() -> {
-                        progressDialog.dismiss();
-                        Toast.makeText(MainActivity.this,
-                                "下载失败：HTTP " + resp.code(), Toast.LENGTH_LONG).show();
-                    });
-                    return;
-                }
-                ResponseBody body = resp.body();
-                long total = body.contentLength();
-                File apkFile = new File(getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), fileName);
-                if (apkFile.exists()) {
-                    //noinspection ResultOfMethodCallIgnored
-                    apkFile.delete();
-                }
-
-                try (InputStream in = body.byteStream();
-                     FileOutputStream out = new FileOutputStream(apkFile)) {
-                    byte[] buf = new byte[8 * 1024];
-                    long sum = 0;
-                    int len;
-                    int lastPercent = -1;
-                    while ((len = in.read(buf)) != -1) {
-                        out.write(buf, 0, len);
-                        sum += len;
-                        if (total > 0) {
-                            int percent = (int) (sum * 100 / total);
-                            if (percent != lastPercent) {
-                                lastPercent = percent;
-                                int finalPercent = percent;
-                                runOnUiThread(() -> {
-                                    progressDialog.setProgress(finalPercent);
-                                    progressDialog.setMessage("已下载 " + finalPercent + "%");
-                                });
-                            }
-                        }
-                    }
-                    out.flush();
-                }
-
-                runOnUiThread(() -> {
-                    progressDialog.dismiss();
-                    installApk(apkFile);
-                });
-            } catch (IOException e) {
-                Log.e(TAG, "下载更新失败", e);
-                runOnUiThread(() -> {
-                    progressDialog.dismiss();
-                    Toast.makeText(MainActivity.this,
-                            "下载失败：" + e.getMessage(), Toast.LENGTH_LONG).show();
-                });
-            }
-        }).start();
+    private String getRemoteApkUrl() {
+        if (remoteConfig == null) return null;
+        return APK_DOWNLOAD_BASE + remoteConfig.remoteVersionCode + "-release.apk";
     }
 
     /**
-     * 调用系统安装器安装 APK
+     * 把远程 APK 下载地址复制到系统剪贴板，并 Toast 提示用户
      */
-    private void installApk(File apkFile) {
-        if (apkFile == null || !apkFile.exists()) {
-            Toast.makeText(this, "安装文件不存在", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        // Android 8.0+ 需要检查“安装未知应用”权限
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
-                && !getPackageManager().canRequestPackageInstalls()) {
-            new AlertDialog.Builder(this)
-                    .setTitle("需要授权")
-                    .setMessage("安装更新需要授予“安装未知应用”权限，是否前往设置？")
-                    .setPositiveButton("去设置", (d, w) -> {
-                        Uri uri = Uri.parse("package:" + getPackageName());
-                        Intent intent = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, uri);
-                        startActivityForResult(intent, REQ_INSTALL_APK);
-                    })
-                    .setNegativeButton("取消", null)
-                    .show();
+    private void copyDownloadUrlToClipboard() {
+        String url = getRemoteApkUrl();
+        if (url == null) {
+            Toast.makeText(this, "更新信息丢失，无法复制", Toast.LENGTH_SHORT).show();
             return;
         }
         try {
-            Intent intent = new Intent(Intent.ACTION_VIEW);
-            intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            Uri apkUri;
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                apkUri = FileProvider.getUriForFile(
-                        this,
-                        getPackageName() + ".fileprovider",
-                        apkFile);
-                intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            } else {
-                apkUri = Uri.fromFile(apkFile);
+            ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            if (cm == null) {
+                Toast.makeText(this, "剪贴板不可用", Toast.LENGTH_SHORT).show();
+                return;
             }
-            intent.setDataAndType(apkUri, "application/vnd.android.package-archive");
-            startActivity(intent);
+            ClipData clip = ClipData.newPlainText("zhujibus_apk_url", url);
+            cm.setPrimaryClip(clip);
+            // Android 13+ 系统会自动显示复制提示；旧版本则通过 Toast 提示
+            Toast.makeText(this, "下载地址已复制，请在浏览器中打开下载（公益服下载较慢，请耐心等待）", Toast.LENGTH_LONG).show();
         } catch (Exception e) {
-            Log.e(TAG, "启动安装器失败", e);
-            Toast.makeText(this, "无法启动安装器：" + e.getMessage(), Toast.LENGTH_LONG).show();
+            Log.e(TAG, "复制下载地址失败", e);
+            Toast.makeText(this, "复制失败：" + e.getMessage(), Toast.LENGTH_LONG).show();
         }
     }
 
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == REQ_INSTALL_APK) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
-                    && getPackageManager().canRequestPackageInstalls()) {
-                // 用户在设置中允许了，再次尝试安装最后一次下载的 APK
-                File apkFile = new File(
-                        getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS),
-                        "zhujibus-" + (remoteConfig != null ? remoteConfig.remoteVersionCode : 0)
-                                + "-release.apk");
-                installApk(apkFile);
-            } else {
-                Toast.makeText(this, "未授予安装权限，无法更新", Toast.LENGTH_LONG).show();
-            }
+    /**
+     * 用浏览器打开 APK 下载地址
+     */
+    private void openInBrowser(String url) {
+        try {
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+            startActivity(intent);
+        } catch (Exception e) {
+            Log.e(TAG, "打开浏览器失败", e);
+            Toast.makeText(this, "无法打开浏览器：" + e.getMessage(), Toast.LENGTH_LONG).show();
         }
     }
 }
