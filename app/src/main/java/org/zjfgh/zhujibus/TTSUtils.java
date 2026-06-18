@@ -377,6 +377,7 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
     }
 
     private void buildArrivalAnnouncement(List<PlaybackItem> items, String lineName, String nextStationName) {
+        items.add(new PlaybackItem(R.raw.network_stop_chime));
         items.add(new PlaybackItem(R.raw.cn_01_zhuji_bus_reminder));
         addCnLineNumber(items, lineName);
         items.add(new PlaybackItem(R.raw.cn_04_arriving));
@@ -400,7 +401,7 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
 
             List<PlaybackItem> items = new ArrayList<>();
             String firstNextStation = pendingAnnouncements.get(1).nextStationName;
-
+            items.add(new PlaybackItem(R.raw.network_stop_chime));
             items.add(new PlaybackItem(R.raw.cn_01_zhuji_bus_reminder));
             for (int i = 1; i < pendingAnnouncements.size(); i++) {
                 QueuedAnnouncement qa = pendingAnnouncements.get(i);
@@ -426,6 +427,7 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
         stopAll();
         backgroundHandler.post(() -> {
             List<PlaybackItem> items = new ArrayList<>();
+            items.add(new PlaybackItem(R.raw.network_stop_chime));
             items.add(new PlaybackItem(R.raw.cn_01_zhuji_bus_reminder));
             items.add(new PlaybackItem(R.raw.cn_02_heading_to));
             addCnStationName(items, endStation);

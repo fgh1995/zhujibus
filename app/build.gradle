@@ -12,12 +12,24 @@ android {
         targetSdk 35
         versionCode 102010
         versionName "1.2.1-beta"
-
+        //remote={"has_notice":ture,"notice":"公告测试内容","has_update":ture,"update":"1.基本完成设想中的数知梦报站器模仿UI和相关功能\n2.小bug未修复"}
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    signingConfigs {
+        release {
+            storeFile file(project.findProperty('KEY_STORE_FILE'))
+            storePassword project.findProperty('KEY_STORE_PASSWORD')
+            keyAlias project.findProperty('KEY_ALIAS')
+            keyPassword project.findProperty('KEY_PASSWORD')
+            v1SigningEnabled true
+            v2SigningEnabled true
+        }
     }
 
     buildTypes {
         release {
+            signingConfig signingConfigs.release
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
@@ -28,6 +40,18 @@ android {
     }
     buildFeatures {
         viewBinding true
+    }
+}
+
+androidComponents {
+    onVariants(selector().all()) { variant ->
+        def versionName = variant.outputs[0].versionName.get()
+        def versionCode = variant.outputs[0].versionCode.get()
+        variant.outputs.each { output ->
+            def buildType = variant.buildType
+            def suffix = buildType == "release" ? "release" : "debug"
+            output.outputFileName.set("zhujibus-${versionCode}-${suffix}.apk")
+        }
     }
 }
 

@@ -38,7 +38,7 @@ public class IBusCloudLineView extends View {
     private Paint textPaint;
     private Paint plateTextPaint;
     private Paint busIconPaint;
-    private static final int SCROLL_SPEED_MS_PER_PX = 10;  // 每像素20ms，即50像素/秒
+    private static final int SCROLL_SPEED_MS_PER_PX = 30;
     private static final int SCROLL_PAUSE_DURATION = 1000;  // 暂停时长（毫秒）
     // 图标
     private Bitmap busIconBitmap;
@@ -51,7 +51,7 @@ public class IBusCloudLineView extends View {
     private static final float STATION_SPACING = 80f;
     private static final float TEXT_Y_OFFSET = 10f;
     private static final float TEXT_SIZE = 32f;
-    private static final float VEHICLE_ICON_SIZE = 40f;
+    private static final float VEHICLE_ICON_SIZE = 30f;
     private static final float LEFT_PADDING = 40f;
 
     // 站名竖向滚动相关
@@ -577,7 +577,7 @@ public class IBusCloudLineView extends View {
             textPaintToUse = new Paint(textPaint);
             textPaintToUse.setColor(0xFF2196F3);
         } else {
-            fillPaint.setColor(0xFF31446F);
+            fillPaint.setColor(0xFF151517);
             fillPaint.setStyle(Paint.Style.FILL);
             strokePaint.setColor(Color.WHITE);
             textPaintToUse = textPaint;
@@ -705,20 +705,25 @@ public class IBusCloudLineView extends View {
         }
 
         if (shouldShowIcon && iconToUse != null) {
-            float iconSize = VEHICLE_ICON_SIZE;
+            // 保持图标原始宽高比
+            int originalWidth = iconToUse.getWidth();
+            int originalHeight = iconToUse.getHeight();
+            float targetHeight = VEHICLE_ICON_SIZE;
+            float targetWidth = targetHeight * originalWidth / originalHeight;
+
             if (isBetweenStations) {
                 if (targetStationIndex >= 0 && targetStationIndex < stations.size() - 1) {
-                    iconX = startX + targetStationIndex * STATION_SPACING + STATION_SPACING / 2 - iconSize / 2;
-                    iconY = y - CIRCLE_RADIUS - iconSize - 8f;
+                    iconX = startX + targetStationIndex * STATION_SPACING + STATION_SPACING / 2 - targetWidth / 2;
+                    iconY = y - CIRCLE_RADIUS - targetHeight - 8f;
                 } else {
-                    iconX = x - iconSize / 2;
-                    iconY = y - CIRCLE_RADIUS - iconSize - 8f;
+                    iconX = x - targetWidth / 2;
+                    iconY = y - CIRCLE_RADIUS - targetHeight - 8f;
                 }
             } else {
-                iconX = x - iconSize / 2;
-                iconY = y - CIRCLE_RADIUS - iconSize - 8f;
+                iconX = x - targetWidth / 2;
+                iconY = y - CIRCLE_RADIUS - targetHeight - 8f;
             }
-            canvas.drawBitmap(iconToUse, null, new RectF(iconX, iconY, iconX + iconSize, iconY + iconSize), null);
+            canvas.drawBitmap(iconToUse, null, new RectF(iconX, iconY, iconX + targetWidth, iconY + targetHeight), null);
         }
     }
 
