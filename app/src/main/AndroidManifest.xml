@@ -12,6 +12,8 @@
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- 在线更新：下载并安装 APK 所需 -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- 高德 SDK 9.3.0 内部会向 Settings.System 写入状态/隐私协议标记，必须声明此权限 -->
     <uses-permission android:name="android.permission.WRITE_SETTINGS" />
     <!-- MIUI 蓝牙定位（MiuiBlueLocationManager#noteOpUseMyIdentity）需要声明，否则日志会刷屏警告 -->

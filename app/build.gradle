@@ -10,9 +10,9 @@ android {
         applicationId "org.zjfgh.zhujibus"
         minSdk 24
         targetSdk 35
-        versionCode 102010
+        versionCode 102011
         versionName "1.2.1-beta"
-        //remote={"has_notice":ture,"notice":"公告测试内容","has_update":ture,"update_log":"1.基本完成设想中的数知梦报站器模仿UI和相关功能\n2.小bug未修复"}
+        //remote={"has_notice":false,"notice":"公告测试内容","has_update":ture,"update_log":"1.基本完成设想中的数知梦报站器模仿UI和相关功能\n2.小bug未修复"}
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 

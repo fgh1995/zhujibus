@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
     android:background="#e3edfb"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -10,16 +11,93 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content">
 
-        <ImageView
-            android:id="@+id/iv_banner"
+        <FrameLayout
+            android:id="@+id/fl_banner"
             android:layout_width="0dp"
-            android:layout_height="180dp"
-            android:contentDescription="@string/todo"
-            android:src="@drawable/banner_icon"
-            android:scaleType="centerCrop"
+            android:layout_height="wrap_content"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintTop_toTopOf="parent" />
+            app:layout_constraintTop_toTopOf="parent">
+
+            <ImageView
+                android:id="@+id/iv_banner"
+                android:layout_width="match_parent"
+                android:layout_height="180dp"
+                android:contentDescription="@string/todo"
+                android:src="@drawable/banner_icon"
+                android:scaleType="centerCrop" />
+
+            <!-- 更新公告行：has_update 为 true 时显示，叠加在 banner 顶部 -->
+            <LinearLayout
+                android:id="@+id/ll_update_notice"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_gravity="top"
+                android:background="#ed2440"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:padding="6dp"
+                android:visibility="gone"
+                tools:visibility="visible">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="6dp"
+                    android:text="更新"
+                    android:textColor="#ffffff"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+
+                <org.zjfgh.zhujibus.HorizontalScrollTextView
+                    android:id="@+id/hstv_update_notice"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    app:hsAnimationMode="bounce_with_pause"
+                    app:hsAutoStart="true"
+                    app:hsScrollSpeed="60"
+                    app:hsTextColor="#ffffff"
+                    app:hsTextSize="13dp"
+                    app:hsTurnPauseDuration="1500" />
+            </LinearLayout>
+
+            <!-- 公告行：has_notice 为 true 时显示，叠加在 banner 顶部（紧贴更新行下方） -->
+            <LinearLayout
+                android:id="@+id/ll_notice"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_gravity="top"
+                android:layout_marginTop="32dp"
+                android:background="#0d8dfb"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:padding="6dp"
+                android:visibility="gone"
+                tools:visibility="visible">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="6dp"
+                    android:text="公告"
+                    android:textColor="#ffffff"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+
+                <org.zjfgh.zhujibus.HorizontalScrollTextView
+                    android:id="@+id/hstv_notice"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    app:hsAnimationMode="bounce_with_pause"
+                    app:hsAutoStart="true"
+                    app:hsScrollSpeed="60"
+                    app:hsTextColor="#ffffff"
+                    app:hsTextSize="13dp"
+                    app:hsTurnPauseDuration="1500" />
+            </LinearLayout>
+        </FrameLayout>
 
         <LinearLayout
             android:gravity="center_vertical"
@@ -33,7 +111,7 @@
             android:layout_marginEnd="12dp"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintTop_toBottomOf="@+id/iv_banner">
+            app:layout_constraintTop_toBottomOf="@+id/fl_banner">
 
             <ImageView
                 android:layout_width="20dp"
