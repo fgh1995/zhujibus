@@ -10,6 +10,8 @@ public class BusRealTimeManager {
     private static final long REFRESH_INTERVAL = 10 * 1000; // 15秒刷新一次
     private Handler handler;
     private String currentLineId;
+    /** 当前回调监听器，由 startTracking 设置，refreshNow 复用 */
+    private RealTimeUpdateListener currentListener;
     private List<BusApiClient.BusPosition> busPositions = new ArrayList<>();
     private List<BusApiClient.BusLineStation> stationList;
     public int busAverageSpeed = 500; // 默认500米/分钟
@@ -31,11 +33,25 @@ public class BusRealTimeManager {
 
     public void startTracking(String lineId, RealTimeUpdateListener listener) {
         this.currentLineId = lineId;
+        this.currentListener = listener;
         fetchData(listener);
     }
 
     public void stopTracking() {
         handler.removeCallbacksAndMessages(null);
+        currentListener = null;
+    }
+
+    /**
+     * 主动触发一次刷新（供 UI 倒计时到 0 时调用）。
+     * <p>
+     * 由 Activity 的倒计时统一调度刷新节奏，避免 Manager 内部 postDelayed
+     * 与 UI 倒计时错位造成"提前刷新"的现象。
+     */
+    public void refreshNow() {
+        if (currentListener != null) {
+            fetchData(currentListener);
+        }
     }
 
     private void fetchData(final RealTimeUpdateListener listener) {
@@ -50,13 +66,13 @@ public class BusRealTimeManager {
                         } else {
                             listener.onError(response.returnInfo);
                         }
-                        handler.postDelayed(() -> fetchData(listener), REFRESH_INTERVAL);
+                        // 不再 postDelayed 下一次，节奏由 UI 倒计时统一控制
                     }
 
                     @Override
                     public void onError(BusApiClient.BusApiException e) {
                         listener.onError(e.toString());
-                        handler.postDelayed(() -> fetchData(listener), REFRESH_INTERVAL);
+                        // 不再 postDelayed 下一次，节奏由 UI 倒计时统一控制
                     }
                 });
     }

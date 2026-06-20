@@ -3,6 +3,9 @@ package org.zjfgh.zhujibus;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
+import android.graphics.Paint;
+import android.graphics.Path;
 import android.location.Location;
 import android.util.Log;
 
@@ -11,6 +14,7 @@ import com.amap.api.location.AMapLocationClient;
 import com.amap.api.location.AMapLocationClientOption;
 import com.amap.api.location.AMapLocationListener;
 import com.amap.api.maps.AMap;
+import com.amap.api.maps.AMapUtils;
 import com.amap.api.maps.CameraUpdate;
 import com.amap.api.maps.CameraUpdateFactory;
 import com.amap.api.maps.LocationSource;
@@ -23,6 +27,7 @@ import com.amap.api.maps.model.CameraPosition;
 import com.amap.api.maps.model.LatLng;
 import com.amap.api.maps.model.LatLngBounds;
 import com.amap.api.maps.model.Marker;
+import com.amap.api.maps.model.MarkerOptions;
 import com.amap.api.maps.model.MyLocationStyle;
 import com.amap.api.maps.model.Polyline;
 import com.amap.api.maps.model.PolylineOptions;
@@ -60,6 +65,14 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener 
     private UiSettings uiSettings;
     private OnLocationChangedListener locationListener;
     private Polyline routePolyline;
+    // ⭐ 路线分层：白色光晕 + 绿色主线
+    private Polyline routeGlowPolyline;
+    private Polyline routeMainPolyline;
+    // ⭐ 沿线方向箭头 marker 列表（参考 CSDN 方案：Marker + setRotation）
+    private final List<Marker> arrowMarkers = new ArrayList<>();
+    private BitmapDescriptor arrowMarkerIcon;
+    // ⭐ 当前地图缩放级别（用于箭头密度自适应）
+    private float currentZoom = 14f;
     private boolean isCompassMode = true;
 
     // 高德定位 SDK
@@ -78,6 +91,8 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener 
     private boolean perspectiveAppliedOnFirstFix = false;
     // ⭐ 标记：当前是否为 GPS 模式（GPS 模式才应用 3D 导航视角，网络模式保持自由视角）
     private boolean isGpsMode = false;
+    /** 最近一次 AMapLocation 定位成功（errorCode == 0）的时间戳（毫秒） */
+    private volatile long lastGpsSuccessTimeMs = 0L;
 
     // ---- 公交车辆 marker 管理（仅网络模式） ----
     /** 当前线路方向的所有公交车辆 SmoothMoveMarker（车牌 → marker） */
@@ -86,14 +101,6 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener 
     private final Map<String, LatLng> lastBusPos = new HashMap<>();
     /** 记录每个车辆上一帧的时间戳（ms，用于算出 SmoothMoveMarker 的时长） */
     private final Map<String, Long> lastBusUpdateMs = new HashMap<>();
-    /**
-     * 记录每个车辆上一次计算出的实际速度（m/s）
-     * <p>
-     * 计算时机：第 N 次更新时，用 prev(N-1) → cur(N) 的距离除以时间。
-     * 使用时机：第 N+1 次更新时，用此速度算动画时长 = dist(N → N+1) / speed。
-     * 首次出现时无值 → 退回 {@link #DEFAULT_SPEED_MPS}。
-     */
-    private final Map<String, Double> lastBusSpeedMps = new HashMap<>();
     private BitmapDescriptor busIconDescriptor;
     private boolean busIconLoaded = false;
 
@@ -176,6 +183,9 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener 
         aMap = mapView.getMap();
         uiSettings = aMap != null ? aMap.getUiSettings() : null;
 
+        // ⭐ 预生成路线方向箭头 marker icon（参考 CSDN 方案：Marker + setRotation）
+        arrowMarkerIcon = createArrowMarkerIcon();
+
         // 监听地图加载成功/失败（排查 KEY/SHA1 不匹配的关键日志）
         if (aMap != null) {
             try {
@@ -186,6 +196,26 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener 
                     applyNavigationCameraPerspective();
                 });
                 aMap.setOnMapClickListener(latLng -> Log.v(TAG, "[MAP] click at " + latLng));
+
+                // ⭐ 监听地图缩放变化 → 自适应调整箭头密度
+                //   必须在 GPS 判断外注册，**网络模式也要响应用户缩放**
+                aMap.setOnCameraChangeListener(new AMap.OnCameraChangeListener() {
+                    @Override
+                    public void onCameraChange(CameraPosition cameraPosition) { /* drag 过程中 */ }
+
+                    @Override
+                    public void onCameraChangeFinish(CameraPosition cameraPosition) {
+                        float z = cameraPosition.zoom;
+                        if (z < 3f) return;
+                        if (Math.abs(z - currentZoom) > 0.3f) {
+                            Log.d(TAG, "[ZOOM] OnCameraChangeFinish " + currentZoom + " -> " + z);
+                            currentZoom = z;
+                            if (routePoints != null && !routePoints.isEmpty()) {
+                                drawArrowMarkers(routePoints);
+                            }
+                        }
+                    }
+                });
             } catch (Throwable t) {
                 Log.w(TAG, "[MAP] set listener failed: " + t.getMessage());
             }
@@ -202,20 +232,32 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener 
         }
 
         // 定位样式：罗盘模式（地图跟随设备方向旋转，车头朝上）
-        if (aMap != null) {
+        // ⭐ 注意：网络模式（默认）下不启用 my-location、不开定位，省电
+        //    GPS 模式会在 setGpsMode(true) → setCompassMode(true) 中按需开启
+        if (aMap != null && isGpsMode) {
             try {
+                // ⭐ 参考 AMap 官方文档（5.0.0+ 标准做法）实现定位蓝点
+                // 1) 初始化 MyLocationStyle 并设置类型
+                // 2) 设置连续定位间隔
+                // 3) 设置定位蓝点 Style
+                // 4) setMyLocationEnabled(true) 启动显示
                 MyLocationStyle style = new MyLocationStyle();
-                // LOCATION_TYPE_MAP_ROTATE = 3 —— 完整的罗盘模式
-                style.myLocationType(MyLocationStyle.LOCATION_TYPE_MAP_ROTATE);
+                // LOCATION_TYPE_LOCATION_ROTATE = 默认模式
+                // 连续定位、且将视角移动到地图中心点，定位点依照设备方向旋转，并且会跟随设备移动
+                style.myLocationType(MyLocationStyle.LOCATION_TYPE_LOCATION_ROTATE);
+                // 设置连续定位模式下的定位间隔，单位为毫秒（官方推荐 2000ms）
+                style.interval(2000);
+                // 自定义精度圆样式
                 style.strokeColor(0xFF1AAD19);
                 style.radiusFillColor(0x5500AAFF);
                 style.strokeWidth(2.0f);
-                style.showMyLocation(true);
                 aMap.setMyLocationStyle(style);
 
                 // 通过 LocationSource 把高德定位 SDK 的数据喂给地图
-                // 这样地图就会使用 AMapLocationClient（而非系统 GPS）进行定位
+                // 这样地图就会使用 AMapLocationClient（而非系统 GPS）进行定位，
+                // 同时能保留我们自定义的智能 bearing（运动方向 vs 设备方向）
                 aMap.setLocationSource(this);
+                // 设置为true表示启动显示定位蓝点
                 aMap.setMyLocationEnabled(true);
 
                 // 罗盘模式下的导航视角（3D 透视 + 较高缩放），让它看起来真的像导航 App
@@ -352,6 +394,8 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener 
                     + ", msg=" + aMapLocation.getErrorInfo());
             return;
         }
+        // 记录最近一次成功定位时间，给信号指示器用
+        lastGpsSuccessTimeMs = System.currentTimeMillis();
 
         // 调试：打印关键信息
         Log.d(TAG, String.format("[NAV] loc: lat=%.6f, lng=%.6f, acc=%.1fm, bearing=%.1f, speed=%.1f, provider=%s",
@@ -466,22 +510,44 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener 
 
     /**
      * 绘制路线（GCJ-02 坐标，与高德地图原生坐标系一致，无需转换）
+     *
+     * 两层 + 方向箭头 marker：
+     *   1) routeGlowPolyline  —— 半透明白色光晕（最宽）
+     *   2) routeMainPolyline  —— 绿色主线（中宽）
+     *   3) arrowMarkers       —— 沿线等距放置的白色"›"形 marker
+     *                           （参考 CSDN：Marker + setRotation 显式控制方向）
      */
     public void drawRoute(List<LatLng> points) {
         if (aMap == null || points == null || points.isEmpty()) {
             return;
         }
-        if (routePolyline != null) {
-            routePolyline.remove();
-            routePolyline = null;
-        }
+        // 清理旧路线
+        if (routeGlowPolyline != null) { routeGlowPolyline.remove(); routeGlowPolyline = null; }
+        if (routeMainPolyline != null) { routeMainPolyline.remove(); routeMainPolyline = null; }
+        if (routePolyline != null) { routePolyline.remove(); routePolyline = null; }
+        clearArrowMarkers();
+
         // ⭐ 保存路线点副本，供后续车辆 marker 的 snap-to-road 使用
         this.routePoints = new ArrayList<>(points);
-        PolylineOptions polylineOptions = new PolylineOptions()
+
+        // 1) 白色光晕（最宽，半透明）
+        PolylineOptions glowOpt = new PolylineOptions()
                 .addAll(points)
-                .width(15f)
-                .color(0xFF00AAFF);
-        routePolyline = aMap.addPolyline(polylineOptions);
+                .width(26f)
+                .color(0x66FFFFFF);
+        routeGlowPolyline = aMap.addPolyline(glowOpt);
+
+        // 2) 绿色主线（中宽）
+        PolylineOptions mainOpt = new PolylineOptions()
+                .addAll(points)
+                .width(16f)
+                .color(0xFF4CAF50);  // 绿色
+        routeMainPolyline = aMap.addPolyline(mainOpt);
+        // 兼容旧引用（外部代码可能仍在读 routePolyline）
+        routePolyline = routeMainPolyline;
+
+        // 3) 沿线方向箭头 marker
+        drawArrowMarkers(points);
 
         try {
             LatLngBounds.Builder builder = LatLngBounds.builder();
@@ -494,6 +560,186 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener 
         } catch (Exception e) {
             Log.e(TAG, "drawRoute bounds failed: " + e.getMessage());
         }
+    }
+
+    /**
+     * ⭐ 生成路线方向箭头 marker icon（**尖端朝上/朝北**的"›"形 V 字）
+     *
+     * 关键：箭头尖端必须朝上（北），这样 setRotateAngle(0) 时箭头指北，
+     *       设置正确角度后就能对准路径方向。
+     *
+     * 形状（32×32）：
+     * <pre>
+     *             ▲    ← 尖端（Y=8，朝北）
+     *            ╱ ╲
+     *           ╱   ╲
+     *          ╱     ╲
+     * </pre>
+     */
+    private BitmapDescriptor createArrowMarkerIcon() {
+        try {
+            int w = 32;
+            int h = 32;
+            Bitmap bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+            Canvas canvas = new Canvas(bitmap);
+
+            Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+            paint.setColor(0xFFFFFFFF);  // 白色
+            paint.setStrokeWidth(5f);
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeCap(Paint.Cap.ROUND);
+            paint.setStrokeJoin(Paint.Join.ROUND);
+
+            Path v = new Path();
+            v.moveTo(w * 0.22f, h * 0.30f);  // 左下
+            v.lineTo(w * 0.50f, h * 0.08f);  // 顶端（北）
+            v.lineTo(w * 0.78f, h * 0.30f);  // 右下
+            canvas.drawPath(v, paint);
+
+            return BitmapDescriptorFactory.fromBitmap(bitmap);
+        } catch (Throwable t) {
+            Log.e(TAG, "createArrowMarkerIcon failed: " + t.getMessage(), t);
+            return null;
+        }
+    }
+
+    /**
+     * ⭐ 沿路径每 N 米放一个方向箭头 marker
+     *
+     * 间距随 zoom 自适应，避免缩小时整条路变白：
+     * <pre>
+     *  zoom  3-12  → 间距 1500m（城市级，16km 路线约 10 个箭头）
+     *  zoom 12-13  → 间距 500m
+     *  zoom 13-14  → 间距 200m
+     *  zoom 14-15  → 间距 100m
+     *  zoom 15-16  → 间距 60m
+     *  zoom >= 16  → 间距 40m（最密，贴地导航）
+     * </pre>
+     *
+     * 注意：drawRoute 在 onMapLoaded 之前可能调用，
+     *       这时 aMap.getCameraPosition() 返回初始 zoom（3-5），
+     *       此时不画箭头会出现"完全没箭头"的问题；
+     *       所以采用兜底：cp.zoom < 3 时用默认值 14。
+     */
+    private void drawArrowMarkers(List<LatLng> points) {
+        if (aMap == null) {
+            Log.w(TAG, "[ARROW] aMap == null, skip");
+            return;
+        }
+        if (points == null || points.size() < 2) {
+            Log.w(TAG, "[ARROW] points invalid, skip");
+            return;
+        }
+        if (arrowMarkerIcon == null) {
+            Log.w(TAG, "[ARROW] arrowMarkerIcon == null, skip");
+            return;
+        }
+
+        // 同步 zoom（从 CameraPosition 取最新值）
+        try {
+            CameraPosition cp = aMap.getCameraPosition();
+            if (cp != null && cp.zoom >= 3f) {  // 高德初始 zoom 可能在 3-5
+                currentZoom = cp.zoom;
+            } else {
+                // ⭐ CameraPosition 还没初始化（地图未加载完成），
+                //   用合理默认值 14，让箭头能画出来
+                if (currentZoom < 3f) currentZoom = 14f;
+            }
+        } catch (Throwable t) {
+            if (currentZoom < 3f) currentZoom = 14f;
+        }
+        Log.d(TAG, "[ARROW] drawArrowMarkers zoom=" + currentZoom);
+
+        // 2) 计算每段长度 + 总长度
+        final double[] segLens = new double[points.size() - 1];
+        double totalLen = 0;
+        for (int i = 0; i < points.size() - 1; i++) {
+            segLens[i] = AMapUtils.calculateLineDistance(points.get(i), points.get(i + 1));
+            totalLen += segLens[i];
+        }
+        if (totalLen <= 1) return;
+
+        // 3) ⭐ 根据 zoom 自适应间距
+        double spacing;
+        if (currentZoom < 12f)      spacing = 1500.0;   // 城市级 16km ≈ 10 个
+        else if (currentZoom < 13f) spacing = 500.0;
+        else if (currentZoom < 14f) spacing = 200.0;
+        else if (currentZoom < 15f) spacing = 100.0;
+        else if (currentZoom < 16f) spacing = 60.0;
+        else                        spacing = 40.0;
+
+        // 清理旧箭头（不管后面是否真要画）
+        clearArrowMarkers();
+
+        // 4) 沿线插值放置
+        double traveled = spacing * 0.5;  // 起点稍微偏一点，避免和站点重叠
+        int segIdx = 0;
+        double acc = 0;
+        while (traveled < totalLen) {
+            // 找 traveled 落在哪一段
+            while (segIdx < segLens.length - 1 && acc + segLens[segIdx] < traveled) {
+                acc += segLens[segIdx];
+                segIdx++;
+            }
+            if (segIdx >= segLens.length) break;
+
+            double segStart = acc;
+            double t = (traveled - segStart) / segLens[segIdx];
+            if (t < 0) t = 0;
+            if (t > 1) t = 1;
+
+            // 5) 沿线插值得到位置
+            double lat = points.get(segIdx).latitude
+                    + (points.get(segIdx + 1).latitude - points.get(segIdx).latitude) * t;
+            double lng = points.get(segIdx).longitude
+                    + (points.get(segIdx + 1).longitude - points.get(segIdx).longitude) * t;
+
+            // 6) 该段方向角（高德 setRotateAngle 是逆时针，computeAzimuth 是顺时钟，需取反）
+            float angle = (float) computeAzimuth(points.get(segIdx), points.get(segIdx + 1));
+            // setRotateAngle 是"从正北开始逆时针"，azimuth 是"从正北开始顺时针"
+            float rotateAngle = (360f - angle) % 360f;
+
+            // ⭐ 注意：高德 9.x 是 setFlat / setRotateAngle（不是 flat / setRotation）
+            Marker marker = aMap.addMarker(new MarkerOptions()
+                    .position(new LatLng(lat, lng))
+                    .icon(arrowMarkerIcon)
+                    .anchor(0.5f, 0.5f)
+                    .setFlat(true)                              // 贴地显示
+                    .setInfoWindowOffset(0, 0)
+                    .zIndex(1f));
+            if (marker != null) {
+                marker.setRotateAngle(rotateAngle);            // 9.x 用 setRotateAngle
+            }
+            arrowMarkers.add(marker);
+
+            traveled += spacing;
+        }
+        Log.d(TAG, "[ARROW] zoom=" + currentZoom + " spacing=" + spacing + "m count=" + arrowMarkers.size());
+    }
+
+    /**
+     * 清理所有方向箭头 marker
+     */
+    private void clearArrowMarkers() {
+        for (Marker m : arrowMarkers) {
+            try { m.remove(); } catch (Throwable ignore) {}
+        }
+        arrowMarkers.clear();
+    }
+
+    /**
+     * 计算两点的方位角（正北=0度，**顺时针**递增）
+     * —— 地理学标准公式
+     * 注意：高德 Marker.setRotateAngle 是"逆时针"角度，需要用 (360 - azimuth) 转换
+     */
+    private double computeAzimuth(LatLng a, LatLng b) {
+        double lat1 = Math.toRadians(a.latitude);
+        double lat2 = Math.toRadians(b.latitude);
+        double dLon = Math.toRadians(b.longitude - a.longitude);
+        double y = Math.sin(dLon) * Math.cos(lat2);
+        double x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+        double brng = Math.toDegrees(Math.atan2(y, x));
+        return (brng + 360.0) % 360.0;
     }
 
     /**
@@ -520,10 +766,12 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener 
         }
         if (aMap != null) {
             try {
+                // ⭐ 参考 AMap 官方文档（5.0.0+ 标准做法）实现定位蓝点
                 MyLocationStyle style = new MyLocationStyle();
                 style.myLocationType(enabled
                         ? MyLocationStyle.LOCATION_TYPE_MAP_ROTATE  // 罗盘模式
                         : MyLocationStyle.LOCATION_TYPE_FOLLOW);    // 普通跟随模式
+                style.interval(2000); // 官方推荐 2 秒一次定位
                 style.strokeColor(0xFF1AAD19);
                 style.radiusFillColor(0x5500AAFF);
                 style.strokeWidth(2.0f);
@@ -548,8 +796,10 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener 
 
     /**
      * 设置当前是 GPS 模式还是网络模式
-     * - GPS 模式：开启罗盘模式（地图旋转 + 3D 贴地视角）
-     * - 网络模式：关闭罗盘模式，地图保持自由视角（用户可自由缩放/平移）
+     * <ul>
+     *   <li>GPS 模式：开启罗盘模式（地图旋转 + 3D 贴地视角），启动 AMap 定位</li>
+     *   <li>网络模式：关闭罗盘模式，地图保持自由视角，停止 AMap 定位省电</li>
+     * </ul>
      */
     public void setGpsMode(boolean gps) {
         this.isGpsMode = gps;
@@ -564,6 +814,8 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener 
                 // GPS 模式：罗盘 + 3D 视角
                 setCompassMode(true);
                 perspectiveAppliedOnFirstFix = false; // 让首次定位时重新应用一次
+                // 启动 AMap 定位（GPS 模式需要实时位置）
+                startAmapLocation();
             } else {
                 // ⭐ 网络模式：关闭罗盘模式，地图回到自由视角
                 // 关闭 setMyLocationEnabled 后，用户可以自由缩放/平移，地图不再被强制居中
@@ -578,6 +830,10 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener 
                                 0f   // bearing = 0，正北朝上
                         )
                 ));
+                // ⭐ 网络模式停止 AMap 定位（省电 + GPS 信号图标立即失效）
+                stopAmapLocation();
+                // 重置最近成功定位时间，让 GPS 信号图标立刻变 not_signal
+                lastGpsSuccessTimeMs = 0L;
             }
         } catch (Throwable t) {
             Log.e(TAG, "setGpsMode failed: " + t.getMessage(), t);
@@ -586,6 +842,14 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener 
 
     public boolean isGpsMode() {
         return isGpsMode;
+    }
+
+    /**
+     * 最近一次 AMapLocation 定位成功的时间戳（毫秒），0 表示从未成功过。
+     * 给 GPS 信号指示器（{@link SignalIndicatorManager}）使用。
+     */
+    public long getLastGpsSuccessTimeMs() {
+        return lastGpsSuccessTimeMs;
     }
 
     /**
@@ -640,16 +904,22 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener 
     private static final int BUS_MARKER_SIZE_DP = 24;
     /** 角度常量：图标"车头"位于图标右侧，因此高德 setRotateAngle 需要偏移 90° */
     private static final float HEAD_BEARING_OFFSET = 90f;
-    /** 首次出现时使用的默认速度：30 km/h */
-    private static final double DEFAULT_SPEED_MPS = 30.0 / 3.6;  // ≈ 8.333 m/s
-    /** 动画时长下限（秒）：防止距离极小时动画瞬间结束 */
-    private static final int MIN_ANIM_SECONDS = 1;
-    /** 动画时长上限（秒）：防止低速时动画无限长 */
-    private static final int MAX_ANIM_SECONDS = 30;
-    /** 实际速度下限（m/s）：停车时用这个值，≈ 1.8 km/h */
-    private static final double MIN_REAL_SPEED_MPS = 0.5;
-    /** 实际速度上限（m/s）：≈ 180 km/h，超出认为 GPS 异常 */
-    private static final double MAX_REAL_SPEED_MPS = 50.0;
+    /**
+     * 公交车辆在地图上的视觉移动速度（米/秒），≈ 30 km/h。
+     * <p>
+     * 不论 API 推送频率多少，都用 distance / SPEED 算出动画时长，
+     * 保证车辆在屏幕上看起来一直以固定速度前进。
+     */
+    private static final double BUS_VISUAL_SPEED_MPS = 8.0;
+    /** 动画时长下限（秒）。距离太小时至少要这么多秒，避免瞬移感。 */
+    private static final int MIN_ANIM_DURATION_SEC = 1;
+    /**
+     * 动画时长上限（秒）。远距离跳变（如 GPS 大幅漂移）也不会超过这个上限，
+     * 实际速度会临时高于 BUS_VISUAL_SPEED_MPS，但视觉上还是连续的。
+     */
+    private static final int MAX_ANIM_DURATION_SEC = 30;
+    /** 距离 < 此值（米）时直接 setPosition，不开动画 */
+    private static final double MIN_MOVE_DISTANCE_M = 1.0;
 
     /**
      * 加载公交车辆 icon（icon_map_bus.png）
@@ -714,17 +984,17 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener 
     /**
      * 在地图上绘制当前方向的所有公交车辆实时位置。
      * <p>
-     * 使用官方 {@link SmoothMoveMarker} 做平滑移动：
+     * 使用官方 {@link SmoothMoveMarker}（在 AMap 9.3.0 上为兼容方案）做平滑移动：
      *  - GPS 模式不绘制，保留用户自身位置
-     *  - 新车首次出现：直接 setPosition 放置（避免从屏幕外飞入），无动画
+     *  - 新车首次出现：直接 setPosition 放置（避免从屏幕外飞入）
      *  - 已存在车辆：
      *      1) 将坐标吸附到最近路线线段（snap-to-road）→ 走"路线"而不是直线
-     *      2) 动画时长 = 距离 / 速度，速度来源：
-     *         - 上一帧已算出实际速度（dist(prev→cur) / elapsedTime）→ 用它
-     *         - 否则（首次/刚出现的车）→ 用默认 30 km/h
-     *      3) setPoints([prev, snapped]) + setTotalDuration(秒) + startSmoothMove()
-     *         → 用官方插值器沿路线段平滑移动
-     *      4) 通过 getMarker().setRotateAngle() 持续设置旋转，车头沿路线段方向
+     *      2) 固定视觉速度：duration = distance / BUS_VISUAL_SPEED_MPS
+     *         不论 API 推送频率多少，车辆在屏幕上看起来匀速前进。
+     *      3) 关键：轨迹起点是 marker 当前的动画位置（getPosition）而不是上一帧的
+     *         服务器坐标，这样前一个动画在任意时刻被新动画接管都不会"瞬移回旧位置"。
+     *      4) 通过 getMarker().setRotateAngle() 在动画过程中持续设置旋转，
+     *         车头沿路线段方向（含弯道跟随）。
      *  - 已离场车辆自动 destroy
      */
     public void updateBusMarkers(List<BusApiClient.BusPosition> positions) {
@@ -804,53 +1074,37 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener 
             // 已存在：用 setMoveListener 实时刷新旋转角
             attachRotationListener(smm, plate);
 
-            // 4) 计算动画时长
-            //   速度来源：
-            //     - 上一帧已算出实际速度 → 用它（dist / speed）
-            //     - 否则 → 用默认 30 km/h
-            //   首次出现已在前面 continue，这里 prevPos 一定不为 null
-            Long lastMs = lastBusUpdateMs.get(plate);
-            double speedMps;
-            Double savedSpeed = lastBusSpeedMps.get(plate);
-            if (savedSpeed != null && savedSpeed > 0) {
-                speedMps = savedSpeed;
-            } else {
-                speedMps = DEFAULT_SPEED_MPS;
-            }
-            double distMeters = computeDistanceMeters(prevPos, snappedPos);
-            int durationSec;
-            if (distMeters < 1.0) {
-                // 几乎没动：1 秒跳到目标即可
-                durationSec = 1;
-            } else {
-                durationSec = (int) Math.round(distMeters / speedMps);
-                if (durationSec < MIN_ANIM_SECONDS) durationSec = MIN_ANIM_SECONDS;
-                if (durationSec > MAX_ANIM_SECONDS) durationSec = MAX_ANIM_SECONDS;
-            }
-
-            // 5) 计算这一帧的实际速度（用于下次动画）
-            //   用「当前帧到上一帧」的距离除以时间，得到这辆车的真实速度
-            if (lastMs != null) {
-                long elapsedMs = nowMs - lastMs;
-                if (elapsedMs > 0) {
-                    double actualSpeedMps = distMeters / (elapsedMs / 1000.0);
-                    // 限制到合理范围，过滤 GPS 异常值
-                    if (actualSpeedMps < MIN_REAL_SPEED_MPS) actualSpeedMps = MIN_REAL_SPEED_MPS;
-                    if (actualSpeedMps > MAX_REAL_SPEED_MPS) actualSpeedMps = MAX_REAL_SPEED_MPS;
-                    lastBusSpeedMps.put(plate, actualSpeedMps);
-                }
-            }
-
-            // 6) 构造轨迹
-            List<LatLng> traj = new ArrayList<>(2);
-            traj.add(prevPos);
-            traj.add(snappedPos);
+            // 4) 关键：取 marker 当前动画中的实际位置（可能还没到上一个目标点），
+            //    以此为新轨迹的起点，避免"动画未完 → 跳回旧起点"造成视觉跳变。
+            LatLng animatedPos = null;
             try {
-                smm.setPoints(traj);
-                smm.setTotalDuration(durationSec);
-                smm.startSmoothMove();
-            } catch (Throwable t) {
-                Log.w(TAG, "[BUS] startSmoothMove failed for " + plate + ": " + t.getMessage());
+                animatedPos = smm.getPosition();
+            } catch (Throwable t) { /* ignore */ }
+            if (animatedPos == null) animatedPos = prevPos;
+
+            // 5) 固定速度策略：duration = distance / SPEED
+            //    大跳变被 MAX_ANIM_DURATION_SEC 截断；距离 < 1m 直接 setPosition。
+            double distMeters = computeDistanceMeters(animatedPos, snappedPos);
+            if (distMeters < MIN_MOVE_DISTANCE_M) {
+                try { smm.setPosition(snappedPos); } catch (Throwable ignore) {}
+            } else {
+                int durationSec = (int) Math.round(distMeters / BUS_VISUAL_SPEED_MPS);
+                if (durationSec < MIN_ANIM_DURATION_SEC) durationSec = MIN_ANIM_DURATION_SEC;
+                if (durationSec > MAX_ANIM_DURATION_SEC) durationSec = MAX_ANIM_DURATION_SEC;
+
+                // 6) 轨迹 = [动画当前所在位置, 新目标]，而不是 [prevPos, snappedPos]，
+                //    这样前一动画在任意时刻被新动画接管都不会"瞬移回旧位置"。
+                List<LatLng> traj = new ArrayList<>(2);
+                traj.add(animatedPos);
+                traj.add(snappedPos);
+
+                try {
+                    smm.setPoints(traj);
+                    smm.setTotalDuration(durationSec);
+                    smm.startSmoothMove();
+                } catch (Throwable t) {
+                    Log.w(TAG, "[BUS] startSmoothMove failed for " + plate + ": " + t.getMessage());
+                }
             }
             setSmmTitle(smm, plate, pos.isArrived);
             lastBusPos.put(plate, snappedPos);
@@ -868,7 +1122,6 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener 
                 it.remove();
                 lastBusPos.remove(e.getKey());
                 lastBusUpdateMs.remove(e.getKey());
-                lastBusSpeedMps.remove(e.getKey());
             }
         }
     }
@@ -939,7 +1192,6 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener 
         busMarkers.clear();
         lastBusPos.clear();
         lastBusUpdateMs.clear();
-        lastBusSpeedMps.clear();
     }
 
     // ---- 几何工具 ----
@@ -1069,6 +1321,13 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener 
             busIconDescriptor = null;
         }
         busIconLoaded = false;
+
+        // ⭐ 释放路线方向箭头 marker
+        clearArrowMarkers();
+        if (arrowMarkerIcon != null) {
+            try { arrowMarkerIcon.recycle(); } catch (Throwable t) { /* ignore */ }
+            arrowMarkerIcon = null;
+        }
 
         // 3. 销毁 locationClient（这部分在高德 SDK 中是安全的，无 GL 线程依赖）
         if (locationClient != null) {

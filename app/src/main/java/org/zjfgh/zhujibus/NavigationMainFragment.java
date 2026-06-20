@@ -8,6 +8,7 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewTreeObserver;
+import android.widget.ImageView;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
@@ -48,6 +49,8 @@ public class NavigationMainFragment extends Fragment {
     private TextView lastBusTime;
     private TextView routeSummary;
     private TextView ticket;
+    private ImageView iconGpsSignal;
+    private ImageView iconNetworkSignal;
     private IBusCloudLineView iBusCloudLineView; // 新增的 IBusCloudLineView
 
     // ---- 地图导航管理 ----
@@ -124,11 +127,17 @@ public class NavigationMainFragment extends Fragment {
             navNextStation = view.findViewById(R.id.nav_next_station);
             navDirection = view.findViewById(R.id.nav_direction);
             gpsSpeedText = view.findViewById(R.id.gps_speed_text);
+            iconGpsSignal = view.findViewById(R.id.icon_gps_signal);
+            iconNetworkSignal = view.findViewById(R.id.icon_network_signal);
             firstBusTime = view.findViewById(R.id.first_bus_time);
             lastBusTime = view.findViewById(R.id.last_bus_time);
             routeSummary = view.findViewById(R.id.route_summary);
             ticket = view.findViewById(R.id.ticket);
             iBusCloudLineView = view.findViewById(R.id.i_bus_cloud_line_view); // 获取 IBusCloudLineView
+
+            // 初始化信号指示器（默认值：GPS 无信号、网络 0 格）
+            SignalIndicatorManager.setGpsSignal(iconGpsSignal, false);
+            SignalIndicatorManager.setNetworkSignal(iconNetworkSignal, SignalIndicatorManager.NET_LEVEL_0);
 
             // 2. 加载数码字体
             try {
@@ -497,8 +506,32 @@ public class NavigationMainFragment extends Fragment {
                 navDateText.setText(String.format(Locale.getDefault(), "%d月%d日 %s",
                         calendar.get(Calendar.MONTH) + 1, day, weekDays[weekDay]));
             }
+
+            // 顺手刷新信号指示器（每秒都重算 + 重设；manager 内部有去重，不会真的反复切图）
+            updateSignalIndicators();
         } catch (Throwable t) {
             Log.w(TAG, "updateNavigationTime failed: " + t.getMessage());
+        }
+    }
+
+    /**
+     * 刷新 GPS / 网络信号图标
+     * <p>
+     * GPS 判定：5 秒内有过成功定位（errorCode == 0）算"有信号"
+     * 网络判定：{@link SignalIndicatorManager#getNetworkSignalLevel(Context)}
+     */
+    private void updateSignalIndicators() {
+        if (getContext() == null) return;
+        try {
+            // GPS
+            long lastGps = navigation != null ? navigation.getLastGpsSuccessTimeMs() : 0L;
+            SignalIndicatorManager.setGpsSignalByTime(iconGpsSignal, lastGps);
+
+            // 网络
+            int netLevel = SignalIndicatorManager.getNetworkSignalLevel(requireContext());
+            SignalIndicatorManager.setNetworkSignal(iconNetworkSignal, netLevel);
+        } catch (Throwable t) {
+            Log.w(TAG, "updateSignalIndicators failed: " + t.getMessage());
         }
     }
 

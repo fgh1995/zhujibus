@@ -11,8 +11,8 @@ android {
         minSdk 24
         targetSdk 35
         versionCode 102023
-        versionName "1.2.23-beta"
-        //remote={"has_notice":false,"notice":"欢迎使用诸暨公交查询APP","has_update":false,"update_log":"1.网络报站模式下，地图将显示公交车的位置。"}
+        versionName "1.2.23"
+        //remote={"has_notice":false,"notice":"欢迎使用诸暨公交查询APP","has_update":true,"update_log":"1.网络报站模式下，地图将显示公交车的位置。\n2.优化其他UI。"}
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 

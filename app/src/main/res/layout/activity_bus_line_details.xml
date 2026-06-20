@@ -140,98 +140,57 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="8dp"
-                android:paddingLeft="4dp"
-                android:paddingEnd="4dp"
+                android:padding="10dp"
                 android:gravity="center_vertical"
-                android:background="@drawable/led_time_background">
+                android:background="@drawable/led_dark_bg_rounded">
                 <LinearLayout
+                    android:id="@+id/mode_switch"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:paddingStart="5dp"
-                    android:paddingEnd="6dp"
-                    android:paddingTop="7dp"
-                    android:paddingBottom="7dp"
-                    android:orientation="vertical">
+                    android:orientation="vertical"
+                    android:padding="4dp"
+                    android:background="@drawable/led_dot_matrix_dark_red_bg">
+                    <TextView
+                        android:id="@+id/mode_tips"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="切换模式"
+                        android:layout_gravity="center_horizontal"
+                        android:textColor="#00FF00"/>
                     <LinearLayout
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:orientation="vertical"
-                        android:padding="4dp"
-                        android:background="@drawable/led_dot_matrix_dark_red_bg">
-                        <LinearLayout
+                        android:gravity="center_vertical">
+                        <TextView
+                            android:id="@+id/network_status_indicator"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:gravity="center_vertical"
-                            android:layout_marginBottom="2dp">
-                            <TextView
-                                android:id="@+id/network_status_indicator"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="●"
-                                android:textColor="#00FF00"
-                                android:textSize="10sp" />
-                            <TextView
-                                android:id="@+id/network_mode_text"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:layout_marginStart="4dp"
-                                android:textColor="#FF0000"
-                                android:textSize="14sp"
-                                android:text="网络"/>
-
-                            <TextView
-                                android:id="@+id/refresh_time"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:paddingStart="5dp"
-                                android:paddingEnd="5dp"
-                                android:text="00:00:00"
-                                android:textColor="#FF0000"
-                                android:textSize="16sp" />
-                        </LinearLayout>
-                        <LinearLayout
-                            android:layout_width="match_parent"
+                            android:text="●"
+                            android:textColor="#00FF00"
+                            android:textSize="10sp" />
+                        <TextView
+                            android:id="@+id/mode_text"
+                            android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:orientation="vertical">
-                            <LinearLayout
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:gravity="center_vertical">
-                                <TextView
-                                    android:id="@+id/gps_status_indicator"
-                                    android:layout_width="wrap_content"
-                                    android:layout_height="wrap_content"
-                                    android:text="●"
-                                    android:textColor="#555555"
-                                    android:textSize="10sp" />
-                                <TextView
-                                    android:id="@+id/gps_mode_text"
-                                    android:layout_width="wrap_content"
-                                    android:layout_height="wrap_content"
-                                    android:layout_marginStart="4dp"
-                                    android:textColor="#555555"
-                                    android:textSize="15sp"
-                                    android:layout_marginEnd="3dp"
-                                    android:text="GPS"/>
-
-                                <TextView
-                                    android:id="@+id/gps_count"
-                                    android:layout_width="match_parent"
-                                    android:layout_height="wrap_content"
-                                    android:paddingStart="5dp"
-                                    android:paddingEnd="5dp"
-                                    android:text="-- / --"
-                                    android:textColor="#555555"
-                                    android:textSize="16sp"
-                                    android:singleLine="true" />
-                            </LinearLayout>
-                        </LinearLayout>
+                            android:layout_marginStart="4dp"
+                            android:padding="2dp"
+                            android:textColor="#FF0000"
+                            android:textSize="14sp"
+                            android:clickable="true"
+                            android:focusable="true"
+                            android:text="网络"/>
+                        <TextView
+                            android:id="@+id/refresh_time"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:paddingStart="5dp"
+                            android:paddingEnd="5dp"
+                            android:text="--"
+                            android:textColor="#FF0000"
+                            android:textSize="14sp" />
                     </LinearLayout>
-
                 </LinearLayout>
             </LinearLayout>
-
-
         </LinearLayout>
         <!-- 时刻信息 -->
         <LinearLayout

@@ -14,7 +14,10 @@ import android.os.Looper;
 import android.util.AttributeSet;
 import android.util.SparseArray;
 import android.view.MotionEvent;
+import android.view.VelocityTracker;
 import android.view.View;
+import android.view.ViewConfiguration;
+import android.widget.Scroller;
 import android.view.animation.LinearInterpolator;
 
 import java.util.Arrays;
@@ -71,6 +74,13 @@ public class IBusCloudLineView extends View {
     private float scrollOffset = 0f;
     private float lastTouchX = 0f;
     private boolean isDragging = false;
+
+    // ⭐ Fling 惯性滚动相关
+    private Scroller mScroller;
+    private VelocityTracker mVelocityTracker;
+    private int mMinimumVelocity;
+    private int mMaximumVelocity;
+    private ValueAnimator mGpsScrollAnimator;
 
     // 交互
     private OnStationClickListener listener;
@@ -244,6 +254,12 @@ public class IBusCloudLineView extends View {
             busRedIconBitmap = null;
         }
         setLayerType(LAYER_TYPE_HARDWARE, null);  // 启用硬件加速
+
+        // ⭐ 初始化 Fling 工具
+        mScroller = new Scroller(getContext());
+        ViewConfiguration config = ViewConfiguration.get(getContext());
+        mMinimumVelocity = config.getScaledMinimumFlingVelocity();
+        mMaximumVelocity = config.getScaledMaximumFlingVelocity();
     }
 
     // --- 数据设置方法 ---
@@ -255,6 +271,12 @@ public class IBusCloudLineView extends View {
     }
 
     public void updateBusPositions(List<BusApiClient.BusPosition> positions) {
+        // ⭐ GPS 模式不显示网络模式的车辆（防止 runOnUiThread post 后模式已切换的 race）
+        if (isGpsMode) {
+            resetAllStations();
+            invalidate();
+            return;
+        }
         if (stations == null || positions == null || positions.isEmpty()) {
             resetAllStations();
             invalidate();
@@ -316,6 +338,12 @@ public class IBusCloudLineView extends View {
         if (isGpsMode) {
             resetAllStations();
             selectedPosition = -1;
+            // ⭐ 切到 GPS 模式时，如果有 GPS 位置，滚动到 view 中心
+            post(() -> {
+                if (isGpsMode && gpsPositionIndex >= 0) {
+                    scrollToGpsPosition(gpsPositionIndex);
+                }
+            });
         } else {
             gpsPositionIndex = -1;
             isGpsArriving = false;
@@ -329,7 +357,12 @@ public class IBusCloudLineView extends View {
         if (isArriving && gpsArrivalListener != null && position >= 0) {
             gpsArrivalListener.onGpsArrival(position);
         }
-        invalidate();
+        // ⭐ GPS 模式：让车辆位置自动滚动到 view 中心
+        if (isGpsMode && position >= 0) {
+            scrollToGpsPosition(position);
+        } else {
+            invalidate();
+        }
     }
 
     public void clearGpsPosition() {
@@ -388,12 +421,25 @@ public class IBusCloudLineView extends View {
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
+        // ⭐ 初始化 VelocityTracker
+        if (mVelocityTracker == null) {
+            mVelocityTracker = VelocityTracker.obtain();
+        }
+        mVelocityTracker.addMovement(event);
+
         switch (event.getAction()) {
             case MotionEvent.ACTION_DOWN:
                 touchDownX = event.getX();
                 touchDownY = event.getY();
                 lastTouchX = event.getX();
                 isDragging = false;
+                // ⭐ 按下时立即停止 fling 和自动滚动
+                if (mScroller != null && !mScroller.isFinished()) {
+                    mScroller.forceFinished(true);
+                }
+                if (mGpsScrollAnimator != null && mGpsScrollAnimator.isRunning()) {
+                    mGpsScrollAnimator.cancel();
+                }
                 return true;
 
             case MotionEvent.ACTION_MOVE:
@@ -403,12 +449,9 @@ public class IBusCloudLineView extends View {
                     scrollOffset -= deltaX;
                     lastTouchX = event.getX();
 
+                    int maxScroll = getMaxScroll();
                     if (scrollOffset < 0) {
                         scrollOffset = 0;
-                    }
-                    float maxScroll = getContentWidth() - getWidth();
-                    if (maxScroll < 0) {
-                        maxScroll = 0;
                     }
                     if (scrollOffset > maxScroll) {
                         scrollOffset = maxScroll;
@@ -419,10 +462,32 @@ public class IBusCloudLineView extends View {
 
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL:
+                // ⭐ fling 惯性滚动：手指抬起时根据速度继续滚动并自然减速
                 if (isDragging) {
                     isDragging = false;
-                    return true;
+
+                    mVelocityTracker.computeCurrentVelocity(1000, mMaximumVelocity);
+                    float xVelocity = mVelocityTracker.getXVelocity();
+                    int maxScroll = getMaxScroll();
+
+                    if (Math.abs(xVelocity) > mMinimumVelocity) {
+                        // 手指向右滑 → velocity > 0 → scrollOffset 应继续减小
+                        // 手指向左滑 → velocity < 0 → scrollOffset 应继续增大
+                        mScroller.fling(
+                                (int) scrollOffset, 0,
+                                (int) -xVelocity, 0,
+                                0, maxScroll,
+                                0, 0);
+                        postInvalidateOnAnimation();
+                    }
                 }
+
+                if (mVelocityTracker != null) {
+                    mVelocityTracker.recycle();
+                    mVelocityTracker = null;
+                }
+
+                // ⭐ 触摸抬手后，处理点击（如果没拖动）
                 float x = event.getX();
                 float y = event.getY();
                 float moveDistance = (float) Math.sqrt(Math.pow(x - touchDownX, 2) + Math.pow(y - touchDownY, 2));
@@ -443,6 +508,71 @@ public class IBusCloudLineView extends View {
                 return true;
         }
         return super.onTouchEvent(event);
+    }
+
+    // ⭐ fling 持续滚动：每一帧从 Scroller 读出当前应该的 scrollOffset
+    @Override
+    public void computeScroll() {
+        if (mScroller != null && mScroller.computeScrollOffset()) {
+            int currX = mScroller.getCurrX();
+            int maxScroll = getMaxScroll();
+            // 边界裁剪（Scroller.fling 内部也会夹，但这里保险）
+            if (currX < 0) {
+                mScroller.forceFinished(true);
+                currX = 0;
+            } else if (currX > maxScroll) {
+                mScroller.forceFinished(true);
+                currX = maxScroll;
+            }
+            scrollOffset = currX;
+            invalidate();
+        }
+    }
+
+    // ⭐ 取得最大可滚动距离
+    private int getMaxScroll() {
+        int max = (int) (getContentWidth() - getWidth());
+        return Math.max(0, max);
+    }
+
+    // ⭐ GPS 模式：让 position 站点滚动到 view 中心
+    private void scrollToGpsPosition(int position) {
+        if (!isGpsMode || position < 0) return;
+        if (stations == null || position >= stations.size()) return;
+        if (getWidth() <= 0) return;
+
+        float stationX = getStartX() + position * STATION_SPACING;
+        float viewCenterX = getWidth() / 2f;
+        float targetScroll = stationX - viewCenterX;
+
+        int maxScroll = getMaxScroll();
+        if (targetScroll < 0) targetScroll = 0;
+        if (targetScroll > maxScroll) targetScroll = maxScroll;
+
+        // ⭐ 取消可能正在运行的 fling 和动画，避免冲突
+        if (mScroller != null && !mScroller.isFinished()) {
+            mScroller.forceFinished(true);
+        }
+        if (mGpsScrollAnimator != null && mGpsScrollAnimator.isRunning()) {
+            mGpsScrollAnimator.cancel();
+        }
+
+        // 如果距离很小，直接设值
+        if (Math.abs(targetScroll - scrollOffset) < 1f) {
+            scrollOffset = targetScroll;
+            invalidate();
+            return;
+        }
+
+        // ⭐ 用 ValueAnimator 平滑滚动到目标位置
+        mGpsScrollAnimator = ValueAnimator.ofFloat(scrollOffset, targetScroll);
+        mGpsScrollAnimator.setDuration(350);
+        mGpsScrollAnimator.setInterpolator(new android.view.animation.DecelerateInterpolator());
+        mGpsScrollAnimator.addUpdateListener(animation -> {
+            scrollOffset = (float) animation.getAnimatedValue();
+            invalidate();
+        });
+        mGpsScrollAnimator.start();
     }
 
     // --- 测量 ---

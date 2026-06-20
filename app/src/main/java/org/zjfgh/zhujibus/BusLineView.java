@@ -118,6 +118,12 @@ public class BusLineView extends View {
     }
 
     public void updateBusPositions(List<BusApiClient.BusPosition> positions) {
+        // ⭐ GPS 模式不显示网络模式的车辆（防止 runOnUiThread post 后模式已切换的 race）
+        if (isGpsMode) {
+            resetAllStations();
+            invalidate();
+            return;
+        }
         if (stations == null || positions == null || positions.isEmpty()) {
             resetAllStations();
             invalidate();
@@ -569,7 +575,7 @@ public class BusLineView extends View {
     }
 
     private void drawBusIcon(Canvas canvas, float x, float y, BusApiClient.BusLineStation station) {
-        if (station.status == null && !isGpsMode) {
+        if (station.status == null) {
             return;
         }
 
@@ -592,6 +598,12 @@ public class BusLineView extends View {
         if (isGpsArrivingStation) {
             iconY = y - iconSize / 2;
             drawGpsBus(canvas, x, iconY, iconSize, true);
+            return;
+        }
+
+        // ⭐ GPS 模式：除了上面两个 GPS 车辆外，不画网络模式的 API 车辆
+        // 防止 processResponse 改写 station.status = CURRENT 后被错误绘制
+        if (isGpsMode) {
             return;
         }
 
