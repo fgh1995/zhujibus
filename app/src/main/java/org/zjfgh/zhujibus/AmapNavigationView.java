@@ -1,6 +1,8 @@
 package org.zjfgh.zhujibus;
 
 import android.content.Context;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.location.Location;
 import android.util.Log;
 
@@ -15,14 +17,24 @@ import com.amap.api.maps.LocationSource;
 import com.amap.api.maps.MapsInitializer;
 import com.amap.api.maps.TextureMapView;
 import com.amap.api.maps.UiSettings;
+import com.amap.api.maps.model.BitmapDescriptor;
+import com.amap.api.maps.model.BitmapDescriptorFactory;
 import com.amap.api.maps.model.CameraPosition;
 import com.amap.api.maps.model.LatLng;
 import com.amap.api.maps.model.LatLngBounds;
+import com.amap.api.maps.model.Marker;
 import com.amap.api.maps.model.MyLocationStyle;
 import com.amap.api.maps.model.Polyline;
 import com.amap.api.maps.model.PolylineOptions;
+import com.amap.api.maps.utils.overlay.SmoothMoveMarker;
 
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * 高德地图 3D 导航管理器（高德地图 SDK + 高德定位 SDK）
@@ -62,10 +74,31 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener 
     // 速度阈值：> 1.5 m/s (≈ 5.4 km/h) 用运动方向，≤ 1.5 m/s 用设备方向
     // 调低阈值的考虑：公交车在市区走走停停，速度经常在 5-15 km/h 区间
     private static final float SPEED_THRESHOLD_MPS = 1.5f;
-    // 标记：是否已应用首次导航视角（首次收到定位时强制应用一次）
+    // ⭐ 标记：是否已应用首次导航视角（首次收到定位时强制应用一次）
     private boolean perspectiveAppliedOnFirstFix = false;
     // ⭐ 标记：当前是否为 GPS 模式（GPS 模式才应用 3D 导航视角，网络模式保持自由视角）
     private boolean isGpsMode = false;
+
+    // ---- 公交车辆 marker 管理（仅网络模式） ----
+    /** 当前线路方向的所有公交车辆 SmoothMoveMarker（车牌 → marker） */
+    private final Map<String, SmoothMoveMarker> busMarkers = new HashMap<>();
+    /** 记录每个车辆上一帧位置（用于决定从哪开始平滑移动） */
+    private final Map<String, LatLng> lastBusPos = new HashMap<>();
+    /** 记录每个车辆上一帧的时间戳（ms，用于算出 SmoothMoveMarker 的时长） */
+    private final Map<String, Long> lastBusUpdateMs = new HashMap<>();
+    /**
+     * 记录每个车辆上一次计算出的实际速度（m/s）
+     * <p>
+     * 计算时机：第 N 次更新时，用 prev(N-1) → cur(N) 的距离除以时间。
+     * 使用时机：第 N+1 次更新时，用此速度算动画时长 = dist(N → N+1) / speed。
+     * 首次出现时无值 → 退回 {@link #DEFAULT_SPEED_MPS}。
+     */
+    private final Map<String, Double> lastBusSpeedMps = new HashMap<>();
+    private BitmapDescriptor busIconDescriptor;
+    private boolean busIconLoaded = false;
+
+    // ---- 路线点（用于车辆 marker 的 snap-to-road 平滑动画） ----
+    private List<LatLng> routePoints = new ArrayList<>();
 
     /**
      * 罗盘模式下的目标相机参数（贴地 + 3D 透视）
@@ -442,6 +475,8 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener 
             routePolyline.remove();
             routePolyline = null;
         }
+        // ⭐ 保存路线点副本，供后续车辆 marker 的 snap-to-road 使用
+        this.routePoints = new ArrayList<>(points);
         PolylineOptions polylineOptions = new PolylineOptions()
                 .addAll(points)
                 .width(15f)
@@ -524,6 +559,8 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener 
 
         try {
             if (gps) {
+                // GPS 模式：先清掉所有公交车辆 marker（用户自己就是其中一辆）
+                clearBusMarkers();
                 // GPS 模式：罗盘 + 3D 视角
                 setCompassMode(true);
                 perspectiveAppliedOnFirstFix = false; // 让首次定位时重新应用一次
@@ -597,6 +634,394 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener 
         aMap.animateCamera(CameraUpdateFactory.newLatLngZoom(new LatLng(gcjLat, gcjLon), zoom));
     }
 
+    // ========== 公交车辆 marker（仅网络模式生效） ==========
+
+    /** 公交车辆 marker 目标显示尺寸（dp） */
+    private static final int BUS_MARKER_SIZE_DP = 24;
+    /** 角度常量：图标"车头"位于图标右侧，因此高德 setRotateAngle 需要偏移 90° */
+    private static final float HEAD_BEARING_OFFSET = 90f;
+    /** 首次出现时使用的默认速度：30 km/h */
+    private static final double DEFAULT_SPEED_MPS = 30.0 / 3.6;  // ≈ 8.333 m/s
+    /** 动画时长下限（秒）：防止距离极小时动画瞬间结束 */
+    private static final int MIN_ANIM_SECONDS = 1;
+    /** 动画时长上限（秒）：防止低速时动画无限长 */
+    private static final int MAX_ANIM_SECONDS = 30;
+    /** 实际速度下限（m/s）：停车时用这个值，≈ 1.8 km/h */
+    private static final double MIN_REAL_SPEED_MPS = 0.5;
+    /** 实际速度上限（m/s）：≈ 180 km/h，超出认为 GPS 异常 */
+    private static final double MAX_REAL_SPEED_MPS = 50.0;
+
+    /**
+     * 加载公交车辆 icon（icon_map_bus.png）
+     * <p>
+     * 关键点：
+     *  - 用 inScaled=false + inDensity 强制读原始像素，避免被系统按 density 缩放
+     *  - 按原图长宽比缩放到目标尺寸上限，避免变形
+     *  - 强制 ARGB_8888 + 双线性过滤，避免边缘锯齿
+     */
+    private void loadBusIcon() {
+        if (busIconLoaded) return;
+        try {
+            BitmapFactory.Options opts = new BitmapFactory.Options();
+            opts.inScaled = false;             // 禁止系统按 density 自动缩放
+            opts.inPreferredConfig = Bitmap.Config.ARGB_8888;
+            opts.inDensity = 0;                // 关闭 density 桶
+            opts.inTargetDensity = 1;
+            opts.inScreenDensity = 1;
+            Bitmap raw = BitmapFactory.decodeResource(
+                    appContext.getResources(), R.drawable.icon_map_bus, opts);
+            if (raw == null) {
+                Log.e(TAG, "[BUS] loadBusIcon: decodeResource returned null");
+                return;
+            }
+
+            int origW = raw.getWidth();
+            int origH = raw.getHeight();
+            Log.d(TAG, "[BUS] icon original size: " + origW + "x" + origH);
+
+            float density = appContext.getResources().getDisplayMetrics().density;
+            int targetMaxPx = Math.round(BUS_MARKER_SIZE_DP * density);
+            // 等比缩放到 targetMaxPx 长边（不画正方形画布，避免短边被裁）
+            Bitmap scaled = scaleBitmapKeepAspect(raw, targetMaxPx);
+            if (scaled != raw) raw.recycle();
+            busIconDescriptor = BitmapDescriptorFactory.fromBitmap(scaled);
+            busIconLoaded = true;
+            Log.d(TAG, "[BUS] loadBusIcon ok, final size=" + scaled.getWidth() + "x" + scaled.getHeight()
+                    + "px (target=" + targetMaxPx + "px, density=" + density + ")");
+        } catch (Throwable t) {
+            Log.e(TAG, "[BUS] loadBusIcon failed: " + t.getMessage(), t);
+        }
+    }
+
+    /**
+     * 按原图比例等比缩放，长边 = maxPx
+     * <p>
+     * 关键点：不画正方形画布、不加透明 padding。AMap marker 会用位图的实际尺寸显示，
+     * 保持原图长宽比，避免原图被"裁掉"短边部分。
+     */
+    private static Bitmap scaleBitmapKeepAspect(Bitmap raw, int maxPx) {
+        int origW = raw.getWidth();
+        int origH = raw.getHeight();
+        if (origW <= 0 || origH <= 0) return raw;
+        if (origW == maxPx && origH == maxPx) return raw;
+        // 长边等比缩放到 maxPx，短边按比例
+        float scale = (float) maxPx / Math.max(origW, origH);
+        int scaledW = Math.max(1, Math.round(origW * scale));
+        int scaledH = Math.max(1, Math.round(origH * scale));
+        return Bitmap.createScaledBitmap(raw, scaledW, scaledH, true);
+    }
+
+    /**
+     * 在地图上绘制当前方向的所有公交车辆实时位置。
+     * <p>
+     * 使用官方 {@link SmoothMoveMarker} 做平滑移动：
+     *  - GPS 模式不绘制，保留用户自身位置
+     *  - 新车首次出现：直接 setPosition 放置（避免从屏幕外飞入），无动画
+     *  - 已存在车辆：
+     *      1) 将坐标吸附到最近路线线段（snap-to-road）→ 走"路线"而不是直线
+     *      2) 动画时长 = 距离 / 速度，速度来源：
+     *         - 上一帧已算出实际速度（dist(prev→cur) / elapsedTime）→ 用它
+     *         - 否则（首次/刚出现的车）→ 用默认 30 km/h
+     *      3) setPoints([prev, snapped]) + setTotalDuration(秒) + startSmoothMove()
+     *         → 用官方插值器沿路线段平滑移动
+     *      4) 通过 getMarker().setRotateAngle() 持续设置旋转，车头沿路线段方向
+     *  - 已离场车辆自动 destroy
+     */
+    public void updateBusMarkers(List<BusApiClient.BusPosition> positions) {
+        if (aMap == null) return;
+
+        if (isGpsMode) {
+            clearBusMarkers();
+            return;
+        }
+
+        loadBusIcon();
+        if (busIconDescriptor == null) {
+            Log.w(TAG, "[BUS] updateBusMarkers skipped: icon not loaded");
+            return;
+        }
+
+        if (positions == null || positions.isEmpty()) {
+            clearBusMarkers();
+            return;
+        }
+
+        long nowMs = System.currentTimeMillis();
+        Set<String> currentPlates = new HashSet<>();
+        for (BusApiClient.BusPosition pos : positions) {
+            if (pos == null) continue;
+            String plate = pos.plateNumber;
+            if (plate == null || plate.isEmpty()) continue;
+            if (pos.lat == 0.0 && pos.lng == 0.0) continue;
+            if (pos.lat < 3.0 || pos.lat > 54.0 || pos.lng < 73.0 || pos.lng > 135.0) continue;
+
+            currentPlates.add(plate);
+
+            // 1) snap-to-road，得到吸附点和最近段方向
+            LatLng rawPos = new LatLng(pos.lat, pos.lng);
+            Object[] snap = snapToRouteAndSegmentBearing(rawPos);
+            LatLng snappedPos = (LatLng) snap[0];
+            float segBearingDeg = (Float) snap[1];
+
+            // 2) 计算最终旋转角（段方向 vs 运动方向，偏差>90°翻转）
+            LatLng prevPos = lastBusPos.get(plate);
+            float finalBearing = segBearingDeg;
+            if (prevPos != null) {
+                double distMeters = computeDistanceMeters(prevPos, snappedPos);
+                if (distMeters >= 1.0) {
+                    float moveBearingDeg = computeBearing(prevPos, snappedPos);
+                    float diff = moveBearingDeg - segBearingDeg;
+                    while (diff < -180f) diff += 360f;
+                    while (diff > 180f) diff -= 360f;
+                    if (Math.abs(diff) > 90f) {
+                        finalBearing = segBearingDeg + 180f;
+                    }
+                }
+            }
+            float rotateDeg = normalizeAngle(finalBearing - HEAD_BEARING_OFFSET);
+
+            // 3) 取出（或创建）SmoothMoveMarker
+            SmoothMoveMarker smm = busMarkers.get(plate);
+            if (smm == null) {
+                // 首次出现：直接放置，不动画（避免从屏幕外飞入）
+                try {
+                    smm = new SmoothMoveMarker(aMap);
+                    smm.setDescriptor(busIconDescriptor);
+                    smm.setPosition(snappedPos);
+                    setSmmTitle(smm, plate, pos.isArrived);
+                    busMarkers.put(plate, smm);
+                    applyRotateToSmm(smm, rotateDeg);
+                } catch (Throwable t) {
+                    Log.e(TAG, "[BUS] create SmoothMoveMarker failed for " + plate + ": " + t.getMessage());
+                }
+                if (smm != null) {
+                    lastBusPos.put(plate, snappedPos);
+                    lastBusUpdateMs.put(plate, nowMs);
+                }
+                continue;
+            }
+
+            // 已存在：用 setMoveListener 实时刷新旋转角
+            attachRotationListener(smm, plate);
+
+            // 4) 计算动画时长
+            //   速度来源：
+            //     - 上一帧已算出实际速度 → 用它（dist / speed）
+            //     - 否则 → 用默认 30 km/h
+            //   首次出现已在前面 continue，这里 prevPos 一定不为 null
+            Long lastMs = lastBusUpdateMs.get(plate);
+            double speedMps;
+            Double savedSpeed = lastBusSpeedMps.get(plate);
+            if (savedSpeed != null && savedSpeed > 0) {
+                speedMps = savedSpeed;
+            } else {
+                speedMps = DEFAULT_SPEED_MPS;
+            }
+            double distMeters = computeDistanceMeters(prevPos, snappedPos);
+            int durationSec;
+            if (distMeters < 1.0) {
+                // 几乎没动：1 秒跳到目标即可
+                durationSec = 1;
+            } else {
+                durationSec = (int) Math.round(distMeters / speedMps);
+                if (durationSec < MIN_ANIM_SECONDS) durationSec = MIN_ANIM_SECONDS;
+                if (durationSec > MAX_ANIM_SECONDS) durationSec = MAX_ANIM_SECONDS;
+            }
+
+            // 5) 计算这一帧的实际速度（用于下次动画）
+            //   用「当前帧到上一帧」的距离除以时间，得到这辆车的真实速度
+            if (lastMs != null) {
+                long elapsedMs = nowMs - lastMs;
+                if (elapsedMs > 0) {
+                    double actualSpeedMps = distMeters / (elapsedMs / 1000.0);
+                    // 限制到合理范围，过滤 GPS 异常值
+                    if (actualSpeedMps < MIN_REAL_SPEED_MPS) actualSpeedMps = MIN_REAL_SPEED_MPS;
+                    if (actualSpeedMps > MAX_REAL_SPEED_MPS) actualSpeedMps = MAX_REAL_SPEED_MPS;
+                    lastBusSpeedMps.put(plate, actualSpeedMps);
+                }
+            }
+
+            // 6) 构造轨迹
+            List<LatLng> traj = new ArrayList<>(2);
+            traj.add(prevPos);
+            traj.add(snappedPos);
+            try {
+                smm.setPoints(traj);
+                smm.setTotalDuration(durationSec);
+                smm.startSmoothMove();
+            } catch (Throwable t) {
+                Log.w(TAG, "[BUS] startSmoothMove failed for " + plate + ": " + t.getMessage());
+            }
+            setSmmTitle(smm, plate, pos.isArrived);
+            lastBusPos.put(plate, snappedPos);
+            lastBusUpdateMs.put(plate, nowMs);
+        }
+
+        // 移除已离场车辆
+        Iterator<Map.Entry<String, SmoothMoveMarker>> it = busMarkers.entrySet().iterator();
+        while (it.hasNext()) {
+            Map.Entry<String, SmoothMoveMarker> e = it.next();
+            if (!currentPlates.contains(e.getKey())) {
+                try {
+                    e.getValue().destroy();
+                } catch (Throwable t) { /* ignore */ }
+                it.remove();
+                lastBusPos.remove(e.getKey());
+                lastBusUpdateMs.remove(e.getKey());
+                lastBusSpeedMps.remove(e.getKey());
+            }
+        }
+    }
+
+    /** 给 SmoothMoveMarker 设置 title（info window 用） */
+    private void setSmmTitle(SmoothMoveMarker smm, String plate, boolean isArrived) {
+        try {
+            Marker m = smm.getMarker();
+            if (m != null) {
+                m.setTitle(isArrived ? "公交 " + plate + "（已到站）" : "公交 " + plate);
+            }
+        } catch (Throwable ignore) {}
+    }
+
+    /** 给 SmoothMoveMarker 底层 Marker 设旋转角 */
+    private void applyRotateToSmm(SmoothMoveMarker smm, float rotateDeg) {
+        try {
+            Marker m = smm.getMarker();
+            if (m != null) m.setRotateAngle(rotateDeg);
+        } catch (Throwable ignore) {}
+    }
+
+    /**
+     * 给 SmoothMoveMarker 装上移动回调，在动画过程中持续按当前实际位置刷新旋转角，
+     * 这样即使车在弯道段（段方向不断变化），车头也能跟得上。
+     */
+    private void attachRotationListener(final SmoothMoveMarker smm, final String plate) {
+        try {
+            smm.setMoveListener(new SmoothMoveMarker.MoveListener() {
+                @Override
+                public void move(final double distance) {
+                    if (aMap == null) return;
+                    try {
+                        LatLng cur = smm.getPosition();
+                        if (cur == null) return;
+                        Object[] snap = snapToRouteAndSegmentBearing(cur);
+                        LatLng snappedCur = (LatLng) snap[0];
+                        float segBearingDeg = (Float) snap[1];
+                        LatLng prevPos = lastBusPos.get(plate);
+                        float finalBearing = segBearingDeg;
+                        if (prevPos != null) {
+                            float moveBearingDeg = computeBearing(prevPos, snappedCur);
+                            float diff = moveBearingDeg - segBearingDeg;
+                            while (diff < -180f) diff += 360f;
+                            while (diff > 180f) diff -= 360f;
+                            if (Math.abs(diff) > 90f) finalBearing = segBearingDeg + 180f;
+                        }
+                        float rotateDeg = normalizeAngle(finalBearing - HEAD_BEARING_OFFSET);
+                        Marker m = smm.getMarker();
+                        if (m != null) m.setRotateAngle(rotateDeg);
+                    } catch (Throwable ignore) {}
+                }
+            });
+        } catch (Throwable t) {
+            Log.w(TAG, "[BUS] setMoveListener failed for " + plate);
+        }
+    }
+
+    /**
+     * 清空地图上所有公交车辆 marker，并清空辅助状态
+     */
+    public void clearBusMarkers() {
+        for (SmoothMoveMarker smm : busMarkers.values()) {
+            if (smm != null) {
+                try { smm.destroy(); } catch (Throwable t) { /* ignore */ }
+            }
+        }
+        busMarkers.clear();
+        lastBusPos.clear();
+        lastBusUpdateMs.clear();
+        lastBusSpeedMps.clear();
+    }
+
+    // ---- 几何工具 ----
+
+    /**
+     * 将坐标吸附到最近路线线段上，返回【吸附后的坐标】和【最近线段的方向角】
+     * <p>
+     * 返回值是一个长度为 2 的数组：index 0 = 吸附点，index 1 = 最近段的方向角（度）。
+     * 路线未绘制（&lt;2 个点）时返回 [原坐标, 0]。
+     */
+    private Object[] snapToRouteAndSegmentBearing(LatLng pos) {
+        if (routePoints == null || routePoints.size() < 2) {
+            return new Object[]{pos, 0f};
+        }
+        LatLng best = pos;
+        double minDist = Double.MAX_VALUE;
+        int bestIdx = 0;
+        for (int i = 0; i < routePoints.size() - 1; i++) {
+            LatLng p1 = routePoints.get(i);
+            LatLng p2 = routePoints.get(i + 1);
+            LatLng projection = projectOntoSegment(pos, p1, p2);
+            double d = computeDistanceMeters(pos, projection);
+            if (d < minDist) {
+                minDist = d;
+                best = projection;
+                bestIdx = i;
+            }
+        }
+        // 用最近段的方向作为 marker 旋转依据
+        LatLng segP1 = routePoints.get(bestIdx);
+        LatLng segP2 = routePoints.get(bestIdx + 1);
+        float segBearing = computeBearing(segP1, segP2);
+        return new Object[]{best, segBearing};
+    }
+
+    /**
+     * 将点 p 投影到线段 a→b 上，结果限制在 a、b 之间
+     */
+    private static LatLng projectOntoSegment(LatLng p, LatLng a, LatLng b) {
+        double ax = a.longitude, ay = a.latitude;
+        double bx = b.longitude, by = b.latitude;
+        double px = p.longitude, py = p.latitude;
+        double abx = bx - ax, aby = by - ay;
+        double abLen2 = abx * abx + aby * aby;
+        if (abLen2 < 1e-12) return new LatLng(ay, ax);
+        double t = ((px - ax) * abx + (py - ay) * aby) / abLen2;
+        if (t < 0) t = 0;
+        else if (t > 1) t = 1;
+        return new LatLng(ay + aby * t, ax + abx * t);
+    }
+
+    /**
+     * 两坐标之间的距离（米）
+     */
+    private static double computeDistanceMeters(LatLng a, LatLng b) {
+        float[] results = new float[1];
+        Location.distanceBetween(a.latitude, a.longitude, b.latitude, b.longitude, results);
+        return results[0];
+    }
+
+    /**
+     * 计算 a→b 的方位角（0=北，90=东，180=南，270=西）
+     */
+    private static float computeBearing(LatLng a, LatLng b) {
+        double lat1 = Math.toRadians(a.latitude);
+        double lat2 = Math.toRadians(b.latitude);
+        double dLon = Math.toRadians(b.longitude - a.longitude);
+        double y = Math.sin(dLon) * Math.cos(lat2);
+        double x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+        double brng = Math.toDegrees(Math.atan2(y, x));
+        return (float) ((brng + 360.0) % 360.0);
+    }
+
+    /**
+     * 把角度规整到 [0, 360) 区间
+     */
+    private static float normalizeAngle(float deg) {
+        float r = deg % 360f;
+        if (r < 0) r += 360f;
+        return r;
+    }
+
     // ========== 生命周期 ==========
 
     public void onResume() {
@@ -637,7 +1062,15 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener 
         // 1. 停止定位（最优先：避免 onLocationChanged 继续回调）
         stopAmapLocation();
 
-        // 2. 销毁 locationClient（这部分在高德 SDK 中是安全的，无 GL 线程依赖）
+        // 2. 销毁公交车辆 marker 与 icon 资源
+        clearBusMarkers();
+        if (busIconDescriptor != null) {
+            try { busIconDescriptor.recycle(); } catch (Throwable t) { /* ignore */ }
+            busIconDescriptor = null;
+        }
+        busIconLoaded = false;
+
+        // 3. 销毁 locationClient（这部分在高德 SDK 中是安全的，无 GL 线程依赖）
         if (locationClient != null) {
             try {
                 locationClient.onDestroy();
@@ -646,7 +1079,7 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener 
             }
         }
 
-        // 3. 切断所有引用，防止延迟回调踩到销毁中的对象
+        // 4. 切断所有引用，防止延迟回调踩到销毁中的对象
         aMap = null;
         uiSettings = null;
         locationListener = null;

@@ -331,6 +331,12 @@ public class NavigationMainFragment extends Fragment {
 
         this.stations = directionData.stationList;
 
+        // 0. 切换方向时，先清空旧方向的所有车辆 marker
+        //    （避免上一方向的车辆残留在新方向地图上）
+        if (navigation != null) {
+            navigation.clearBusMarkers();
+        }
+
         // 1. 更新 IBusCloudLineView
         if (iBusCloudLineView != null) {
             iBusCloudLineView.setStations(stations);
@@ -379,6 +385,11 @@ public class NavigationMainFragment extends Fragment {
     public void updateBusPositions(List<BusApiClient.BusPosition> positions) {
         if (iBusCloudLineView != null) {
             iBusCloudLineView.updateBusPositions(positions);
+        }
+
+        // 在地图上绘制所有车辆 marker（仅网络模式生效，GPS 模式内部会清空）
+        if (navigation != null) {
+            navigation.updateBusMarkers(positions);
         }
 
         // 自动更新下一站
