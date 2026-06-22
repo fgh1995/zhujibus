@@ -209,7 +209,8 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             return displayName;
         }
     }
-    private CoordConvertMode currentCoordConvertMode = CoordConvertMode.WGS_TO_GCJ;
+    // 高德定位SDK返回GCJ-02坐标，无需转换
+    private CoordConvertMode currentCoordConvertMode = CoordConvertMode.NO_CONVERT;
 
     private static final int TIPS_INTERVAL = 3000;
     private static final String[] TIPS_TEXT_BASE = {"文明排队   上下有序", "严禁携带危险物品上车"};
