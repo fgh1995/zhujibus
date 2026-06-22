@@ -61,6 +61,12 @@ public class NavigationMainFragment extends Fragment {
     private Runnable navigationTimeRunnable;
     private Typeface digitalTypeface;
 
+    // ---- 速度平滑处理（EWMA + 变化率限制） ----
+    private static final float EWMA_ALPHA = 0.3f;       // EWMA 权重：新值权重 0.3，旧值权重 0.7
+    private static final float MAX_SPEED_CHANGE = 5f;   // 最大速度变化率（km/h/帧），防止跳变
+    private float smoothedSpeed = 0f;                   // EWMA 平滑后的速度
+    private boolean speedInitialized = false;           // 是否已初始化速度
+
     // ---- 数据 ----
     private List<BusApiClient.BusLineStation> stations;
     private boolean isGpsMode = false;
@@ -223,6 +229,12 @@ public class NavigationMainFragment extends Fragment {
                         textureMapView.getViewTreeObserver().removeOnGlobalLayoutListener(this);
                         try {
                             navigation = new AmapNavigationView(requireContext(), textureMapView);
+                            // 设置速度回调，网络模式下显示车辆移动速度
+                            navigation.setSpeedChangeListener(speedKmh -> {
+                                if (!isGpsMode) {
+                                    updateSpeed(speedKmh);
+                                }
+                            });
                             Log.d(TAG, "onGlobalLayout -> start onCreate (w=" +
                                     textureMapView.getWidth() + ", h=" + textureMapView.getHeight() + ")");
                             navigation.onCreate(finalSavedState);
@@ -253,6 +265,8 @@ public class NavigationMainFragment extends Fragment {
                 iBusCloudLineView.clearGpsPosition();
             }
         }
+        // 切换模式时重置速度窗口
+        resetSpeed();
     }
 
     public void setSwapOrientation(View.OnClickListener listener) {
@@ -275,13 +289,46 @@ public class NavigationMainFragment extends Fragment {
 
     public void updateSpeed(float speedKmh) {
         if (gpsSpeedText != null) {
-            gpsSpeedText.setText(String.format(Locale.CHINA, "%.0f", speedKmh));
+            // speedKmh < 0 表示无有效速度，显示 "--"
+            if (speedKmh < 0) {
+                gpsSpeedText.setText("--");
+                return;
+            }
+
+            // EWMA 平滑处理
+            if (!speedInitialized) {
+                // 首次初始化，直接使用当前速度
+                smoothedSpeed = speedKmh;
+                speedInitialized = true;
+            } else {
+                // EWMA: smoothedSpeed = alpha * newSpeed + (1 - alpha) * oldSpeed
+                float ewmaSpeed = EWMA_ALPHA * speedKmh + (1 - EWMA_ALPHA) * smoothedSpeed;
+
+                // 变化率限制：防止速度跳变太快
+                float speedChange = ewmaSpeed - smoothedSpeed;
+                if (Math.abs(speedChange) > MAX_SPEED_CHANGE) {
+                    // 限制变化幅度
+                    if (speedChange > 0) {
+                        ewmaSpeed = smoothedSpeed + MAX_SPEED_CHANGE;
+                    } else {
+                        ewmaSpeed = smoothedSpeed - MAX_SPEED_CHANGE;
+                    }
+                }
+
+                smoothedSpeed = ewmaSpeed;
+            }
+
+            // 显示平滑后的速度
+            gpsSpeedText.setText(String.format(Locale.CHINA, "%.0f", smoothedSpeed));
         }
     }
 
     public void resetSpeed() {
         if (gpsSpeedText != null) {
-            gpsSpeedText.setText("0");
+            gpsSpeedText.setText("--");
+            // 重置 EWMA 状态
+            smoothedSpeed = 0f;
+            speedInitialized = false;
         }
     }
 

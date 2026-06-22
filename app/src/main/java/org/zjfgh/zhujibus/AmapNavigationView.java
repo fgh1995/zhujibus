@@ -59,6 +59,19 @@ import java.util.Set;
 public class AmapNavigationView implements LocationSource, AMapLocationListener {
     private static final String TAG = "AmapNavigationView";
 
+    /**
+     * 速度变化回调接口（用于网络模式下显示车辆移动速度）
+     */
+    public interface OnSpeedChangeListener {
+        void onSpeedChanged(float speedKmh);
+    }
+
+    private OnSpeedChangeListener speedChangeListener;
+
+    public void setSpeedChangeListener(OnSpeedChangeListener listener) {
+        this.speedChangeListener = listener;
+    }
+
     private final Context appContext;
     private TextureMapView mapView;
     private AMap aMap;
@@ -101,6 +114,18 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener 
     private final Map<String, LatLng> lastBusPos = new HashMap<>();
     /** 记录每个车辆上一帧的时间戳（ms，用于算出 SmoothMoveMarker 的时长） */
     private final Map<String, Long> lastBusUpdateMs = new HashMap<>();
+    /** 记录每个车辆上一次有效移动的位置（用于速度计算，忽略静止时间） */
+    private final Map<String, LatLng> lastMovingPos = new HashMap<>();
+    /** 记录每个车辆上一次有效移动的时间戳（ms，用于速度计算） */
+    private final Map<String, Long> lastMovingTimeMs = new HashMap<>();
+    /** 记录每个车辆最近一次静止结束的时间（用于计算实际移动时间） */
+    private final Map<String, Long> lastStationaryEndMs = new HashMap<>();
+    /** 静止检测阈值：距离变化小于此值视为静止（米） */
+    private static final double STATIONARY_THRESHOLD_M = 5.0;
+    /** 目标站点位置（用于计算最近车辆的速度） */
+    private LatLng targetStationPos = null;
+    /** 目标站点索引（用于找到最近车辆，和 eta 逻辑一致） */
+    private int targetStationIndex = -1;
     private BitmapDescriptor busIconDescriptor;
     private boolean busIconLoaded = false;
 
@@ -700,13 +725,14 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener 
             float rotateAngle = (360f - angle) % 360f;
 
             // ⭐ 注意：高德 9.x 是 setFlat / setRotateAngle（不是 flat / setRotation）
+            // zIndex 层级：线段(0) < 箭头(0.5) < 车辆(1)，确保箭头在线段上方但不在车辆上方
             Marker marker = aMap.addMarker(new MarkerOptions()
                     .position(new LatLng(lat, lng))
                     .icon(arrowMarkerIcon)
                     .anchor(0.5f, 0.5f)
                     .setFlat(true)                              // 贴地显示
                     .setInfoWindowOffset(0, 0)
-                    .zIndex(1f));
+                    .zIndex(0.5f));                             // 箭头层级：线段上方，车辆下方
             if (marker != null) {
                 marker.setRotateAngle(rotateAngle);            // 9.x 用 setRotateAngle
             }
@@ -845,6 +871,22 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener 
     }
 
     /**
+     * 设置目标站点位置（用于网络模式下计算最近车辆的速度）
+     * @param lat 站点纬度
+     * @param lng 站点经度
+     * @param stationIndex 站点索引（用于找到最近车辆，和 eta 逻辑一致）
+     */
+    public void setTargetStation(double lat, double lng, int stationIndex) {
+        this.targetStationPos = new LatLng(lat, lng);
+        this.targetStationIndex = stationIndex;
+    }
+
+    public void clearTargetStation() {
+        this.targetStationPos = null;
+        this.targetStationIndex = -1;
+    }
+
+    /**
      * 最近一次 AMapLocation 定位成功的时间戳（毫秒），0 表示从未成功过。
      * 给 GPS 信号指示器（{@link SignalIndicatorManager}）使用。
      */
@@ -920,6 +962,8 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener 
     private static final int MAX_ANIM_DURATION_SEC = 30;
     /** 距离 < 此值（米）时直接 setPosition，不开动画 */
     private static final double MIN_MOVE_DISTANCE_M = 1.0;
+    /** 距离 > 此值（米）时视为大跳变，直接瞬移到新位置，避免慢吞吞移动 */
+    private static final double TELEPORT_THRESHOLD_M = 200.0;
 
     /**
      * 加载公交车辆 icon（icon_map_bus.png）
@@ -1017,6 +1061,7 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener 
         }
 
         long nowMs = System.currentTimeMillis();
+
         Set<String> currentPlates = new HashSet<>();
         for (BusApiClient.BusPosition pos : positions) {
             if (pos == null) continue;
@@ -1059,6 +1104,11 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener 
                     smm.setDescriptor(busIconDescriptor);
                     smm.setPosition(snappedPos);
                     setSmmTitle(smm, plate, pos.isArrived);
+                    // 设置车辆 marker zIndex 为 1，确保在箭头(0.5)上方
+                    Marker busMarker = smm.getMarker();
+                    if (busMarker != null) {
+                        busMarker.setZIndex(1f);
+                    }
                     busMarkers.put(plate, smm);
                     applyRotateToSmm(smm, rotateDeg);
                 } catch (Throwable t) {
@@ -1083,10 +1133,37 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener 
             if (animatedPos == null) animatedPos = prevPos;
 
             // 5) 固定速度策略：duration = distance / SPEED
-            //    大跳变被 MAX_ANIM_DURATION_SEC 截断；距离 < 1m 直接 setPosition。
+            //    大跳变：固定动画时长（3-6秒），速度 = 距离 / 时长
             double distMeters = computeDistanceMeters(animatedPos, snappedPos);
             if (distMeters < MIN_MOVE_DISTANCE_M) {
                 try { smm.setPosition(snappedPos); } catch (Throwable ignore) {}
+            } else if (distMeters > TELEPORT_THRESHOLD_M) {
+                // 大跳变：固定动画时长，按距离计算速度
+                // 距离越大，时长越长（但最多6秒）
+                int durationSec;
+                if (distMeters <= 500) {
+                    durationSec = 3;
+                } else if (distMeters <= 1000) {
+                    durationSec = 4;
+                } else if (distMeters <= 2000) {
+                    durationSec = 5;
+                } else {
+                    durationSec = 6;
+                }
+                double fastSpeed = distMeters / durationSec;
+
+                List<LatLng> traj = new ArrayList<>(2);
+                traj.add(animatedPos);
+                traj.add(snappedPos);
+
+                Log.d(TAG, "[BUS] " + plate + " fast move: " + String.format("%.1f", distMeters) + "m in " + durationSec + "s (speed=" + String.format("%.1f", fastSpeed) + "m/s)");
+                try {
+                    smm.setPoints(traj);
+                    smm.setTotalDuration(durationSec);
+                    smm.startSmoothMove();
+                } catch (Throwable t) {
+                    Log.w(TAG, "[BUS] startSmoothMove failed for " + plate + ": " + t.getMessage());
+                }
             } else {
                 int durationSec = (int) Math.round(distMeters / BUS_VISUAL_SPEED_MPS);
                 if (durationSec < MIN_ANIM_DURATION_SEC) durationSec = MIN_ANIM_DURATION_SEC;
@@ -1122,6 +1199,84 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener 
                 it.remove();
                 lastBusPos.remove(e.getKey());
                 lastBusUpdateMs.remove(e.getKey());
+            }
+        }
+
+        // 网络模式下计算车辆移动速度并通知回调
+        if (!isGpsMode && speedChangeListener != null && !busMarkers.isEmpty()) {
+            // 使用有效移动时间计算速度（忽略静止时间）
+            // 参考 eta 逻辑：找到 vehicleStationIndex < targetStationIndex 的车辆中，
+            // vehicleStationIndex 最大（最接近目标站点）的那辆
+            int nearestVehicleStationIndex = -1;
+            String nearestVehiclePlate = null;
+            float nearestVehicleSpeed = 0f;
+
+            for (BusApiClient.BusPosition pos : positions) {
+                if (pos == null || pos.plateNumber == null) continue;
+                String plate = pos.plateNumber;
+                int vehicleStationIndex = pos.currentStationOrder - 1;
+                LatLng currentPos = new LatLng(pos.lat, pos.lng);
+
+                // 只考虑已经过了目标站点之前站点的车辆（vehicleStationIndex < targetStationIndex）
+                if (targetStationIndex >= 0 && vehicleStationIndex < targetStationIndex) {
+                    // 找到 vehicleStationIndex 最大的（最接近目标站点的）
+                    if (vehicleStationIndex > nearestVehicleStationIndex) {
+                        nearestVehicleStationIndex = vehicleStationIndex;
+                        nearestVehiclePlate = plate;
+
+                        // 计算这辆车的速度（忽略静止时间）
+                        LatLng lastPos = lastMovingPos.get(plate);
+                        Long lastTime = lastMovingTimeMs.get(plate);
+                        Long stationaryEnd = lastStationaryEndMs.get(plate);
+
+                        // 初始化：首次出现
+                        if (lastPos == null) {
+                            lastMovingPos.put(plate, currentPos);
+                            lastMovingTimeMs.put(plate, nowMs);
+                            lastStationaryEndMs.put(plate, nowMs);
+                            nearestVehicleSpeed = 0f;
+                            continue;
+                        }
+
+                        // 计算距离变化
+                        double distM = computeDistanceMeters(lastPos, currentPos);
+
+                        if (distM > STATIONARY_THRESHOLD_M) {
+                            // 车辆移动了：使用静止结束时间到现在的实际移动时间
+                            long movingTimeMs = nowMs - (stationaryEnd != null ? stationaryEnd : lastTime);
+                            if (movingTimeMs > 0 && movingTimeMs < 120000) { // 移动时间在合理范围内（<2分钟）
+                                double speedMps = distM / (movingTimeMs / 1000.0);
+                                nearestVehicleSpeed = (float) (speedMps * 3.6);
+                            }
+
+                            // 更新移动记录
+                            lastMovingPos.put(plate, currentPos);
+                            lastMovingTimeMs.put(plate, nowMs);
+                            lastStationaryEndMs.put(plate, nowMs);
+                        } else {
+                            // 车辆静止：只更新静止结束时间，不更新移动记录
+                            lastStationaryEndMs.put(plate, nowMs);
+                            nearestVehicleSpeed = 0f;
+                        }
+                    }
+                }
+            }
+
+            // 只有设置了目标站点且找到最近车辆时才通知速度
+            // 否则通知 -1 表示无有效速度（显示 "--"）
+            if (targetStationIndex >= 0 && nearestVehiclePlate != null) {
+                if (nearestVehicleSpeed > 0) {
+                    Log.d(TAG, "[BUS] speed update: " + String.format("%.1f", nearestVehicleSpeed) +
+                            " km/h (nearest to target: " + nearestVehiclePlate +
+                            ", station: " + nearestVehicleStationIndex + ")");
+                    speedChangeListener.onSpeedChanged(nearestVehicleSpeed);
+                } else {
+                    // 最近车辆静止或没有有效速度数据
+                    speedChangeListener.onSpeedChanged(-1f); // 显示 "--"
+                }
+            } else {
+                // 没有设置目标站点，或目标站点附近没有车辆
+                speedChangeListener.onSpeedChanged(-1f); // 显示 "--"
             }
         }
     }

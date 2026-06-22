@@ -391,6 +391,10 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             // ⭐ GPS 模式：开启地图罗盘模式（3D 贴地视角）
             if (navigationMainFragment != null) {
                 navigationMainFragment.setGpsMode(true);
+                // GPS 模式下清除目标站点位置
+                if (navigationMainFragment.getNavigation() != null) {
+                    navigationMainFragment.getNavigation().clearTargetStation();
+                }
             }
         } else {
             GpsWarmingUp.removeListener(gpsActivityListener);
@@ -2372,6 +2376,17 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 }
                 int selectedStationIndex = busLineView != null ? busLineView.getSelectedPosition() : -1;
                 if (selectedStationIndex != -1) {
+                    // 设置目标站点位置（用于网络模式下计算最近车辆的速度）
+                    List<BusApiClient.BusLineStation> stations = realTimeManager.getStationList();
+                    if (stations != null && selectedStationIndex < stations.size()) {
+                        BusApiClient.BusLineStation station = stations.get(selectedStationIndex);
+                        if (station.poiOriginLat != 0 && station.poiOriginLon != 0) {
+                            if (navigationMainFragment != null && navigationMainFragment.getNavigation() != null) {
+                                navigationMainFragment.getNavigation().setTargetStation(station.poiOriginLat, station.poiOriginLon, selectedStationIndex);
+                            }
+                        }
+                    }
+
                     if (trackedVehiclePlate == null) {
                         for (BusApiClient.BusPosition vehicle : positions) {
                             int vehicleStationIndex = vehicle.currentStationOrder - 1;
