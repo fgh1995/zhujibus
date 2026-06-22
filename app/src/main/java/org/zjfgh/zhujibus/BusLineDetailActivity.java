@@ -50,6 +50,8 @@ import java.util.Locale;
 
 import android.graphics.Color;
 
+import org.zjfgh.zhujibus.view.DotMatrixLinearLayout;
+
 import io.sgr.geometry.utils.GeometryUtils;
 
 public class BusLineDetailActivity extends AppCompatActivity implements BusRealTimeManager.RealTimeUpdateListener {
@@ -111,11 +113,10 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     // ⭐ updateNavigationTime() 已迁移到 NavigationMainFragment，
     //   fragment 内部使用独立 Handler 每秒刷新，不需要 Activity 干预。
 
-    TextView refreshTime;
     TextView errorIndicator;
     TextView networkModeText;
     TextView modeTips;
-    LinearLayout modeSwitch;
+    DotMatrixLinearLayout modeSwitch;
     TextView networkStatusIndicator;
     private ValueAnimator errorBlinkAnimator;
     private ValueAnimator gpsBlinkAnimator;
@@ -134,7 +135,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private Runnable refreshCountdownRunnable;
     /** 当前倒计时剩余秒数（0 = 未启动 / 已结束） */
     private int refreshCountdownSec = 0;
-    /** 最近一次刷新是否失败（true → refreshTime 显示"刷新失败"） */
+    /** 最近一次刷新是否失败（true → networkModeText 显示"检查网络"） */
     private boolean networkRefreshFailed = false;
 
     public enum AnnounceMode {
@@ -445,16 +446,12 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private void updateAnnounceModeDisplay() {
         if (currentAnnounceMode == AnnounceMode.GPS) {
             // GPS 模式：模式文字标"GPS"（红色高亮），状态灯变绿
-            if (networkModeText != null) {
-                networkModeText.setText("GPS");
-                networkModeText.setTextColor(0xFFFF0000);
-            }
-            // GPS 模式：refreshTime 显示卫星数（缓存值）
+            // GPS 模式：显示卫星数（缓存值）
             int used = GpsWarmingUp.getSatelliteCount();
             int total = GpsWarmingUp.getTotalSatelliteCount();
-            if (refreshTime != null) {
-                refreshTime.setText(used + "/" + total);
-                refreshTime.setTextColor(0xFF00FF00);
+            if (networkModeText != null) {
+                networkModeText.setText("GPS " + used + "/" + total);
+                networkModeText.setTextColor(0xFFFF0000);
             }
             // GPS 模式默认认为信号正常（GPS 未启动时 updateNetworkStatusIndicator 会置灰）
             isGpsSignalNormal = true;
@@ -469,10 +466,6 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 networkModeText.setTextColor(0xFFFF0000);
             }
             isGpsSignalNormal = false;
-            // 网络模式：refreshTime 交给倒计时控制
-            if (refreshTime != null) {
-                refreshTime.setTextColor(0xFFFF0000);
-            }
             updateNetworkStatusIndicator(false);
             if (navigationMainFragment != null) {
                 navigationMainFragment.setGpsMode(false);
@@ -481,7 +474,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     }
 
     private void startGpsTimeUpdate() {
-        // GPS 模式下 refreshTime 由 satelliteCountListener 实时驱动，不再需要每秒 tick
+        // GPS 模式下 networkModeText 由 satelliteCountListener 实时驱动，不再需要每秒 tick
         stopGpsTimeUpdate();
     }
 
@@ -510,9 +503,9 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
 
     private final GpsWarmingUp.SatelliteCountListener satelliteCountListener = (usedCount, totalCount) -> {
         runOnUiThread(() -> {
-            // GPS 模式：refreshTime 显示卫星数；网络模式：refreshTime 已被倒计时控制，无需操作
-            if (currentAnnounceMode == AnnounceMode.GPS && refreshTime != null) {
-                refreshTime.setText(usedCount + "/" + totalCount);
+            // GPS 模式：显示卫星数
+            if (currentAnnounceMode == AnnounceMode.GPS && networkModeText != null) {
+                networkModeText.setText("GPS " + usedCount + "/" + totalCount);
             }
         });
     };
@@ -1253,9 +1246,8 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         routeNumber.setText(lineName);
         routeNumber.setTextColor(0xFF00FF00);
         routeNumber.setGravity(0);
-        routeNumber.setScrollSpeed(220f);
-        Typeface dottedSongti = Typeface.createFromAsset(getAssets(), "fonts/DottedSongtiSquareRegular.otf");
-        Typeface digitalTypeface = Typeface.createFromAsset(getAssets(), "fonts/DS-DIGIB-2.ttf");
+        routeNumber.setScrollSpeed(180f);
+        Typeface dottedSongti = Typeface.createFromAsset(getAssets(), "fonts/ZiTiGuanJiaBoDian-2.ttf");
         routeNumber.setTypeface(dottedSongti);
         int maxWidth = (int) (120 * getResources().getDisplayMetrics().density);
         int textWidth = (int) routeNumber.getTextWidth();
@@ -1286,8 +1278,6 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         nextStationInfo.setScrollSpeed(180f);
         accessibilityIcon = findViewById(R.id.accessibility_icon);
         accessibilityIcon.setVisibility(View.GONE);
-        refreshTime = findViewById(R.id.refresh_time);
-        refreshTime.setTypeface(digitalTypeface);
         updateTicketPrice();
         // ⭐ 初始化导航模块：旧版在 Activity 内 findViewById，
         // 现已迁移到 NavigationMainFragment，由 FragmentManager 加载并通过公开 API 交互。
@@ -1327,22 +1317,11 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         };
         modeSwitch.setOnClickListener(modeSwitchListener);
         updateAnnounceModeDisplay();
-        // gps_count 已合并到 refresh_time，不再单独查找
-        digitalTypeface = Typeface.createFromAsset(getAssets(), "fonts/DS-DIGIB-2.ttf");
-        if (refreshTime != null) {
-            refreshTime.setTypeface(digitalTypeface);
-        }
         modeTips.setTypeface(dottedSongti);
         networkModeText.setTypeface(dottedSongti);
         // ⭐ gpsSpeedText 已迁移到 NavigationMainFragment，字体设置在 fragment.onViewCreated() 中完成
 
         startErrorBlinkAnimation();
-
-        // 创建格式化器，指定格式为 00:00:00
-        SimpleDateFormat formatter = new SimpleDateFormat("HH:mm:ss", Locale.getDefault());
-        // 获取当前时间
-        Date currentDate = new Date();
-        refreshTime.setText(formatter.format(currentDate));
     }
 
     private void setupListeners() {
@@ -2420,11 +2399,6 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         });
     }
 
-    private void updateRefreshTimeDisplay() {
-        SimpleDateFormat formatter = new SimpleDateFormat("HH:mm:ss", Locale.getDefault());
-        refreshTime.setText(formatter.format(new Date()));
-    }
-
     // ============================================================
     //  网络模式刷新倒计时
     //  - 进入网络模式时启动，从 NETWORK_REFRESH_COUNTDOWN_SEC 倒数到 0
@@ -2454,13 +2428,13 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         scheduleNextCountdownTick();
     }
 
-    /** 刷新失败 → 立即显示"刷新失败"，冻结倒计时 */
+    /** 刷新失败 → 显示"失败"，但继续倒计时刷新 */
     private void markNetworkRefreshFailed() {
         networkRefreshFailed = true;
-        stopNetworkRefreshCountdownTick();
-        if (refreshTime != null) {
-            refreshTime.setText("失败");
-        }
+        // 不停止倒计时，继续每10秒刷新
+        refreshCountdownSec = NETWORK_REFRESH_COUNTDOWN_SEC;
+        renderRefreshCountdownText();
+        scheduleNextCountdownTick();
     }
 
     /** 停掉定时器（切到 GPS 模式 / Activity 退出时用） */
@@ -2482,12 +2456,11 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             refreshCountdownRunnable = new Runnable() {
                 @Override
                 public void run() {
-                    if (networkRefreshFailed) return; // 失败态不再递减
                     refreshCountdownSec--;
                     if (refreshCountdownSec <= 0) {
                         // 倒数到 0 → 主动触发刷新，统一刷新节奏
-                        if (refreshTime != null) {
-                            refreshTime.setText("--");
+                        if (networkModeText != null) {
+                            networkModeText.setText("网络 --");
                         }
                         if (realTimeManager != null) {
                             realTimeManager.refreshNow();
@@ -2505,11 +2478,11 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     }
 
     private void renderRefreshCountdownText() {
-        if (refreshTime == null) return;
+        if (networkModeText == null) return;
         if (networkRefreshFailed) {
-            refreshTime.setText("刷新失败");
+            networkModeText.setText("失败 " + String.format(Locale.getDefault(), "%d", refreshCountdownSec));
         } else {
-            refreshTime.setText(String.format(Locale.getDefault(), "%d", refreshCountdownSec));
+            networkModeText.setText("网络 " + String.format(Locale.getDefault(), "%d", refreshCountdownSec));
         }
     }
 
@@ -2557,7 +2530,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
 
     @SuppressLint("SetTextI18n")
     private void checkAndAnnounceArrival(List<BusApiClient.BusPosition> positions, int selectedStationIndex) {
-        // refreshTime 已在 onBusPositionsUpdated 顶部重置为 10 秒倒计时，这里不再覆盖
+        // networkModeText 已在 onBusPositionsUpdated 顶部重置为 10 秒倒计时，这里不再覆盖
         BusApiClient.BusPosition nearestVehicle = null;
         for (BusApiClient.BusPosition vehicle : positions) {
             if (selectedStationIndex >= vehicle.currentStationOrder) {
@@ -2690,7 +2663,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             lastErrorMessage = userMessage;
             lastErrorDetail = detailMessage;
             showErrorIndicator();
-            // 刷新失败 → refreshTime 显示"刷新失败"（GPS 模式不动）
+            // 刷新失败 → networkModeText 显示"检查网络"（GPS 模式不动）
             if (currentAnnounceMode == AnnounceMode.NETWORK) {
                 markNetworkRefreshFailed();
             }
@@ -2816,9 +2789,9 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         if (currentAnnounceMode == AnnounceMode.GPS) {
             GpsWarmingUp.addListener(gpsActivityListener);
             GpsWarmingUp.addSatelliteListener(satelliteCountListener);
-            // GPS 模式：refreshTime 显示缓存的卫星数
-            if (refreshTime != null) {
-                refreshTime.setText(GpsWarmingUp.getSatelliteCount() + "/" + GpsWarmingUp.getTotalSatelliteCount());
+            // GPS 模式：显示缓存的卫星数
+            if (networkModeText != null) {
+                networkModeText.setText("GPS " + GpsWarmingUp.getSatelliteCount() + "/" + GpsWarmingUp.getTotalSatelliteCount());
             }
         }
     }

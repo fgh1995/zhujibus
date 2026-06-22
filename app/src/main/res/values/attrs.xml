@@ -66,4 +66,12 @@
         </attr>
         <attr name="vsTurnPauseDuration" format="integer" />
     </declare-styleable>
+    <declare-styleable name="DotMatrixLinearLayout">
+        <attr name="dmlDotRadius" format="dimension" />
+        <attr name="dmlDotSpacing" format="dimension" />
+        <attr name="dmlDotColor" format="color" />
+        <attr name="dmlBgColor" format="color" />
+        <attr name="dmlOffsetX" format="dimension" />
+        <attr name="dmlOffsetY" format="dimension" />
+    </declare-styleable>
 </resources>

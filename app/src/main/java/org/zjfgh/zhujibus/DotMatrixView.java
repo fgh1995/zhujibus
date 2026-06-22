@@ -285,7 +285,12 @@ public class DotMatrixView extends View {
 
         float singleDotWidth = viewWidth / cols;
         float singleDotHeight = viewHeight / rows;
-        float dotDrawSize = Math.min(singleDotWidth, singleDotHeight) - 1;
+
+        // 圆点大小比例，0.9 表示圆点占单元格的90%，数值越大圆点越大
+        // 最大不能超过1，否则圆点会重叠
+        float dotScale = 1f;
+        float dotDrawSize = Math.min(singleDotWidth, singleDotHeight) * dotScale;
+        float radius = dotDrawSize / 2;
 
         float offsetX = (viewWidth - cols * singleDotWidth) / 2;
         float offsetY = (viewHeight - rows * singleDotHeight) / 2;
@@ -293,9 +298,9 @@ public class DotMatrixView extends View {
         for (int row = 0; row < rows; row++) {
             for (int col = 0; col < cols; col++) {
                 if (pattern[row][col] == 1) {
-                    float left = offsetX + col * singleDotWidth;
-                    float top = offsetY + row * singleDotHeight;
-                    canvas.drawRect(left, top, left + dotDrawSize, top + dotDrawSize, paint);
+                    float centerX = offsetX + col * singleDotWidth + singleDotWidth / 2;
+                    float centerY = offsetY + row * singleDotHeight + singleDotHeight / 2;
+                    canvas.drawCircle(centerX, centerY, radius, paint);
                 }
             }
         }
@@ -325,7 +330,10 @@ public class DotMatrixView extends View {
 
         float singleDotWidth = viewWidth / cols;
         float singleDotHeight = viewHeight / rows;
-        float dotDrawSize = Math.min(singleDotWidth, singleDotHeight) - 1;
+
+        float dotScale = 0.92f;
+        float dotDrawSize = Math.min(singleDotWidth, singleDotHeight) * dotScale;
+        float radius = dotDrawSize / 2;
 
         float offsetX = (viewWidth - cols * singleDotWidth) / 2;
         float offsetY = (viewHeight - rows * singleDotHeight) / 2;
@@ -333,9 +341,9 @@ public class DotMatrixView extends View {
         for (int row = 0; row < rows; row++) {
             for (int col = 0; col < cols; col++) {
                 if (pattern[row][col] == 1) {
-                    float left = offsetX + col * singleDotWidth;
-                    float top = offsetY + row * singleDotHeight;
-                    canvas.drawRect(left, top, left + dotDrawSize, top + dotDrawSize, paint);
+                    float centerX = offsetX + col * singleDotWidth + singleDotWidth / 2;
+                    float centerY = offsetY + row * singleDotHeight + singleDotHeight / 2;
+                    canvas.drawCircle(centerX, centerY, radius, paint);
                 }
             }
         }

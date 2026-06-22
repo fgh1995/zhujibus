@@ -51,20 +51,21 @@
             android:padding="10dp"
             android:orientation="vertical"
             android:layout_marginBottom="10dp">
-            <LinearLayout
+            <org.zjfgh.zhujibus.view.DotMatrixLinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:padding="4dp"
-                android:background="@drawable/led_dot_matrix_dark_red_bg">
+                app:dmlDotColor="#3D1515"
+                app:dmlBgColor="#090303"
+                android:padding="4dp">
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:gravity="center_vertical">
                     <org.zjfgh.zhujibus.DotMatrixView
                         android:id="@+id/accessibility_icon"
-                        android:layout_width="36dp"
-                        android:layout_height="36dp"
+                        android:layout_width="42dp"
+                        android:layout_height="42dp"
                         app:dotMatrixPattern="accessibility"
                         app:dotMatrixColor="#FFFFFF"
                         android:layout_marginRight="10dp"/>
@@ -80,8 +81,8 @@
                         app:hsTextGap="20dp"
                         android:layout_marginRight="10dp"/>
                     <org.zjfgh.zhujibus.DotMatrixView
-                        android:layout_width="36dp"
-                        android:layout_height="36dp"
+                        android:layout_width="42dp"
+                        android:layout_height="42dp"
                         app:dotMatrixPattern="right_arrow"
                         app:dotMatrixColor="#FF0000"/>
                     <org.zjfgh.zhujibus.HorizontalScrollTextView
@@ -107,7 +108,7 @@
                         android:textColor="#FFFF00"
                         android:text="文明排队   上下有序"/>
                 </LinearLayout>
-            </LinearLayout>
+            </org.zjfgh.zhujibus.view.DotMatrixLinearLayout>
 
         </LinearLayout>
         <LinearLayout
@@ -124,17 +125,22 @@
                 android:gravity="center_vertical"
                 android:orientation="vertical"
                 android:padding="10dp">
-
-                <org.zjfgh.zhujibus.HorizontalScrollTextView
-                    android:background="@drawable/led_dot_matrix_dark_red_bg"
-                    android:id="@+id/next_station_info"
-                    android:layout_width="wrap_content"
+                <org.zjfgh.zhujibus.view.DotMatrixLinearLayout
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:padding="4dp"
-                    app:hsGravity="center"
-                    app:hsTextColor="#FF0000"
-                    app:hsTextGap="90dp"
-                    app:hsTextSize="30sp" />
+                    android:orientation="vertical"
+                    app:dmlDotColor="#3D1515"
+                    app:dmlBgColor="#090303">
+                    <org.zjfgh.zhujibus.HorizontalScrollTextView
+                        android:id="@+id/next_station_info"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        app:hsGravity="center"
+                        app:hsTextColor="#FF0000"
+                        app:hsTextGap="90dp"
+                        app:hsTextSize="30sp" />
+                </org.zjfgh.zhujibus.view.DotMatrixLinearLayout>
+
             </LinearLayout>
             <LinearLayout
                 android:layout_width="wrap_content"
@@ -143,13 +149,14 @@
                 android:padding="10dp"
                 android:gravity="center_vertical"
                 android:background="@drawable/led_dark_bg_rounded">
-                <LinearLayout
+                <org.zjfgh.zhujibus.view.DotMatrixLinearLayout
                     android:id="@+id/mode_switch"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
-                    android:padding="4dp"
-                    android:background="@drawable/led_dot_matrix_dark_red_bg">
+                    android:padding="2dp"
+                    app:dmlDotColor="#3D1515"
+                    app:dmlBgColor="#090303">
                     <TextView
                         android:id="@+id/mode_tips"
                         android:layout_width="wrap_content"
@@ -176,20 +183,9 @@
                             android:padding="2dp"
                             android:textColor="#FF0000"
                             android:textSize="14sp"
-                            android:clickable="true"
-                            android:focusable="true"
                             android:text="网络"/>
-                        <TextView
-                            android:id="@+id/refresh_time"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:paddingStart="5dp"
-                            android:paddingEnd="5dp"
-                            android:text="--"
-                            android:textColor="#FF0000"
-                            android:textSize="14sp" />
                     </LinearLayout>
-                </LinearLayout>
+                </org.zjfgh.zhujibus.view.DotMatrixLinearLayout>
             </LinearLayout>
         </LinearLayout>
         <!-- 时刻信息 -->
@@ -205,6 +201,7 @@
         <include
             android:id="@+id/navigation_section"
             layout="@layout/activity_navigation"
+            android:layout_marginTop="2dp"
             android:layout_width="match_parent"
             android:layout_height="280dp" />
 
