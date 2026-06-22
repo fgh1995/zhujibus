@@ -16,6 +16,7 @@ import com.amap.api.location.AMapLocationListener;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * GPS 定位管理类（使用高德定位SDK）
@@ -46,8 +47,9 @@ public class GpsWarmingUp {
     private static volatile float lastSpeed = 0;
     private static volatile float lastBearing = 0;
 
-    private static final List<LocationListener> listeners = new ArrayList<>();
-    private static final List<SatelliteCountListener> satelliteListeners = new ArrayList<>();
+    // 使用线程安全的 CopyOnWriteArrayList，避免并发访问导致 NullPointerException
+    private static final List<LocationListener> listeners = new CopyOnWriteArrayList<>();
+    private static final List<SatelliteCountListener> satelliteListeners = new CopyOnWriteArrayList<>();
     private static Handler mainHandler;
 
     // 后台线程：用于处理定位数据，避免阻塞主线程
@@ -140,39 +142,44 @@ public class GpsWarmingUp {
      * 处理定位数据（在后台线程执行）
      */
     private static void processLocation(AMapLocation aMapLocation) {
-        // 构造 Android 标准 Location
-        Location location = new Location(aMapLocation.getProvider());
-        location.setLatitude(aMapLocation.getLatitude());
-        location.setLongitude(aMapLocation.getLongitude());
-        location.setAccuracy(aMapLocation.getAccuracy());
-        location.setTime(aMapLocation.getTime());
-        location.setSpeed(aMapLocation.getSpeed());
-        location.setBearing(aMapLocation.getBearing());
+        try {
+            // 构造 Android 标准 Location
+            String provider = aMapLocation.getProvider();
+            Location location = new Location(provider != null ? provider : "AMap");
+            location.setLatitude(aMapLocation.getLatitude());
+            location.setLongitude(aMapLocation.getLongitude());
+            location.setAccuracy(aMapLocation.getAccuracy());
+            location.setTime(aMapLocation.getTime());
+            location.setSpeed(aMapLocation.getSpeed());
+            location.setBearing(aMapLocation.getBearing());
 
-        // 更新缓存
-        lastKnownLocation = location;
-        lastLocationTime = System.currentTimeMillis();
-        lastAccuracy = aMapLocation.getAccuracy();
-        lastSpeed = aMapLocation.getSpeed();
-        lastBearing = aMapLocation.getBearing();
+            // 更新缓存
+            lastKnownLocation = location;
+            lastLocationTime = System.currentTimeMillis();
+            lastAccuracy = aMapLocation.getAccuracy();
+            lastSpeed = aMapLocation.getSpeed();
+            lastBearing = aMapLocation.getBearing();
 
-        // 高德定位SDK不直接提供卫星数量，模拟估算
-        // 根据定位精度和定位类型估算卫星数量
-        int estimatedSatellites = estimateSatelliteCount(aMapLocation);
-        usedSatelliteCount = estimatedSatellites;
-        totalSatelliteCount = estimatedSatellites + 2; // 估算总数略多于使用数
+            // 高德定位SDK不直接提供卫星数量，模拟估算
+            // 根据定位精度和定位类型估算卫星数量
+            int estimatedSatellites = estimateSatelliteCount(aMapLocation);
+            usedSatelliteCount = estimatedSatellites;
+            totalSatelliteCount = estimatedSatellites + 2; // 估算总数略多于使用数
 
-        Log.d(TAG, String.format("定位成功: lat=%.6f, lng=%.6f, acc=%.1fm, speed=%.1f, bearing=%.1f, satellites≈%d",
-                aMapLocation.getLatitude(),
-                aMapLocation.getLongitude(),
-                aMapLocation.getAccuracy(),
-                aMapLocation.getSpeed(),
-                aMapLocation.getBearing(),
-                estimatedSatellites));
+            Log.d(TAG, String.format("定位成功: lat=%.6f, lng=%.6f, acc=%.1fm, speed=%.1f, bearing=%.1f, satellites≈%d",
+                    aMapLocation.getLatitude(),
+                    aMapLocation.getLongitude(),
+                    aMapLocation.getAccuracy(),
+                    aMapLocation.getSpeed(),
+                    aMapLocation.getBearing(),
+                    estimatedSatellites));
 
-        // 通知监听器
-        notifyListeners(location);
-        notifySatelliteListeners(usedSatelliteCount, totalSatelliteCount);
+            // 通知监听器
+            notifyListeners(location);
+            notifySatelliteListeners(usedSatelliteCount, totalSatelliteCount);
+        } catch (Throwable t) {
+            Log.e(TAG, "processLocation error: " + t.getMessage(), t);
+        }
     }
 
     /**
@@ -250,34 +257,43 @@ public class GpsWarmingUp {
     }
 
     public static void addListener(LocationListener listener) {
-        if (!listeners.contains(listener)) {
+        if (listener != null && !listeners.contains(listener)) {
             listeners.add(listener);
         }
     }
 
     public static void removeListener(LocationListener listener) {
-        listeners.remove(listener);
+        if (listener != null) {
+            listeners.remove(listener);
+        }
     }
 
     public static void addSatelliteListener(SatelliteCountListener listener) {
-        if (!satelliteListeners.contains(listener)) {
+        if (listener != null && !satelliteListeners.contains(listener)) {
             satelliteListeners.add(listener);
         }
     }
 
     public static void removeSatelliteListener(SatelliteCountListener listener) {
-        satelliteListeners.remove(listener);
+        if (listener != null) {
+            satelliteListeners.remove(listener);
+        }
     }
 
     private static void notifySatelliteListeners(int usedCount, int totalCount) {
         for (SatelliteCountListener listener : satelliteListeners) {
-            listener.onSatelliteCountChanged(usedCount, totalCount);
+            if (listener != null) {
+                listener.onSatelliteCountChanged(usedCount, totalCount);
+            }
         }
     }
 
     private static void notifyListeners(Location location) {
+        if (location == null) return;
         for (LocationListener listener : listeners) {
-            listener.onLocationChanged(location);
+            if (listener != null) {
+                listener.onLocationChanged(location);
+            }
         }
     }
 
