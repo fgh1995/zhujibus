@@ -2,11 +2,13 @@ package org.zjfgh.zhujibus;
 
 import android.Manifest;
 import android.annotation.SuppressLint;
+import android.app.Dialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.graphics.drawable.ColorDrawable;
 import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
@@ -20,6 +22,8 @@ import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.Window;
+import android.view.WindowManager;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -30,6 +34,7 @@ import androidx.activity.EdgeToEdge;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.cardview.widget.CardView;
 import androidx.core.app.ActivityCompat;
 import androidx.recyclerview.widget.DividerItemDecoration;
 import androidx.recyclerview.widget.LinearLayoutManager;
@@ -484,51 +489,125 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * 弹出更新对话框：显示更新日志，用户点击确认后复制下载地址自行下载安装。
-     * 已不再在应用内做下载 / 安装调用，规避 Android 各厂商系统安装器兼容性差异。
+     * 弹出更新对话框：显示更新日志，提供主下载链接和备用下载链接。
+     * 使用自定义UI，美观的升级界面。
      */
     private void showUpdateDialog() {
         if (remoteConfig == null) return;
         if (isFinishing() || isDestroyed()) return;
+
+        // 创建自定义对话框
+        Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        dialog.setContentView(R.layout.dialog_update);
+        dialog.setCancelable(true);
+
+        // 设置对话框宽度
+        Window window = dialog.getWindow();
+        if (window != null) {
+            WindowManager.LayoutParams lp = window.getAttributes();
+            lp.width = WindowManager.LayoutParams.MATCH_PARENT;
+            lp.horizontalMargin = dpToPx(32);
+            window.setAttributes(lp);
+            window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+        }
+
+        // 绑定视图
+        TextView tvVersionInfo = dialog.findViewById(R.id.tv_version_info);
+        TextView tvUpdateLog = dialog.findViewById(R.id.tv_update_log);
+        CardView cardPrimaryDownload = dialog.findViewById(R.id.card_primary_download);
+        TextView tvPrimaryDownloadTitle = dialog.findViewById(R.id.tv_primary_download_title);
+        TextView tvPrimaryDownloadDesc = dialog.findViewById(R.id.tv_primary_download_desc);
+        TextView tvBackupDownloadDesc = dialog.findViewById(R.id.tv_backup_download_desc);
+        CardView cardBackupDownload = dialog.findViewById(R.id.card_backup_download);
+        TextView tvLater = dialog.findViewById(R.id.tv_later);
+
+        // 设置版本信息
         String versionInfo = "当前版本：v" + getLocalVersionName()
                 + "\n最新版本：v" + remoteConfig.remoteVersionName
                 + " (build " + remoteConfig.remoteVersionCode + ")";
+        tvVersionInfo.setText(versionInfo);
+
+        // 设置更新日志
         String log = TextUtils.isEmpty(remoteConfig.updateLog)
                 ? "（未提供更新日志）" : remoteConfig.updateLog;
-        String url = getRemoteApkUrl();
-        String speedUrl = getSpeedApkUrl();
+        tvUpdateLog.setText(log);
+
+        // 获取下载链接
+        String primaryUrl = getSpeedApkUrl();
+        String backupUrl = getRemoteApkUrl();
+
+        // 设置主下载按钮
+        if (primaryUrl != null && !primaryUrl.isEmpty()) {
+            // 有加速链接
+            tvPrimaryDownloadTitle.setText("主下载链接");
+            tvPrimaryDownloadDesc.setText("推荐使用，下载更快");
+            cardPrimaryDownload.setCardBackgroundColor(Color.parseColor("#4CAF50"));
+            cardPrimaryDownload.setOnClickListener(v -> {
+                copyUrlToClipboard(primaryUrl, "加速下载地址已复制，请在浏览器中打开下载");
+                dialog.dismiss();
+            });
+        } else {
+            // 没有加速链接，使用备用链接作为主链接
+            tvPrimaryDownloadTitle.setText("下载链接");
+            tvPrimaryDownloadDesc.setText("点击复制下载地址");
+            cardPrimaryDownload.setCardBackgroundColor(Color.parseColor("#2196F3"));
+            cardPrimaryDownload.setOnClickListener(v -> {
+                if (backupUrl != null) {
+                    copyUrlToClipboard(backupUrl, "下载地址已复制，请在浏览器中打开下载");
+                }
+                dialog.dismiss();
+            });
+        }
+
+        // 设置备用下载按钮
+        if (primaryUrl != null && !primaryUrl.isEmpty() && backupUrl != null) {
+            // 有加速链接时，显示备用链接
+            cardBackupDownload.setVisibility(View.VISIBLE);
+            tvBackupDownloadDesc.setText("公益服代理，下载较慢");
+            cardBackupDownload.setOnClickListener(v -> {
+                copyUrlToClipboard(backupUrl, "备用下载地址已复制，请在浏览器中打开下载");
+                dialog.dismiss();
+            });
+        } else {
+            // 没有加速链接时，隐藏备用按钮
+            cardBackupDownload.setVisibility(View.GONE);
+        }
+
+        // 稍后再说按钮
+        tvLater.setOnClickListener(v -> dialog.dismiss());
+
+        dialog.show();
+    }
+
+    /**
+     * dp 转 px
+     */
+    private int dpToPx(int dp) {
+        return (int) (dp * getResources().getDisplayMetrics().density);
+    }
+
+    /**
+     * 复制链接到剪贴板
+     */
+    private void copyUrlToClipboard(String url, String toastMessage) {
         if (url == null) {
-            Toast.makeText(this, "更新信息丢失，请稍后重试", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "下载地址不可用", Toast.LENGTH_SHORT).show();
             return;
         }
-
-        // 构建下载链接信息
-        StringBuilder downloadInfo = new StringBuilder();
-        downloadInfo.append("\n\n请复制下方链接到浏览器中下载，")
-                .append("下载完成后在系统文件管理器或下载列表中点击 APK 手动安装：\n\n");
-
-        // 加速下载链接（如果有，优先显示）
-        if (speedUrl != null && !speedUrl.isEmpty()) {
-            downloadInfo.append("【加速链接】（推荐，下载更快）\n").append(speedUrl).append("\n\n");
+        try {
+            ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            if (cm == null) {
+                Toast.makeText(this, "剪贴板不可用", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            ClipData clip = ClipData.newPlainText("zhujibus_apk_url", url);
+            cm.setPrimaryClip(clip);
+            Toast.makeText(this, toastMessage, Toast.LENGTH_LONG).show();
+        } catch (Exception e) {
+            Log.e(TAG, "复制下载地址失败", e);
+            Toast.makeText(this, "复制失败：" + e.getMessage(), Toast.LENGTH_LONG).show();
         }
-
-        // 原始下载链接（公益服代理）
-        downloadInfo.append("【备用链接】（公益服代理，下载较慢）\n").append(url);
-
-        new AlertDialog.Builder(this)
-                .setTitle("发现新版本")
-                .setMessage(versionInfo
-                        + "\n\n更新日志：\n" + log
-                        + downloadInfo.toString())
-                .setPositiveButton("复制加速链接", (d, w) -> copySpeedUrlToClipboard())
-                .setNeutralButton("在浏览器中打开", (d, w) -> {
-                    // 优先打开加速链接
-                    String openUrl = (speedUrl != null && !speedUrl.isEmpty()) ? speedUrl : url;
-                    openInBrowser(openUrl);
-                })
-                .setNegativeButton("稍后再说", null)
-                .setCancelable(true)
-                .show();
     }
 
     private String getLocalVersionName() {
@@ -557,57 +636,6 @@ public class MainActivity extends AppCompatActivity {
         if (TextUtils.isEmpty(remoteConfig.githubAddSpeed)) return null;
         // 使用原始 GitHub 路径拼接，避免双重代理
         return remoteConfig.githubAddSpeed + "/" + APK_DOWNLOAD_ORIGINAL + remoteConfig.remoteVersionCode + "-release.apk";
-    }
-
-    /**
-     * 把远程 APK 下载地址复制到系统剪贴板，并 Toast 提示用户
-     */
-    private void copyDownloadUrlToClipboard() {
-        String url = getRemoteApkUrl();
-        if (url == null) {
-            Toast.makeText(this, "更新信息丢失，无法复制", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        try {
-            ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
-            if (cm == null) {
-                Toast.makeText(this, "剪贴板不可用", Toast.LENGTH_SHORT).show();
-                return;
-            }
-            ClipData clip = ClipData.newPlainText("zhujibus_apk_url", url);
-            cm.setPrimaryClip(clip);
-            // Android 13+ 系统会自动显示复制提示；旧版本则通过 Toast 提示
-            Toast.makeText(this, "下载地址已复制，请在浏览器中打开下载（公益服下载较慢，请耐心等待）", Toast.LENGTH_LONG).show();
-        } catch (Exception e) {
-            Log.e(TAG, "复制下载地址失败", e);
-            Toast.makeText(this, "复制失败：" + e.getMessage(), Toast.LENGTH_LONG).show();
-        }
-    }
-
-    /**
-     * 把加速 APK 下载地址复制到系统剪贴板，并 Toast 提示用户
-     */
-    private void copySpeedUrlToClipboard() {
-        String url = getSpeedApkUrl();
-        if (url == null || url.isEmpty()) {
-            // 如果没有加速链接，复制原始链接
-            copyDownloadUrlToClipboard();
-            return;
-        }
-        try {
-            ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
-            if (cm == null) {
-                Toast.makeText(this, "剪贴板不可用", Toast.LENGTH_SHORT).show();
-                return;
-            }
-            ClipData clip = ClipData.newPlainText("zhujibus_apk_speed_url", url);
-            cm.setPrimaryClip(clip);
-            // Android 13+ 系统会自动显示复制提示；旧版本则通过 Toast 提示
-            Toast.makeText(this, "加速下载地址已复制，请在浏览器中打开下载", Toast.LENGTH_LONG).show();
-        } catch (Exception e) {
-            Log.e(TAG, "复制加速下载地址失败", e);
-            Toast.makeText(this, "复制失败：" + e.getMessage(), Toast.LENGTH_LONG).show();
-        }
     }
 
     /**
