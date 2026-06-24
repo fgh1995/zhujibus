@@ -7,6 +7,8 @@ import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.location.Location;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 
 import com.amap.api.location.AMapLocation;
@@ -77,6 +79,8 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener 
     private AMap aMap;
     private UiSettings uiSettings;
     private OnLocationChangedListener locationListener;
+    // 主线程 Handler，用于在后台线程调用时切换到主线程
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private Polyline routePolyline;
     // ⭐ 路线分层：白色光晕 + 绿色主线
     private Polyline routeGlowPolyline;
@@ -543,6 +547,12 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener 
      *                           （参考 CSDN：Marker + setRotation 显式控制方向）
      */
     public void drawRoute(List<LatLng> points) {
+        // ⭐ 必须在主线程执行，因为涉及地图 Polyline 操作
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            mainHandler.post(() -> drawRoute(points));
+            return;
+        }
+
         if (aMap == null || points == null || points.isEmpty()) {
             return;
         }
@@ -770,6 +780,7 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener 
 
     /**
      * 外部位置数据推送（备用：网络模式或自定义定位）
+     * ⭐ 此方法可能从后台线程调用，必须切换到主线程执行动画
      */
     public void updateMyLocation(double gcjLat, double gcjLon, float bearing) {
         if (aMap == null || locationListener == null) return;
@@ -779,13 +790,31 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener 
         location.setBearing(bearing);
         location.setAccuracy(5.0f);
         location.setTime(System.currentTimeMillis());
-        locationListener.onLocationChanged(location);
+
+        // ⭐ 必须在主线程调用 locationListener.onLocationChanged()，否则动画会崩溃
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            // 已经在主线程，直接调用
+            locationListener.onLocationChanged(location);
+        } else {
+            // 在后台线程，切换到主线程
+            mainHandler.post(() -> {
+                if (locationListener != null) {
+                    locationListener.onLocationChanged(location);
+                }
+            });
+        }
     }
 
     /**
      * 设置/取消罗盘模式
      */
     public void setCompassMode(boolean enabled) {
+        // ⭐ 必须在主线程执行，因为涉及地图 UI 操作
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            mainHandler.post(() -> setCompassMode(enabled));
+            return;
+        }
+
         this.isCompassMode = enabled;
         if (uiSettings != null) {
             uiSettings.setCompassEnabled(enabled);
@@ -828,6 +857,12 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener 
      * </ul>
      */
     public void setGpsMode(boolean gps) {
+        // ⭐ 必须在主线程执行，因为涉及地图操作
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            mainHandler.post(() -> setGpsMode(gps));
+            return;
+        }
+
         this.isGpsMode = gps;
         Log.d(TAG, "[NAV] setGpsMode(" + gps + ")");
 
@@ -1042,6 +1077,12 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener 
      *  - 已离场车辆自动 destroy
      */
     public void updateBusMarkers(List<BusApiClient.BusPosition> positions) {
+        // ⭐ 必须在主线程执行，因为 SmoothMoveMarker 使用动画
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            mainHandler.post(() -> updateBusMarkers(positions));
+            return;
+        }
+
         if (aMap == null) return;
 
         if (isGpsMode) {
@@ -1339,6 +1380,12 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener 
      * 清空地图上所有公交车辆 marker，并清空辅助状态
      */
     public void clearBusMarkers() {
+        // ⭐ 必须在主线程执行，因为 SmoothMoveMarker.destroy() 可能涉及动画
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            mainHandler.post(this::clearBusMarkers);
+            return;
+        }
+
         for (SmoothMoveMarker smm : busMarkers.values()) {
             if (smm != null) {
                 try { smm.destroy(); } catch (Throwable t) { /* ignore */ }
@@ -1347,6 +1394,9 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener 
         busMarkers.clear();
         lastBusPos.clear();
         lastBusUpdateMs.clear();
+        lastMovingPos.clear();
+        lastMovingTimeMs.clear();
+        lastStationaryEndMs.clear();
     }
 
     // ---- 几何工具 ----

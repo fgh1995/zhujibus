@@ -52,6 +52,10 @@ public class MainActivity extends AppCompatActivity {
     private static final String TAG = "MainActivity";
     private static final String REMOTE_CONFIG_URL =
             "https://github.360967.xyz/https://raw.githubusercontent.com/fgh1995/zhujibus/refs/heads/master/app/build.gradle";
+    // 原始 GitHub 下载路径（用于拼接加速链接）
+    private static final String APK_DOWNLOAD_ORIGINAL =
+            "https://github.com/fgh1995/zhujibus/releases/download/Release/zhujibus-";
+    // 默认代理下载路径（公益服代理）
     private static final String APK_DOWNLOAD_BASE =
             "https://github.360967.xyz/https://github.com/fgh1995/zhujibus/releases/download/Release/zhujibus-";
 
@@ -344,6 +348,7 @@ public class MainActivity extends AppCompatActivity {
         boolean hasUpdate;
         String notice = "";
         String updateLog = "";
+        String githubAddSpeed = ""; // GitHub 加速地址
 
         boolean isNewVersion(int localVersionCode) {
             return remoteVersionCode > localVersionCode;
@@ -393,6 +398,13 @@ public class MainActivity extends AppCompatActivity {
             Matcher vnMatcher = Pattern.compile("versionName\\s+\"([^\"]*)\"").matcher(gradleText);
             if (vnMatcher.find()) {
                 cfg.remoteVersionName = vnMatcher.group(1);
+            }
+
+            // 解析 githubAddSpeed 加速地址
+            // 格式：//githubAddSpeed=https://gh-proxy.com
+            Matcher speedMatcher = Pattern.compile("//githubAddSpeed\\s*=\\s*`?([^`\\n]+)`?").matcher(gradleText);
+            if (speedMatcher.find()) {
+                cfg.githubAddSpeed = speedMatcher.group(1).trim();
             }
 
             // remote={...} 注释里的 JSON（注意：示例中 ture 是笔误，宽松解析）
@@ -484,20 +496,36 @@ public class MainActivity extends AppCompatActivity {
         String log = TextUtils.isEmpty(remoteConfig.updateLog)
                 ? "（未提供更新日志）" : remoteConfig.updateLog;
         String url = getRemoteApkUrl();
+        String speedUrl = getSpeedApkUrl();
         if (url == null) {
             Toast.makeText(this, "更新信息丢失，请稍后重试", Toast.LENGTH_SHORT).show();
             return;
         }
 
+        // 构建下载链接信息
+        StringBuilder downloadInfo = new StringBuilder();
+        downloadInfo.append("\n\n请复制下方链接到浏览器中下载，")
+                .append("下载完成后在系统文件管理器或下载列表中点击 APK 手动安装：\n\n");
+
+        // 加速下载链接（如果有，优先显示）
+        if (speedUrl != null && !speedUrl.isEmpty()) {
+            downloadInfo.append("【加速链接】（推荐，下载更快）\n").append(speedUrl).append("\n\n");
+        }
+
+        // 原始下载链接（公益服代理）
+        downloadInfo.append("【备用链接】（公益服代理，下载较慢）\n").append(url);
+
         new AlertDialog.Builder(this)
                 .setTitle("发现新版本")
                 .setMessage(versionInfo
                         + "\n\n更新日志：\n" + log
-                        + "\n\n请复制下方链接到浏览器中下载，"
-                        + "下载完成后在系统文件管理器或下载列表中点击 APK 手动安装：\n\n"
-                        + url)
-                .setPositiveButton("复制下载链接", (d, w) -> copyDownloadUrlToClipboard())
-                .setNeutralButton("在浏览器中打开", (d, w) -> openInBrowser(url))
+                        + downloadInfo.toString())
+                .setPositiveButton("复制加速链接", (d, w) -> copySpeedUrlToClipboard())
+                .setNeutralButton("在浏览器中打开", (d, w) -> {
+                    // 优先打开加速链接
+                    String openUrl = (speedUrl != null && !speedUrl.isEmpty()) ? speedUrl : url;
+                    openInBrowser(openUrl);
+                })
                 .setNegativeButton("稍后再说", null)
                 .setCancelable(true)
                 .show();
@@ -512,11 +540,23 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * 拼接远程 APK 的下载地址
+     * 拼接远程 APK 的下载地址（原始链接）
      */
     private String getRemoteApkUrl() {
         if (remoteConfig == null) return null;
         return APK_DOWNLOAD_BASE + remoteConfig.remoteVersionCode + "-release.apk";
+    }
+
+    /**
+     * 拼接远程 APK 的加速下载地址
+     * 格式：githubAddSpeed + "/" + 原始 GitHub 路径 + 版本号 + "-release.apk"
+     * 例如：https://gh-proxy.com/https://github.com/fgh1995/zhujibus/releases/download/Release/zhujibus-102025-release.apk
+     */
+    private String getSpeedApkUrl() {
+        if (remoteConfig == null) return null;
+        if (TextUtils.isEmpty(remoteConfig.githubAddSpeed)) return null;
+        // 使用原始 GitHub 路径拼接，避免双重代理
+        return remoteConfig.githubAddSpeed + "/" + APK_DOWNLOAD_ORIGINAL + remoteConfig.remoteVersionCode + "-release.apk";
     }
 
     /**
@@ -540,6 +580,32 @@ public class MainActivity extends AppCompatActivity {
             Toast.makeText(this, "下载地址已复制，请在浏览器中打开下载（公益服下载较慢，请耐心等待）", Toast.LENGTH_LONG).show();
         } catch (Exception e) {
             Log.e(TAG, "复制下载地址失败", e);
+            Toast.makeText(this, "复制失败：" + e.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    /**
+     * 把加速 APK 下载地址复制到系统剪贴板，并 Toast 提示用户
+     */
+    private void copySpeedUrlToClipboard() {
+        String url = getSpeedApkUrl();
+        if (url == null || url.isEmpty()) {
+            // 如果没有加速链接，复制原始链接
+            copyDownloadUrlToClipboard();
+            return;
+        }
+        try {
+            ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            if (cm == null) {
+                Toast.makeText(this, "剪贴板不可用", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            ClipData clip = ClipData.newPlainText("zhujibus_apk_speed_url", url);
+            cm.setPrimaryClip(clip);
+            // Android 13+ 系统会自动显示复制提示；旧版本则通过 Toast 提示
+            Toast.makeText(this, "加速下载地址已复制，请在浏览器中打开下载", Toast.LENGTH_LONG).show();
+        } catch (Exception e) {
+            Log.e(TAG, "复制加速下载地址失败", e);
             Toast.makeText(this, "复制失败：" + e.getMessage(), Toast.LENGTH_LONG).show();
         }
     }

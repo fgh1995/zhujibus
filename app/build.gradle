@@ -10,9 +10,10 @@ android {
         applicationId "org.zjfgh.zhujibus"
         minSdk 24
         targetSdk 35
-        versionCode 102025
-        versionName "1.2.25"
-        //remote={"has_notice":false,"notice":"欢迎使用诸暨公交查询APP","has_update":true,"update_log":"1.[修改]点阵字体修改为圆形点阵。\n2.[修复]网络模式刷新失败后不再刷新的问题。\n3.[修改]统一使用高德定位获取地理位置，定位速度更快。\n4.[其他]语音包修改\n5.[优化]优化网络模式下车辆移动动画速度。"}
+        versionCode 102026
+        versionName "1.2.26"
+        //githubAddSpeed=`https://gh-proxy.com`
+        //remote={"has_notice":false,"notice":"欢迎使用诸暨公交查询APP","has_update":true,"update_log":"1.[尝试修复]GPS模式下，异常闪退的问题。\n2.[新增]新增更新文件加速地址。"}
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 
