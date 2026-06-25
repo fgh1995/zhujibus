@@ -1834,7 +1834,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         updateStartEndStations();
         showDirection();
 
-        nextStationInfo.setText("欢迎乘坐" + lineName + "公交车");
+        nextStationInfo.setText("欢迎乘坐 " + lineName + " 公交车" + "    " + "Welcome aboard the No." + formatLineNameForEnglish(lineName) +  " bus.");
 
         if (currentAnnounceMode == AnnounceMode.GPS) {
             GpsWarmingUp.removeListener(gpsActivityListener);

@@ -5,6 +5,7 @@ import android.os.Looper;
 import android.util.Log;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
 import okhttp3.*;
 
@@ -496,6 +497,7 @@ public class BusApiClient {
         public BusLineDirection down;
     }
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class BusLineDirection {
         public String endStation;
         public double totalPrice;
