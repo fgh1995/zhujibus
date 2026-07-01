@@ -74,4 +74,9 @@
         <attr name="dmlOffsetX" format="dimension" />
         <attr name="dmlOffsetY" format="dimension" />
     </declare-styleable>
+    <declare-styleable name="AutoScrollTextView">
+        <attr name="scrollDuration" format="integer"/>
+        <attr name="intervalDuration" format="integer"/>
+        <attr name="maxLines" format="integer"/>
+    </declare-styleable>
 </resources>

@@ -43,6 +43,8 @@ import androidx.recyclerview.widget.RecyclerView;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import org.zjfgh.zhujibus.view.AutoScrollTextView;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -66,7 +68,7 @@ public class MainActivity extends AppCompatActivity {
 
     private RecyclerView recyclerView;
     private TextView tv_search_line;
-    private ViewFlipper viewFlipper;
+    private AutoScrollTextView autoScrollTextView;
     private BusApiClient client;
     private double currentLatitude = 120.235555;
     private double currentLongitude = 29.713397;
@@ -87,7 +89,7 @@ public class MainActivity extends AppCompatActivity {
             setContentView(R.layout.activity_main);
             recyclerView = findViewById(R.id.recyclerView);
             tv_search_line = findViewById(R.id.tv_search_line);
-            viewFlipper = findViewById(R.id.view_flipper);
+            autoScrollTextView = findViewById(R.id.auto_scroll_text);
             tvNoData = findViewById(R.id.tv_no_data);
             llUpdateNotice = findViewById(R.id.ll_update_notice);
             llNotice = findViewById(R.id.ll_notice);
@@ -292,27 +294,23 @@ public class MainActivity extends AppCompatActivity {
                 @Override
                 public void onSuccess(BusApiClient.BusAnnouncementResponse response) {
                     try {
-                        if (response == null) {
+                        if (response == null || !"200".equals(response.code) ||
+                                response.data == null || response.data.isEmpty()) {
                             Log.w("-BusInfo-", "滚动公告请求失败-无数据");
                             return;
                         }
-                        if (!"200".equals(response.code)) {
-                            Log.w("-BusInfo-", "滚动公告请求失败-状态码异常：" + response.code);
-                            return;
-                        }
-                        if (response.data == null || response.data.isEmpty()) {
-                            Log.w("-BusInfo-", "滚动公告数据为空");
-                            return;
-                        }
+
+                        // 收集所有公告标题
+                        List<String> announcements = new ArrayList<>();
                         for (BusApiClient.BusAnnouncement announcement : response.data) {
-                            try {
-                                TextView textView = getTextView(announcement);
-                                viewFlipper.addView(textView);
-                            } catch (Exception e) {
-                                Log.e("-BusInfo-", "添加公告视图失败", e);
-                            }
+                            announcements.add(announcement.title);
                         }
-                        viewFlipper.startFlipping();
+
+                        // 使用自定义组件
+                        runOnUiThread(() -> {
+                            autoScrollTextView.setItems(announcements);
+                        });
+
                     } catch (Exception e) {
                         Log.e("-BusInfo-", "处理公告数据失败", e);
                     }

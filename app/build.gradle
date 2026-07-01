@@ -10,10 +10,10 @@ android {
         applicationId "org.zjfgh.zhujibus"
         minSdk 24
         targetSdk 35
-        versionCode 102027
-        versionName "1.2.28-beta"
+        versionCode 102028
+        versionName "1.2.28"
         //githubAddSpeed=`https://gh-proxy.org`
-        //remote={"has_notice":false,"notice":"欢迎使用诸暨公交查询APP","has_update":true,"update_log":"1.[尝试修复]GPS模式下，异常闪退的问题。\n2.[新增]新增更新文件加速地址。"}
+        //remote={"has_notice":false,"notice":"欢迎使用诸暨公交查询APP","has_update":true,"update_log":"1.[修复]修复了特定类型线路（如“专线”）无法正常载入地图或数据的问题。\n[修复]修复了点击“换向”按钮后，车辆LED屏上“欢迎乘坐”双语提示（中/英文）英文提示丢失的问题。\n3.[重构]优化了GPS模式下地图的导航展示，界面更贴近实际导航体验。\n4.[修复]补充起点站中文自动报站语音丢失片段。"}
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -71,8 +71,8 @@ dependencies {
     implementation libs.okhttp       // OkHttp
     implementation libs.jackson.databind // Jackson
     implementation libs.kotlinx.coroutines.android
-    // 高德地图 3D SDK
-    implementation libs.amap3dmap
+    // 高德导航 SDK（包含地图+导航功能）
+    implementation libs.amapNavi3dmap
     implementation libs.glide
     implementation libs.gridlayout
 }

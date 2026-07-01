@@ -13,7 +13,7 @@ okhttp = "4.9.1"
 navigationFragment = "2.6.0"
 navigationUi = "2.6.0"
 pinyin4j = "2.5.1"
-amap3dMap = "9.3.0"
+amapNavi3dMap = "latest.integration"
 glide = "5.0.7"
 gridlayout = "1.0.0"
 
@@ -31,7 +31,7 @@ okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
 navigation-fragment = { group = "androidx.navigation", name = "navigation-fragment", version.ref = "navigationFragment" }
 navigation-ui = { group = "androidx.navigation", name = "navigation-ui", version.ref = "navigationUi" }
 pinyin4j = { module = "com.belerweb:pinyin4j", version.ref = "pinyin4j" }
-amap3dmap = { group = "com.amap.api", name = "3dmap", version.ref = "amap3dMap" }
+amapNavi3dmap = { group = "com.amap.api", name = "navi-3dmap", version.ref = "amapNavi3dMap" }
 glide = { module = "com.github.bumptech.glide:glide", version.ref = "glide" }
 gridlayout = { group = "androidx.gridlayout", name = "gridlayout", version.ref = "gridlayout" }
 [plugins]

@@ -26,77 +26,6 @@
                 android:contentDescription="@string/todo"
                 android:src="@drawable/banner_icon"
                 android:scaleType="centerCrop" />
-
-            <!-- 更新公告行：has_update 为 true 时显示，叠加在 banner 顶部 -->
-            <LinearLayout
-                android:id="@+id/ll_update_notice"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_gravity="top"
-                android:background="#ed2440"
-                android:gravity="center_vertical"
-                android:orientation="horizontal"
-                android:padding="6dp"
-                android:visibility="gone"
-                tools:visibility="visible">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginEnd="6dp"
-                    android:text="更新"
-                    android:textColor="#ffffff"
-                    android:textSize="13sp"
-                    android:textStyle="bold" />
-
-                <org.zjfgh.zhujibus.HorizontalScrollTextView
-                    android:id="@+id/hstv_update_notice"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    app:hsAnimationMode="bounce_with_pause"
-                    app:hsAutoStart="true"
-                    app:hsScrollSpeed="60"
-                    app:hsTextColor="#ffffff"
-                    app:hsTextSize="13dp"
-                    app:hsTurnPauseDuration="1500" />
-            </LinearLayout>
-
-            <!-- 公告行：has_notice 为 true 时显示，叠加在 banner 顶部（紧贴更新行下方） -->
-            <LinearLayout
-                android:id="@+id/ll_notice"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_gravity="top"
-                android:layout_marginTop="32dp"
-                android:background="#0d8dfb"
-                android:gravity="center_vertical"
-                android:orientation="horizontal"
-                android:padding="6dp"
-                android:visibility="gone"
-                tools:visibility="visible">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginEnd="6dp"
-                    android:text="公告"
-                    android:textColor="#ffffff"
-                    android:textSize="13sp"
-                    android:textStyle="bold" />
-
-                <org.zjfgh.zhujibus.HorizontalScrollTextView
-                    android:id="@+id/hstv_notice"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    app:hsAnimationMode="infinite"
-                    app:hsAutoStart="true"
-                    app:hsScrollSpeed="60"
-                    app:hsTextColor="#ffffff"
-                    app:hsTextSize="13dp"
-                    app:hsTurnPauseDuration="1500" />
-            </LinearLayout>
         </FrameLayout>
 
         <LinearLayout
@@ -141,7 +70,76 @@
             android:layout_marginEnd="12dp"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toBottomOf="@+id/ll_search">
+            <!-- 更新公告行：has_update 为 true 时显示，叠加在 banner 顶部 -->
+            <LinearLayout
+                android:id="@+id/ll_update_notice"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_gravity="top"
+                android:background="@drawable/red_bg_rounded"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:padding="6dp"
+                android:layout_marginBottom="8dp"
+                android:visibility="gone"
+                tools:visibility="visible">
 
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="6dp"
+                    android:text="更新提示"
+                    android:textColor="#ffffff"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+
+                <org.zjfgh.zhujibus.HorizontalScrollTextView
+                    android:id="@+id/hstv_update_notice"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    app:hsAnimationMode="bounce_with_pause"
+                    app:hsAutoStart="true"
+                    app:hsScrollSpeed="60"
+                    app:hsTextColor="#ffffff"
+                    app:hsTextSize="13dp"
+                    app:hsTurnPauseDuration="1500" />
+            </LinearLayout>
+            <!-- 公告行：has_notice 为 true 时显示，叠加在 banner 顶部（紧贴更新行下方） -->
+            <LinearLayout
+                android:id="@+id/ll_notice"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_gravity="top"
+                android:layout_marginBottom="8dp"
+                android:background="@drawable/blue_bg_rounded"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:padding="6dp"
+                android:visibility="gone"
+                tools:visibility="visible">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="6dp"
+                    android:text="软件公告"
+                    android:textColor="#ffffff"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+
+                <org.zjfgh.zhujibus.HorizontalScrollTextView
+                    android:id="@+id/hstv_notice"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    app:hsAnimationMode="infinite"
+                    app:hsAutoStart="true"
+                    app:hsScrollSpeed="60"
+                    app:hsTextColor="#ffffff"
+                    app:hsTextSize="13dp"
+                    app:hsTurnPauseDuration="1500" />
+            </LinearLayout>
             <LinearLayout
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
@@ -161,15 +159,12 @@
                     android:layout_marginRight="8dp"
                     android:text="通知\n公告" />
 
-                <ViewFlipper
-                    android:id="@+id/view_flipper"
-                    android:layout_gravity="center_vertical"
+                <org.zjfgh.zhujibus.view.AutoScrollTextView
+                    android:id="@+id/auto_scroll_text"
                     android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:autoStart="true"
-                    android:flipInterval="3000"
-                    android:inAnimation="@anim/slide_in_bottom"
-                    android:outAnimation="@anim/slide_out_top" />
+                    android:layout_height="match_parent"
+                    app:scrollDuration="800"
+                    app:intervalDuration="4000" />
             </LinearLayout>
 
             <LinearLayout
@@ -200,6 +195,7 @@
 
                     <TextView
                         android:textColor="#262224"
+                        android:visibility="gone"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="查看更多 >" />

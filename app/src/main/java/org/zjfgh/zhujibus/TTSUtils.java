@@ -219,12 +219,13 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
                 R.raw.cn_00_welcom_zhuji, R.raw.cn_00_bus, R.raw.cn_01_this_bus_is_from,R.raw.cn_this_is_a_driver_only_bus,
                 R.raw.cn_01_zhuji_bus_reminder, R.raw.cn_02_heading_to, R.raw.cn_03_direction,
                 R.raw.cn_03_starting_stop_departing, R.raw.cn_04_arriving, R.raw.cn_04_the_bus_is_moving_tips,
-                R.raw.cn_05_next_station, R.raw.cn_06_press_the_bell_to_get_off_tips,
+                R.raw.cn_05_next_station, R.raw.cn_06_press_the_bell_to_get_off_tips, R.raw.cn_66_press_the_bell_to_get_off,
                 R.raw.cn_17_terminal_station, R.raw.cn_07_passengers_terminal_station, R.raw.cn_08_thank_you_for_riding_with_us, R.raw.cn_091_we_are_now_at,
                 R.raw.en_00_welcome_aboard_the_zhuji, R.raw.en_01_this_bus_is_from, R.raw.en_01_zhuji_bus_reminder, R.raw.en_02_bound_for,
                 R.raw.en_02_to, R.raw.en_03_is_arriving_at, R.raw.en_03_starting_stop_departing,
                 R.raw.en_04_the_bus_is_moving_tips, R.raw.en_05_next_station,
-                R.raw.en_06_press_the_bell_to_get_off_tips, R.raw.en_17_terminal_station,R.raw.en_07_passengers_terminal_station,
+                R.raw.en_06_press_the_bell_to_get_off_tips, R.raw.en_66_press_the_bell_to_get_off,
+                R.raw.en_17_terminal_station,R.raw.en_07_passengers_terminal_station,
                 R.raw.en_08_thank_you_for_riding_with_us, R.raw.en_091_we_are_now_at, R.raw.en_092_passengers_getting_off,
                 R.raw.cn_031_starting_stop_departing
         };
@@ -459,10 +460,10 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
             addCnStationName(items, startStation);
             items.add(new PlaybackItem(R.raw.cn_02_heading_to));
             addCnStationName(items, endStation);
+            items.add(new PlaybackItem(R.raw.cn_03_starting_stop_departing));
             items.add(new PlaybackItem(R.raw.cn_05_next_station));
             addCnStationName(items, nextStation);
-            items.add(new PlaybackItem(R.raw.cn_03_starting_stop_departing));
-
+            items.add(new PlaybackItem(R.raw.cn_66_press_the_bell_to_get_off));
             String lineNameEn = lineName.replace("路", "");
             items.add(new PlaybackItem(R.raw.en_00_welcome_aboard_the_zhuji));
             addEnLineNumber(items, lineNameEn);
@@ -471,10 +472,10 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
             addEnStationName(items, startStation);
             items.add(new PlaybackItem(R.raw.en_02_to));
             addEnStationName(items, endStation);
+            items.add(new PlaybackItem(R.raw.en_03_starting_stop_departing));
             items.add(new PlaybackItem(R.raw.en_05_next_station));
             addEnStationName(items, nextStation);
-            items.add(new PlaybackItem(R.raw.en_03_starting_stop_departing));
-
+            items.add(new PlaybackItem(R.raw.en_66_press_the_bell_to_get_off));
             buildAndPlayMergedAudio(items);
         });
     }

@@ -16,6 +16,7 @@ import androidx.annotation.Nullable;
 import androidx.fragment.app.Fragment;
 
 import com.amap.api.maps.TextureMapView;
+import com.amap.api.navi.AMapNaviView;
 import com.amap.api.maps.model.LatLng;
 
 import java.text.ParseException;
@@ -36,7 +37,7 @@ public class NavigationMainFragment extends Fragment {
     private String endStation;
 
     // ---- 视图引用 ----
-    private TextureMapView textureMapView;
+    private TextureMapView naviMapView;  // ⭐ 改回 TextureMapView（官方自定义方式）
     private TextView navTimeHM;
     private TextView navTimeSecond;
     private TextView navDateText;
@@ -124,7 +125,7 @@ public class NavigationMainFragment extends Fragment {
         super.onViewCreated(view, savedInstanceState);
         try {
             // 1. 找到所有视图
-            textureMapView = view.findViewById(R.id.amap_map_view);
+            naviMapView = view.findViewById(R.id.amap_map_view);
             navTimeHM = view.findViewById(R.id.nav_time_hm);
             navTimeSecond = view.findViewById(R.id.nav_time_second);
             navDateText = view.findViewById(R.id.nav_date_text);
@@ -214,21 +215,21 @@ public class NavigationMainFragment extends Fragment {
     }
 
     private void initMapWhenReady(Bundle savedInstanceState) {
-        if (textureMapView == null) {
-            Log.e(TAG, "initMapWhenReady skipped: textureMapView is null");
+        if (naviMapView == null) {
+            Log.e(TAG, "initMapWhenReady skipped: naviMapView is null");
             return;
         }
         final Bundle finalSavedState = savedInstanceState;
-        textureMapView.getViewTreeObserver().addOnGlobalLayoutListener(
+        naviMapView.getViewTreeObserver().addOnGlobalLayoutListener(
                 new ViewTreeObserver.OnGlobalLayoutListener() {
                     @Override
                     public void onGlobalLayout() {
-                        if (textureMapView.getWidth() <= 0 || textureMapView.getHeight() <= 0) {
+                        if (naviMapView.getWidth() <= 0 || naviMapView.getHeight() <= 0) {
                             return;
                         }
-                        textureMapView.getViewTreeObserver().removeOnGlobalLayoutListener(this);
+                        naviMapView.getViewTreeObserver().removeOnGlobalLayoutListener(this);
                         try {
-                            navigation = new AmapNavigationView(requireContext(), textureMapView);
+                            navigation = new AmapNavigationView(requireContext(), naviMapView);
                             // 设置速度回调，网络模式下显示车辆移动速度
                             navigation.setSpeedChangeListener(speedKmh -> {
                                 if (!isGpsMode) {
@@ -236,7 +237,7 @@ public class NavigationMainFragment extends Fragment {
                                 }
                             });
                             Log.d(TAG, "onGlobalLayout -> start onCreate (w=" +
-                                    textureMapView.getWidth() + ", h=" + textureMapView.getHeight() + ")");
+                                    naviMapView.getWidth() + ", h=" + naviMapView.getHeight() + ")");
                             navigation.onCreate(finalSavedState);
                             if (isHostResumed && navigation != null) {
                                 navigation.onResume();
@@ -386,6 +387,21 @@ public class NavigationMainFragment extends Fragment {
         }
 
         this.stations = directionData.stationList;
+
+        // ⭐ 设置公交线路起点和终点（用于GPS导航）
+        if (stations != null && !stations.isEmpty() && navigation != null) {
+            BusApiClient.BusLineStation startStation = stations.get(0);  // 起点站
+            BusApiClient.BusLineStation endStation = stations.get(stations.size() - 1);  // 终点站
+            
+            if (startStation.poiOriginLat != 0 && startStation.poiOriginLon != 0 &&
+                endStation.poiOriginLat != 0 && endStation.poiOriginLon != 0) {
+                navigation.setBusLineStartAndEnd(
+                        startStation.poiOriginLat, startStation.poiOriginLon,
+                        endStation.poiOriginLat, endStation.poiOriginLon
+                );
+                Log.d(TAG, "[GPS] 已设置导航起点和终点: 起点=" + startStation.stationName + ", 终点=" + endStation.stationName);
+            }
+        }
 
         // 0. 切换方向时，先清空旧方向的所有车辆 marker
         //    （避免上一方向的车辆残留在新方向地图上）
@@ -564,8 +580,7 @@ public class NavigationMainFragment extends Fragment {
     /**
      * 刷新 GPS / 网络信号图标
      * <p>
-     * GPS 判定：5 秒内有过成功定位（errorCode == 0）算"有信号"
-     * 网络判定：{@link SignalIndicatorManager#getNetworkSignalLevel(Context)}
+     * GPS 判定：5 秒内有过成功定位（errorCode == 0）算"有信号
      */
     private void updateSignalIndicators() {
         if (getContext() == null) return;
@@ -678,7 +693,7 @@ public class NavigationMainFragment extends Fragment {
             navigation = null;
         }
 
-        textureMapView = null;
+        naviMapView = null;
         navTimeHM = null;
         navTimeSecond = null;
         navDateText = null;

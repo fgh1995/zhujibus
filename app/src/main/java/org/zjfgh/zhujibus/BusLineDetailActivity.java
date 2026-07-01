@@ -391,10 +391,8 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             // ⭐ GPS 模式：开启地图罗盘模式（3D 贴地视角）
             if (navigationMainFragment != null) {
                 navigationMainFragment.setGpsMode(true);
-                // GPS 模式下清除目标站点位置
-                if (navigationMainFragment.getNavigation() != null) {
-                    navigationMainFragment.getNavigation().clearTargetStation();
-                }
+                // GPS 模式下保留目标站点位置（用于导航SDK的算路终点）
+                // ⚠️ 不要清除目标站点，否则导航SDK无法启动
             }
         } else {
             GpsWarmingUp.removeListener(gpsActivityListener);
