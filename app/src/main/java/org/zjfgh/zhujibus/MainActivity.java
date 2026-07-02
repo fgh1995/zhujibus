@@ -82,6 +82,12 @@ public class MainActivity extends AppCompatActivity {
     private RemoteConfig remoteConfig;
     private volatile boolean remoteConfigFetching = false;
 
+    // ===== WebSocket 相关 =====
+    private WebSocketManager webSocketManager;
+    private String wsServerAddress = "";
+    /** ⭐ 当前在线人数（-1 表示尚未收到广播） */
+    private volatile int currentOnlineCount = -1;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -168,6 +174,10 @@ public class MainActivity extends AppCompatActivity {
     protected void onDestroy() {
         super.onDestroy();
         GpsWarmingUp.removeListener(gpsListener);
+        // 关闭 WebSocket 连接
+        if (webSocketManager != null) {
+            webSocketManager.close();
+        }
     }
 
     @Override
@@ -352,6 +362,7 @@ public class MainActivity extends AppCompatActivity {
         String notice = "";
         String updateLog = "";
         String githubAddSpeed = ""; // GitHub 加速地址
+        String wsServerAddress = ""; // WebSocket 服务器地址
 
         boolean isNewVersion(int localVersionCode) {
             return remoteVersionCode > localVersionCode;
@@ -410,6 +421,16 @@ public class MainActivity extends AppCompatActivity {
                 cfg.githubAddSpeed = speedMatcher.group(1).trim();
             }
 
+            // 解析 wsServerAddress
+            // 格式：//wsServerAddress=http://zhujibus.android.360967.xyz
+            Matcher wsMatcher = Pattern.compile("//wsServerAddress\\s*=\\s*`?([^`\\n]+)`?").matcher(gradleText);
+            if (wsMatcher.find()) {
+                cfg.wsServerAddress = wsMatcher.group(1).trim();
+                Log.d(TAG, "解析到 wsServerAddress: " + cfg.wsServerAddress);
+            } else {
+                Log.w(TAG, "未找到 wsServerAddress 配置");
+            }
+
             // remote={...} 注释里的 JSON（注意：示例中 ture 是笔误，宽松解析）
             Matcher remoteMatcher = Pattern.compile("remote\\s*=\\s*(\\{[\\s\\S]*?\\})").matcher(gradleText);
             if (remoteMatcher.find()) {
@@ -452,7 +473,7 @@ public class MainActivity extends AppCompatActivity {
         boolean showUpdate = remoteConfig.hasUpdate && isRemoteNewer;
         if (showUpdate) {
             String text = "发现新版本 v" + remoteConfig.remoteVersionName
-                    + " (build " + remoteConfig.remoteVersionCode + ") ，点击查看更新内容";
+                    + " (" + remoteConfig.remoteVersionCode + ") ，点击查看。";
             if (hstvUpdateNotice != null) hstvUpdateNotice.setText(text);
             if (llUpdateNotice != null) {
                 llUpdateNotice.setVisibility(View.VISIBLE);
@@ -476,6 +497,136 @@ public class MainActivity extends AppCompatActivity {
         } else {
             if (llNotice != null) llNotice.setVisibility(View.GONE);
         }
+
+        // ===== WebSocket 连接 =====
+        // 如果配置了 wsServerAddress，则建立 WebSocket 连接
+        if (!TextUtils.isEmpty(remoteConfig.wsServerAddress)) {
+            wsServerAddress = remoteConfig.wsServerAddress;
+            Log.d(TAG, "开始建立 WebSocket 连接，地址: " + wsServerAddress);
+            connectWebSocket(wsServerAddress);
+        } else {
+            Log.w(TAG, "未配置 wsServerAddress，跳过 WebSocket 连接");
+        }
+    }
+
+    // ==================== WebSocket 连接逻辑 ====================
+
+    /**
+     * 建立 WebSocket 连接（先检测重定向）
+     * @param httpAddress HTTP/HTTPS 地址
+     */
+    private void connectWebSocket(String httpAddress) {
+        if (TextUtils.isEmpty(httpAddress)) {
+            Log.w(TAG, "WebSocket 地址为空，跳过连接");
+            return;
+        }
+
+        // 先检测重定向
+        new Thread(() -> {
+            try {
+                OkHttpClient httpClient = new OkHttpClient.Builder()
+                        .followRedirects(false)  // 不自动跟随重定向，手动检测
+                        .build();
+
+                Request request = new Request.Builder()
+                        .url(httpAddress)
+                        .head()  // HEAD 请求获取响应头
+                        .build();
+
+                try (Response response = httpClient.newCall(request).execute()) {
+                    int code = response.code();
+                    String finalAddress = httpAddress;
+
+                    // 检测是否重定向 (301, 302, 303, 307, 308)
+                    if (code == 301 || code == 302 || code == 303 || code == 307 || code == 308) {
+                        String location = response.header("Location");
+                        if (!TextUtils.isEmpty(location)) {
+                            // 处理相对路径
+                            if (location.startsWith("/")) {
+                                Uri uri = Uri.parse(httpAddress);
+                                location = uri.getScheme() + "://" + uri.getHost() + ":" + uri.getPort() + location;
+                            }
+                            finalAddress = location;
+                            Log.d(TAG, "检测到重定向: " + httpAddress + " -> " + finalAddress);
+                        }
+                    } else if (code == 200) {
+                        Log.d(TAG, "无重定向，使用原地址: " + httpAddress);
+                    } else {
+                        Log.w(TAG, "HTTP 请求返回非预期状态码: " + code + "，尝试使用原地址");
+                    }
+
+                    // 创建 WebSocketManager（内部自动处理 http→ws 转换）
+                    String finalWsAddress = finalAddress;
+                    runOnUiThread(() -> {
+                        if (webSocketManager != null) {
+                            webSocketManager.close();
+                        }
+                        webSocketManager = new WebSocketManager(MainActivity.this, finalWsAddress);
+                        webSocketManager.setOnWebSocketListener(new WebSocketManager.OnWebSocketListener() {
+                            @Override
+                            public void onConnected() {
+                                Log.d(TAG, "WebSocket 连接成功回调");
+                                updateWebSocketStatus(true, "在线");
+                            }
+
+                            @Override
+                            public void onDisconnected() {
+                                Log.d(TAG, "WebSocket 断开连接回调");
+                                updateWebSocketStatus(false, "离线");
+                            }
+
+                            @Override
+                            public void onDataReceived(String data) {
+                                Log.d(TAG, "收到服务端数据: " + data);
+                                // TODO: 处理服务端下发的数据
+                            }
+
+                            @Override
+                            public void onEventReceived(String event) {
+                                Log.d(TAG, "收到服务端事件: " + event);
+                                // TODO: 处理服务端事件
+                            }
+
+                            @Override
+                            public void onError(String error) {
+                                Log.e(TAG, "WebSocket 错误: " + error);
+                                updateWebSocketStatus(false, "错误");
+                            }
+
+                            @Override
+                            public void onPongReceived() {
+                                // 心跳回复，可选：更新状态为"在线"（如果是重连场景）
+                                updateWebSocketStatus(true, "在线");
+                            }
+
+                            @Override
+                            public void onReconnecting(int attempt, long delayMs) {
+                                Log.d(TAG, "第 " + attempt + " 次重连，延迟 " + delayMs + "ms");
+                                updateWebSocketStatus(false, "重连中 " + attempt);
+                            }
+
+                            @Override
+                            public void onOnlineCountReceived(int count) {
+                                // ⭐ 收到在线人数广播，更新 UI
+                                Log.d(TAG, "在线人数: " + count);
+                                runOnUiThread(() -> updateWebSocketOnlineCount(count));
+                            }
+                        });
+                        webSocketManager.connect();
+                    });
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "检测重定向失败: " + e.getMessage(), e);
+                // 失败时直接尝试连接原地址
+                runOnUiThread(() -> {
+                    if (webSocketManager != null) {
+                        webSocketManager.close();
+                    }
+                    webSocketManager = new WebSocketManager(MainActivity.this, httpAddress);
+                    webSocketManager.connect();
+                });
+            }
+        }).start();
     }
 
     private int getLocalVersionCode() {
@@ -485,7 +636,45 @@ public class MainActivity extends AppCompatActivity {
             return 0;
         }
     }
+// ==================== WebSocket 状态 UI 更新 ====================
 
+    private void updateWebSocketStatus(boolean isConnected, String statusText) {
+        runOnUiThread(() -> {
+            View dot = findViewById(R.id.view_status_dot);
+            TextView tvStatus = findViewById(R.id.tv_ws_status);
+            LinearLayout llStatus = findViewById(R.id.ll_ws_status);
+
+            if (dot == null || tvStatus == null) return;
+
+            if (isConnected) {
+                dot.setBackgroundResource(R.drawable.status_dot_online);
+                // ⭐ 已连接：显示"在线 N人使用中"（如果还没有人数数据，先显示"在线"）
+                if (currentOnlineCount >= 0) {
+                    tvStatus.setText(currentOnlineCount + " 人使用中");
+                } else {
+                    tvStatus.setText("在线");
+                }
+                if (llStatus != null) {
+                    //llStatus.setBackgroundResource(R.drawable.status_pill_bg_online);
+                }
+            } else {
+                dot.setBackgroundResource(R.drawable.status_dot_offline);
+                tvStatus.setText(statusText != null ? statusText : "离线");
+                if (llStatus != null) {
+                    llStatus.setBackgroundResource(R.drawable.status_pill_bg);
+                }
+            }
+        });
+    }
+
+    /**
+     * ⭐ 收到在线人数广播，更新显示
+     */
+    private void updateWebSocketOnlineCount(int count) {
+        this.currentOnlineCount = count;
+        // 强制刷新状态显示（保持"在线"状态）
+        updateWebSocketStatus(true, null);
+    }
     /**
      * 弹出更新对话框：显示更新日志，提供主下载链接和备用下载链接。
      * 使用自定义UI，美观的升级界面。

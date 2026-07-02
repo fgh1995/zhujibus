@@ -31,6 +31,7 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.诸暨公交"
+        android:usesCleartextTraffic="true"
         tools:targetApi="31">
         <!-- 高德地图 API Key（需要替换为你自己的高德 Key） -->
         <meta-data

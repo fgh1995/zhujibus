@@ -2,15 +2,16 @@
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
-    android:background="#e3edfb"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:background="#e3edfb"
     android:fillViewport="true">
 
     <androidx.constraintlayout.widget.ConstraintLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content">
 
+        <!-- ========== Banner 区域 ========== -->
         <FrameLayout
             android:id="@+id/fl_banner"
             android:layout_width="0dp"
@@ -24,20 +25,57 @@
                 android:layout_width="match_parent"
                 android:layout_height="180dp"
                 android:contentDescription="@string/todo"
-                android:src="@drawable/banner_icon"
-                android:scaleType="centerCrop" />
+                android:scaleType="centerCrop"
+                android:src="@drawable/banner_icon" />
+
+            <!-- ===== WebSocket 状态指示器（悬浮在 Banner 右上角） ===== -->
+            <LinearLayout
+                android:id="@+id/ll_ws_status"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="top|end"
+                android:layout_marginTop="12dp"
+                android:layout_marginEnd="12dp"
+                android:background="@drawable/status_pill_bg"
+                android:elevation="4dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="8dp"
+                android:paddingTop="2dp"
+                android:paddingEnd="8dp"
+                android:paddingBottom="2dp">
+
+                <!-- 状态圆点（在线：绿色，离线：灰色/红色） -->
+                <View
+                    android:id="@+id/view_status_dot"
+                    android:layout_width="12dp"
+                    android:layout_height="12dp"
+                    android:layout_marginEnd="6dp"
+                    android:background="@drawable/status_dot_offline" />
+
+                <!-- 状态文字 -->
+                <TextView
+                    android:id="@+id/tv_ws_status"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="连接中"
+                    android:textColor="@android:color/white"
+                    android:textSize="12sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
         </FrameLayout>
 
+        <!-- ========== 搜索栏 ========== -->
         <LinearLayout
-            android:gravity="center_vertical"
             android:id="@+id/ll_search"
-            android:background="@drawable/blue_border_white_bg_rounded"
-            android:padding="15dp"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_marginTop="-25dp"
             android:layout_marginStart="12dp"
+            android:layout_marginTop="-25dp"
             android:layout_marginEnd="12dp"
+            android:background="@drawable/blue_border_white_bg_rounded"
+            android:gravity="center_vertical"
+            android:padding="15dp"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toBottomOf="@+id/fl_banner">
@@ -45,42 +83,44 @@
             <ImageView
                 android:layout_width="20dp"
                 android:layout_height="20dp"
-                android:src="@drawable/search_icon"
+                android:layout_marginEnd="4dp"
                 android:contentDescription="@string/todo"
-                android:layout_marginEnd="4dp" />
+                android:src="@drawable/search_icon" />
 
             <TextView
                 android:id="@+id/tv_search_line"
-                android:textSize="15sp"
-                android:textColorHint="#2c2c2c"
-                android:background="@null"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:hint="@string/search_hint"
                 android:layout_weight="1"
-                android:autofillHints="" />
+                android:autofillHints=""
+                android:background="@null"
+                android:hint="@string/search_hint"
+                android:textColorHint="#2c2c2c"
+                android:textSize="15sp" />
         </LinearLayout>
 
+        <!-- ========== 主内容区域 ========== -->
         <LinearLayout
-            android:orientation="vertical"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
             android:layout_marginStart="12dp"
+            android:layout_marginTop="10dp"
             android:layout_marginEnd="12dp"
+            android:orientation="vertical"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toBottomOf="@+id/ll_search">
-            <!-- 更新公告行：has_update 为 true 时显示，叠加在 banner 顶部 -->
+
+            <!-- 更新公告行 -->
             <LinearLayout
                 android:id="@+id/ll_update_notice"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_gravity="top"
+                android:layout_marginBottom="8dp"
                 android:background="@drawable/red_bg_rounded"
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
                 android:padding="6dp"
-                android:layout_marginBottom="8dp"
                 android:visibility="gone"
                 tools:visibility="visible">
 
@@ -105,7 +145,8 @@
                     app:hsTextSize="13dp"
                     app:hsTurnPauseDuration="1500" />
             </LinearLayout>
-            <!-- 公告行：has_notice 为 true 时显示，叠加在 banner 顶部（紧贴更新行下方） -->
+
+            <!-- 公告行 -->
             <LinearLayout
                 android:id="@+id/ll_notice"
                 android:layout_width="match_parent"
@@ -140,74 +181,79 @@
                     app:hsTextSize="13dp"
                     app:hsTurnPauseDuration="1500" />
             </LinearLayout>
+
+            <!-- 通知公告滚动条 -->
             <LinearLayout
-                android:gravity="center_vertical"
-                android:orientation="horizontal"
-                android:background="@drawable/white_bg_rounded"
-                android:padding="8dp"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_gravity="center_vertical"
+                android:background="@drawable/white_bg_rounded"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:padding="8dp"
                 app:layout_constraintStart_toStartOf="parent"
                 app:layout_constraintTop_toBottomOf="@+id/ll_search">
 
                 <TextView
-                    android:textSize="18sp"
-                    android:textColor="#0d8dfb"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginRight="8dp"
-                    android:text="通知\n公告" />
+                    android:text="通知\n公告"
+                    android:textColor="#0d8dfb"
+                    android:textSize="18sp" />
 
                 <org.zjfgh.zhujibus.view.AutoScrollTextView
                     android:id="@+id/auto_scroll_text"
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
-                    app:scrollDuration="800"
-                    app:intervalDuration="4000" />
+                    app:intervalDuration="4000"
+                    app:scrollDuration="800" />
             </LinearLayout>
 
+            <!-- 附近公交卡片 -->
             <LinearLayout
-                android:gravity="center_vertical"
-                android:orientation="vertical"
-                android:background="@drawable/white_bg_rounded"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
+                android:background="@drawable/white_bg_rounded"
+                android:gravity="center_vertical"
+                android:orientation="vertical"
                 app:layout_constraintStart_toStartOf="parent"
                 app:layout_constraintTop_toBottomOf="@+id/ll_search">
 
+                <!-- 标题行 -->
                 <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
                     android:gravity="center_vertical"
                     android:orientation="horizontal"
-                    android:padding="8dp"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content">
+                    android:padding="8dp">
 
                     <TextView
-                        android:textSize="18sp"
-                        android:textColor="#0d8dfb"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
-                        android:text="附近公交"
+                        android:layout_marginEnd="8dp"
                         android:layout_weight="1"
-                        android:layout_marginEnd="8dp" />
+                        android:text="附近公交"
+                        android:textColor="#0d8dfb"
+                        android:textSize="18sp" />
 
                     <TextView
-                        android:textColor="#262224"
-                        android:visibility="gone"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="查看更多 >" />
+                        android:text="查看更多 >"
+                        android:textColor="#262224"
+                        android:visibility="gone" />
                 </LinearLayout>
 
+                <!-- 提示条 -->
                 <LinearLayout
-                    android:gravity="center_vertical"
-                    android:orientation="horizontal"
-                    android:background="#fadce3"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="8dp"
+                    android:background="#fadce3"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
                     android:paddingStart="4dp"
                     android:paddingEnd="2dp">
 
@@ -217,22 +263,23 @@
                         android:src="@drawable/tips_icon" />
 
                     <TextView
-                        android:textSize="13sp"
-                        android:textColor="#ed2440"
-                        android:paddingTop="4dp"
-                        android:paddingBottom="4dp"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
+                        android:layout_marginStart="4dp"
+                        android:paddingTop="4dp"
+                        android:paddingBottom="4dp"
                         android:text="车辆预估到达时间会随着车辆实际行驶路况随之变化，请务必在该页面持续关注车辆行驶状态(到站时间)!"
-                        android:layout_marginStart="4dp" />
+                        android:textColor="#ed2440"
+                        android:textSize="13sp" />
                 </LinearLayout>
 
+                <!-- RecyclerView 容器 -->
                 <FrameLayout
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
+                    android:layout_margin="8dp"
                     android:background="@drawable/white_blue_bg_gradient"
-                    android:padding="8dp"
-                    android:layout_margin="8dp">
+                    android:padding="8dp">
 
                     <androidx.recyclerview.widget.RecyclerView
                         android:id="@+id/recyclerView"
@@ -246,8 +293,8 @@
                         android:layout_height="wrap_content"
                         android:layout_gravity="center"
                         android:text="暂无数据~"
-                        android:textSize="16sp"
                         android:textColor="#666666"
+                        android:textSize="16sp"
                         android:visibility="visible" />
                 </FrameLayout>
 

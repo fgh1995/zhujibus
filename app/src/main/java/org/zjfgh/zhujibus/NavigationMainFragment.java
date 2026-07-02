@@ -335,7 +335,26 @@ public class NavigationMainFragment extends Fragment {
 
     public void updateNextStation(String stationName) {
         if (navNextStation != null) {
-            navNextStation.setText("下一站: " + stationName);
+            if (stationName == null || stationName.isEmpty()) {
+                // ⭐ 不显示下一站
+                navNextStation.setText("");
+            } else {
+                navNextStation.setText("下一站: " + stationName);
+            }
+        }
+    }
+
+    /**
+     * ⭐ 直接设置下一站显示文本（不加"下一站: "前缀，用于"到达: XX"等自定义文案）
+     * @param displayText null/空 → 不显示
+     */
+    public void updateNextStationRaw(String displayText) {
+        if (navNextStation != null) {
+            if (displayText == null || displayText.isEmpty()) {
+                navNextStation.setText("");
+            } else {
+                navNextStation.setText(displayText);
+            }
         }
     }
 
@@ -387,21 +406,6 @@ public class NavigationMainFragment extends Fragment {
         }
 
         this.stations = directionData.stationList;
-
-        // ⭐ 设置公交线路起点和终点（用于GPS导航）
-        if (stations != null && !stations.isEmpty() && navigation != null) {
-            BusApiClient.BusLineStation startStation = stations.get(0);  // 起点站
-            BusApiClient.BusLineStation endStation = stations.get(stations.size() - 1);  // 终点站
-            
-            if (startStation.poiOriginLat != 0 && startStation.poiOriginLon != 0 &&
-                endStation.poiOriginLat != 0 && endStation.poiOriginLon != 0) {
-                navigation.setBusLineStartAndEnd(
-                        startStation.poiOriginLat, startStation.poiOriginLon,
-                        endStation.poiOriginLat, endStation.poiOriginLon
-                );
-                Log.d(TAG, "[GPS] 已设置导航起点和终点: 起点=" + startStation.stationName + ", 终点=" + endStation.stationName);
-            }
-        }
 
         // 0. 切换方向时，先清空旧方向的所有车辆 marker
         //    （避免上一方向的车辆残留在新方向地图上）
@@ -464,20 +468,69 @@ public class NavigationMainFragment extends Fragment {
             navigation.updateBusMarkers(positions);
         }
 
-        // 自动更新下一站
+        // ⭐ 自动更新下一站：找离用户选站最近且未到达的车辆，用它的下一站
+        //    如果用户没选目标站点、或者找不到匹配车辆、或者一开始没有数据 → 不显示下一站
+        //    如果命中的车辆已到站（isArrived=true）→ 显示"到达: XX"
         if (positions != null && !positions.isEmpty() && stations != null && !stations.isEmpty()) {
+            int userTargetIndex = (gpsPositionIndex >= 0) ? gpsPositionIndex : -1;
+
+            String nextStationName = null;
+            int bestVehicleIndex = -1;
+            boolean bestVehicleArrived = false;
+
             for (BusApiClient.BusPosition vehicle : positions) {
-                if (vehicle.currentStationOrder > 0 && vehicle.currentStationOrder <= stations.size()) {
-                    int vehicleIndex = vehicle.currentStationOrder - 1;
-                    if (vehicleIndex + 1 < stations.size()) {
-                        String nextStation = stations.get(vehicleIndex + 1).stationName;
-                        updateNextStation(nextStation);
-                    } else if (vehicleIndex == stations.size() - 1) {
-                        updateNextStation("终点站");
+                if (vehicle == null) continue;
+                if (vehicle.currentStationOrder <= 0 || vehicle.currentStationOrder > stations.size()) continue;
+
+                int vehicleIndex = vehicle.currentStationOrder - 1;
+
+                if (userTargetIndex >= 0) {
+                    if (vehicleIndex >= userTargetIndex) continue;
+                    if (vehicleIndex > bestVehicleIndex) {
+                        bestVehicleIndex = vehicleIndex;
+                        bestVehicleArrived = vehicle.isArrived;
                     }
+                } else {
+                    // ⭐ 用户没选目标站点 → 不显示下一站
                     break;
                 }
             }
+
+            // ⭐ 用最佳车辆的下一站
+            String displayText = null;
+            if (userTargetIndex >= 0 && bestVehicleIndex >= 0) {
+                boolean isAtEndStation = (bestVehicleIndex == stations.size() - 1);
+
+                if (bestVehicleArrived && isAtEndStation) {
+                    // ⭐ 命中的车已到达终点站
+                    displayText = "已到达终点站";
+                } else if (bestVehicleArrived) {
+                    // ⭐ 命中的车到达中间站
+                    if (bestVehicleIndex + 1 < stations.size()) {
+                        String arriveStationName = stations.get(bestVehicleIndex + 1).stationName;
+                        displayText = "到达: " + arriveStationName;
+                    }
+                } else if (isAtEndStation) {
+                    // ⭐ 命中的车在途中，下一站是终点站
+                    displayText = "下一站: 终点站";
+                } else {
+                    // ⭐ 命中的车在途中，下一站是普通站
+                    if (bestVehicleIndex + 1 < stations.size()) {
+                        String nextName = stations.get(bestVehicleIndex + 1).stationName;
+                        displayText = "下一站: " + nextName;
+                    }
+                }
+            }
+
+            // null → 不显示
+            if (displayText != null) {
+                updateNextStationRaw(displayText);
+            } else {
+                updateNextStationRaw(null);
+            }
+        } else {
+            // ⭐ 一开始没有数据 → 不显示下一站
+            updateNextStationRaw(null);
         }
     }
 

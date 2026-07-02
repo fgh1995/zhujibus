@@ -116,12 +116,10 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
     // 高德定位 SDK
     private AMapLocationClient locationClient;
     private AMapLocationClientOption locationOption;
+    private float lastCameraBearing = -1f;
 
     // ⭐ 导航 SDK 核心类
     private AMapNavi aMapNavi;
-
-    // ⭐ 自车位置管理 Overlay（官方方式：自定义车标）
-    private CarOverlay carOverlay;
 
     // 用于计算"运动方向"的历史位置
     private double lastLat = 0;
@@ -133,15 +131,15 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
     private boolean perspectiveAppliedOnFirstFix = false;
     // ⭐ 标记：当前是否为 GPS 模式（GPS 模式才应用 3D 导航视角，网络模式保持自由视角）
     private boolean isGpsMode = false;
-    // ⭐ 标记：GPS导航SDK是否已启动（避免重复启动）
-    private boolean gpsNavigationStarted = false;
-    // ⭐ 标记：地图锁车态（true=跟随车移动，false=用户可拖动）
-    private boolean isCarLocked = true;
-    // ⭐ Handler：用于触摸后延迟锁车
-    private final Handler carLockHandler = new Handler(Looper.getMainLooper());
-    private static final int CAR_LOCK_DELAY_MS = 3000;  // 3秒后自动锁车
     /** 最近一次 AMapLocation 定位成功（errorCode == 0）的时间戳（毫秒） */
     private volatile long lastGpsSuccessTimeMs = 0L;
+
+    /**
+     * ⭐ 记录网络模式 drawRoute 自适应后的 zoom（用于切回网络模式时恢复）
+     * drawRoute 调用 animateCamera(newLatLngBounds) 后，会把生效的 zoom 记到这里
+     * 切回网络模式时使用该 zoom 恢复（而不是 GPS 模式的贴地 zoom）
+     */
+    private float lastNetworkAdaptiveZoom = -1f;
 
     // ---- 公交车辆 marker 管理（仅网络模式） ----
     /** 当前线路方向的所有公交车辆 SmoothMoveMarker（车牌 → marker） */
@@ -165,15 +163,21 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
     private BitmapDescriptor busIconDescriptor;
     private boolean busIconLoaded = false;
 
+    /**
+     * ⭐ 网络模式下：是否处于"跟随命中的车辆"模式
+     * 用户选择目标站点后开启，清除目标站点后关闭
+     */
+    private boolean isFollowBusMode = false;
+
     // ---- 路线点（用于车辆 marker 的 snap-to-road 平滑动画） ----
     private List<LatLng> routePoints = new ArrayList<>();
 
     /**
-     * 罗盘模式下的目标相机参数（完全俯视 + 适中缩放）
+     * 罗盘模式下的目标相机参数（贴地 + 3D 透视）
      * 使用 static final 防止在 onLocationChanged 中被重置
      */
-    public static final float TARGET_ZOOM = 15f;   // 适中缩放（不要太贴地）
-    public static final float TARGET_TILT = 0f;    // 完全俯视（2D视角）
+    public static final float TARGET_ZOOM = 18f;   // GPS 模式贴地导航
+    public static final float TARGET_TILT = 65f;   // GPS 模式 3D 俯视
 
     public AmapNavigationView(Context context, TextureMapView mapView) {
         this.appContext = context.getApplicationContext();
@@ -260,9 +264,6 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
         // ⭐ 预生成路线方向箭头 marker icon（参考 CSDN 方案：Marker + setRotation）
         arrowMarkerIcon = createArrowMarkerIcon();
 
-        // ⭐ 初始化自车位置管理 Overlay（官方方式）
-        carOverlay = new CarOverlay(appContext, mapView);
-
         // 监听地图加载成功/失败（排查 KEY/SHA1 不匹配的关键日志）
         if (aMap != null) {
             try {
@@ -271,20 +272,6 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
                     applyNavigationCameraPerspective();
                 });
                 aMap.setOnMapClickListener(latLng -> Log.v(TAG, "[MAP] click at " + latLng));
-
-                // ⭐ 监听地图触摸事件：解锁车 → 3秒后自动锁车
-                aMap.setOnMapTouchListener(motionEvent -> {
-                    if (isGpsMode && isCarLocked) {
-                        unlockCar();  // 用户触摸时解锁车
-                        // 3秒后自动锁车
-                        carLockHandler.removeCallbacks(this::lockCar);
-                        carLockHandler.postDelayed(this::lockCar, CAR_LOCK_DELAY_MS);
-                    }
-                });
-
-                // ⭐ GPS模式：不使用 MyLocationStyle，使用 CarOverlay 绘制车标
-                // 官方方式：完全自定义车标，禁用内置定位图层
-                aMap.setMyLocationEnabled(false);  // 禁用内置定位图层
 
                 // ⭐ 监听地图缩放变化 → 自适应调整箭头密度
                 aMap.setOnCameraChangeListener(new AMap.OnCameraChangeListener() {
@@ -309,7 +296,7 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
             }
         }
 
-        // UI 设置：左上角小罗盘（点击回正北）、禁用缩放按钮、禁用定位按钮
+        // UI 设置：左上角小罗盘（点击回正北）、禁用缩放按钮、启用定位按钮
         if (uiSettings != null) {
             uiSettings.setCompassEnabled(true);
             uiSettings.setZoomControlsEnabled(false);
@@ -319,10 +306,25 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
             uiSettings.setScaleControlsEnabled(false);
         }
 
-        // ⭐ GPS模式：不使用 MyLocationStyle，使用 CarOverlay 绘制车标（官方方式）
-        // 初始化时禁用内置定位图层
-        if (aMap != null) {
-            aMap.setMyLocationEnabled(false);  // 禁用内置定位图层
+        // 定位样式：罗盘模式（地图跟随设备方向旋转，车头朝上）
+        // ⭐ 注意：网络模式（默认）下不启用 my-location、不开定位，省电
+        if (aMap != null && isGpsMode) {
+            try {
+                MyLocationStyle style = new MyLocationStyle();
+                style.myLocationType(MyLocationStyle.LOCATION_TYPE_LOCATION_ROTATE);
+                style.interval(2000);
+                style.strokeColor(0xFF1AAD19);
+                style.radiusFillColor(0x5500AAFF);
+                style.strokeWidth(2.0f);
+                aMap.setMyLocationStyle(style);
+
+                aMap.setLocationSource(this);
+                aMap.setMyLocationEnabled(true);
+
+                applyNavigationCameraPerspective();
+            } catch (Throwable t) {
+                Log.e(TAG, "setMyLocationStyle/setLocationSource failed: " + t.getMessage(), t);
+            }
         }
 
         // 初始化高德定位 SDK（替代系统 GPS）
@@ -330,8 +332,7 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
     }
 
     /**
-     * 应用导航视角：3D 透视俯视 + 较高缩放 + 禁止手势
-     * ⭐ 注意：只在导航启动时调用一次，后续通过定位回调更新地图位置
+     * 应用导航视角：3D 透视俯视 + 较高缩放 + 中心点偏移
      */
     private void applyNavigationCameraPerspective() {
         if (aMap == null) return;
@@ -340,59 +341,17 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
             return;
         }
         try {
-            // ⭐ 导航视角：只设置 zoom、tilt，不设置 target 和 bearing
-            //    target 和 bearing 会通过定位回调自动更新（跟随车移动和旋转）
-            CameraPosition currentPos = aMap.getCameraPosition();
             CameraPosition cp = new CameraPosition.Builder()
-                    .target(currentPos.target)  // 保持当前位置
-                    .zoom(TARGET_ZOOM)          // 适中缩放（15级，不要太贴地）
-                    .tilt(TARGET_TILT)          // 完全俯视（0度，2D视角）
-                    .bearing(currentPos.bearing) // 保持当前方向
+                    .target(new LatLng(0, 0))
+                    .zoom(TARGET_ZOOM)
+                    .tilt(TARGET_TILT)
+                    .bearing(0f)
                     .build();
             aMap.moveCamera(CameraUpdateFactory.newCameraPosition(cp));
 
-            // ⭐ 禁止用户手势改变视角（锁车态）
-            aMap.getUiSettings().setTiltGesturesEnabled(false);      // 禁止倾斜手势
-            aMap.getUiSettings().setRotateGesturesEnabled(false);    // 禁止旋转手势
-            // ⚠️ 不禁止缩放手势，让用户可以调整视野范围
-            
-            Log.d(TAG, "[MAP] 导航视角已应用：zoom=" + TARGET_ZOOM + ", tilt=" + TARGET_TILT + ", 锁车态已启用");
+            aMap.getUiSettings().setTiltGesturesEnabled(false);
         } catch (Throwable t) {
             Log.e(TAG, "applyNavigationCameraPerspective failed: " + t.getMessage(), t);
-        }
-    }
-
-    /**
-     * ⭐ 锁车：地图跟随车移动和旋转
-     */
-    private void lockCar() {
-        isCarLocked = true;
-        Log.d(TAG, "[NAV] 锁车态已启用：地图跟随车移动和旋转");
-        if (carOverlay != null) {
-            carOverlay.setLock(true);  // ⭐ 调用 CarOverlay 的锁车方法
-        }
-        if (aMap != null) {
-            // 禁止用户手势（锁车态）
-            aMap.getUiSettings().setTiltGesturesEnabled(false);
-            aMap.getUiSettings().setRotateGesturesEnabled(false);
-        }
-    }
-
-    /**
-     * ⭐ 解锁车：用户可以拖动地图
-     */
-    private void unlockCar() {
-        isCarLocked = false;
-        Log.d(TAG, "[NAV] 解锁车态：用户可以拖动地图");
-        if (carOverlay != null) {
-            carOverlay.setLock(false);  // ⭐ 调用 CarOverlay 的解锁车方法
-        }
-        if (aMap != null) {
-            // 允许用户手势（但保持3D视角）
-            aMap.getUiSettings().setTiltGesturesEnabled(true);      // 允许倾斜手势
-            aMap.getUiSettings().setRotateGesturesEnabled(true);    // 允许旋转手势
-            aMap.getUiSettings().setZoomGesturesEnabled(true);      // 允许缩放手势
-            aMap.getUiSettings().setScrollGesturesEnabled(true);    // 允许拖动手势
         }
     }
 
@@ -538,24 +497,27 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
         }
         locationListener.onLocationChanged(location);
 
-        // ⭐ GPS模式首次定位成功：启动导航SDK的算路+导航
-        if (isGpsMode && !gpsNavigationStarted && targetStationPos != null && aMapNavi != null) {
-            gpsNavigationStarted = true;
-            Log.d(TAG, "[NAV] GPS首次定位成功，启动导航SDK算路到目标站点");
-            startGpsNavigation(
-                    aMapLocation.getLatitude(),
-                    aMapLocation.getLongitude(),
-                    targetStationPos.latitude,
-                    targetStationPos.longitude
-            );
-        }
-
-        // ⭐ 注意：导航SDK启动后，不再使用 AMapLocationClient 的定位数据绘制车标
-        // 而是使用导航SDK的 onLocationChange(AMapNaviLocation) 回调
-
         if (!perspectiveAppliedOnFirstFix && aMap != null) {
             perspectiveAppliedOnFirstFix = true;
             applyNavigationCameraPerspective();
+        }
+
+        if (aMap != null && bearing >= 0 && bearing <= 360) {
+            if (Math.abs(bearing - lastCameraBearing) > 1.0f) {
+                try {
+                    CameraPosition current = aMap.getCameraPosition();
+                    aMap.animateCamera(CameraUpdateFactory.newCameraPosition(
+                            new CameraPosition(
+                                    current.target,
+                                    TARGET_ZOOM,
+                                    TARGET_TILT,
+                                    bearing
+                            )
+                    ));
+                    lastCameraBearing = bearing;
+                } catch (Throwable t) {
+                }
+            }
         }
     }
 
@@ -574,11 +536,6 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
     @Override
     public void onStartNavi(int type) {
         Log.d(TAG, "[NAVI] onStartNavi —— 导航开始，type=" + type);
-        // ⭐ 导航启动时，强制应用导航视角（锁车态、3D视角）
-        if (aMap != null) {
-            applyNavigationCameraPerspective();
-            Log.d(TAG, "[NAVI] 导航视角已应用：锁车态 + 3D视角");
-        }
     }
 
     @Override
@@ -588,13 +545,7 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
 
     @Override
     public void onLocationChange(AMapNaviLocation location) {
-        // ⭐ 导航SDK的定位回调（官方方式：使用这个回调绘制车标）
-        if (isGpsMode && carOverlay != null && location != null && aMap != null) {
-            LatLng carPos = new LatLng(location.getCoord().getLatitude(), location.getCoord().getLongitude());
-            float carBearing = location.getBearing();
-            carOverlay.draw(aMap, carPos, carBearing);  // ⭐ 绘制车标 + 更新地图视角（锁车态下）
-            //Log.d(TAG, "[NAVI] onLocationChange: lat=" + carPos.latitude + ", lng=" + carPos.longitude + ", bearing=" + carBearing);
-        }
+        Log.v(TAG, "[NAVI] onLocationChange —— 位置更新");
     }
 
     @Override
@@ -730,48 +681,35 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
 
     @Override
     public void onCalculateRouteSuccess(AMapCalcRouteResult aMapCalcRouteResult) {
-        Log.d(TAG, "[NAVI] onCalculateRouteSuccess —— 算路成功");
+        Log.d(TAG, "[NAVI] onCalculateRouteSuccess (new) —— 算路成功");
 
-        // ⭐ 算路成功：绘制导航路线 + 启动GPS导航
-        if (aMapNavi != null && aMap != null) {
-            AMapNaviPath naviPath = aMapNavi.getNaviPath();
-            if (naviPath != null) {
-                // 绘制导航SDK的路线（使用自定义方式）
-                drawNaviRoute(naviPath);
-
-                // ⭐ 启动GPS导航
-                aMapNavi.startNavi(NaviType.GPS);
-                Log.d(TAG, "[NAVI] GPS导航已启动");
-            }
+        if (aMapNavi == null) {
+            return;
         }
-    }
 
-    /**
-     * ⭐ 绘制导航SDK的路线（官方方式）
-     */
-    private void drawNaviRoute(AMapNaviPath naviPath) {
-        if (aMap == null || naviPath == null) return;
-
-        try {
-            // ⭐ 获取路线坐标点（正确方法：getCoordList）
-            List<NaviLatLng> naviLatLngList = naviPath.getCoordList();
-            if (naviLatLngList == null || naviLatLngList.isEmpty()) {
-                Log.w(TAG, "[NAVI] drawNaviRoute: 路线坐标点为空");
-                return;
+        // ⭐ GPS 模式：从导航SDK获取路线数据，自己画到地图上
+        if (isGpsMode) {
+            try {
+                AMapNaviPath naviPath = aMapNavi.getNaviPath();
+                if (naviPath != null) {
+                    java.util.List<NaviLatLng> naviLatLngList = naviPath.getCoordList();
+                    if (naviLatLngList != null && !naviLatLngList.isEmpty()) {
+                        java.util.List<LatLng> points = new java.util.ArrayList<>();
+                        for (NaviLatLng naviLatLng : naviLatLngList) {
+                            points.add(new LatLng(naviLatLng.getLatitude(), naviLatLng.getLongitude()));
+                        }
+                        // ⭐ 调用 drawRoute，会自动清空旧路线
+                        drawRoute(points);
+                        Log.d(TAG, "[NAVI] GPS模式路线已重新绘制，路径点数量=" + points.size());
+                    }
+                }
+            } catch (Throwable t) {
+                Log.e(TAG, "onCalculateRouteSuccess 画线失败: " + t.getMessage(), t);
             }
 
-            // 转换为 LatLng 列表
-            List<LatLng> points = new ArrayList<>();
-            for (NaviLatLng naviLatLng : naviLatLngList) {
-                points.add(new LatLng(naviLatLng.getLatitude(), naviLatLng.getLongitude()));
-            }
-
-            // 绘制自定义路线（白色光晕 + 绿色主线）
-            drawRoute(points);
-
-            Log.d(TAG, "[NAVI] drawNaviRoute: 路线已绘制，点数=" + points.size());
-        } catch (Throwable t) {
-            Log.e(TAG, "[NAVI] drawNaviRoute failed: " + t.getMessage(), t);
+            // 启动GPS导航
+            aMapNavi.startNavi(NaviType.GPS);
+            Log.d(TAG, "[NAVI] GPS导航已启动");
         }
     }
 
@@ -821,13 +759,7 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
             return;
         }
 
-        // ⭐ GPS模式下不绘制自定义路线（使用导航SDK的内置路线）
-        if (isGpsMode) {
-            Log.d(TAG, "[ROUTE] GPS模式：跳过自定义路线绘制（使用导航SDK内置路线）");
-            return;
-        }
-
-        // 清理旧路线
+        // 清理旧路线（GPS模式和网络模式都需要清空）
         if (routeGlowPolyline != null) { routeGlowPolyline.remove(); routeGlowPolyline = null; }
         if (routeMainPolyline != null) { routeMainPolyline.remove(); routeMainPolyline = null; }
         if (routePolyline != null) { routePolyline.remove(); routePolyline = null; }
@@ -853,6 +785,8 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
         // 3) 沿线方向箭头 marker
         drawArrowMarkers(points);
 
+        Log.d(TAG, "[ROUTE] 路线已绘制，路径点数量=" + points.size() + ", GPS模式=" + isGpsMode);
+
         try {
             LatLngBounds.Builder builder = LatLngBounds.builder();
             for (LatLng p : points) {
@@ -861,6 +795,16 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
             LatLngBounds bounds = builder.build();
             CameraUpdate update = CameraUpdateFactory.newLatLngBounds(bounds, 100);
             aMap.animateCamera(update);
+
+            // ⭐ 延迟记录自适应后的 zoom（animateCamera 是异步的，等动画完成后再读）
+            mainHandler.postDelayed(() -> {
+                try {
+                    if (aMap != null && !isGpsMode) {
+                        lastNetworkAdaptiveZoom = aMap.getCameraPosition().zoom;
+                        Log.d(TAG, "[ZOOM] 记录网络模式自适应 zoom=" + lastNetworkAdaptiveZoom);
+                    }
+                } catch (Throwable ignore) {}
+            }, 500);  // 500ms 后读取（动画时长通常 300-500ms）
         } catch (Exception e) {
             Log.e(TAG, "drawRoute bounds failed: " + e.getMessage());
         }
@@ -1062,7 +1006,6 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
 
     /**
      * 设置/取消罗盘模式
-     * ⭐ 注意：GPS模式下不使用 MyLocationStyle，使用 CarOverlay 绘制车标
      */
     public void setCompassMode(boolean enabled) {
         if (Looper.myLooper() != Looper.getMainLooper()) {
@@ -1073,6 +1016,26 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
         this.isCompassMode = enabled;
         if (uiSettings != null) {
             uiSettings.setCompassEnabled(enabled);
+        }
+        if (aMap != null) {
+            try {
+                MyLocationStyle style = new MyLocationStyle();
+                style.myLocationType(enabled
+                        ? MyLocationStyle.LOCATION_TYPE_MAP_ROTATE
+                        : MyLocationStyle.LOCATION_TYPE_FOLLOW);
+                style.interval(2000);
+                style.strokeColor(0xFF1AAD19);
+                style.radiusFillColor(0x5500AAFF);
+                style.strokeWidth(2.0f);
+                aMap.setMyLocationStyle(style);
+
+                if (enabled) {
+                    aMap.setLocationSource(this);
+                    aMap.setMyLocationEnabled(true);
+                }
+            } catch (Throwable t) {
+                Log.e(TAG, "setCompassMode update style failed: " + t.getMessage());
+            }
         }
     }
 
@@ -1104,38 +1067,54 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
                 clearBusMarkers();
                 setCompassMode(true);
                 perspectiveAppliedOnFirstFix = false;
-                gpsNavigationStarted = false;  // 重置导航启动标记，等待定位后启动
-                isCarLocked = true;            // ⭐ 初始状态：锁车态
-                carLockHandler.removeCallbacksAndMessages(null);  // 清除所有锁车任务
                 startAmapLocation();
-
-                // ⭐ GPS模式：如果有目标站点，立即启动导航SDK的算路+导航
-                if (targetStationPos != null && aMapNavi != null) {
-                    // 等待首次定位成功后再启动导航（在 onLocationChanged 中触发）
-                    Log.d(TAG, "[NAV] GPS模式已启用，等待定位数据后启动导航到目标站点: " + targetStationPos);
-                }
             } else {
-                // ⭐ 网络模式：关闭罗盘模式，停止导航，清除车标，使用自定义路线
-                aMap.setMyLocationEnabled(false);  // 禁用内置定位图层
+                // ⭐ 网络模式：关闭罗盘模式，停止导航，使用自定义路线
+                aMap.setMyLocationEnabled(false);
                 setCompassMode(false);
                 stopGpsNavigation();  // 停止导航SDK的导航
                 stopAmapLocation();
-                gpsNavigationStarted = false;  // 重置导航启动标记
 
-                // ⭐ 清除车标（CarOverlay）
-                if (carOverlay != null) {
-                    carOverlay.reset();  // 清除车标 Marker
+                // ⭐ 恢复到网络模式：自适应 zoom + 居中到路线中心（不沿用 GPS 模式的贴地 zoom）
+                //    如果还没记录 zoom（首次进入），用当前 zoom
+                float restoreZoom = (lastNetworkAdaptiveZoom > 0)
+                        ? lastNetworkAdaptiveZoom
+                        : aMap.getCameraPosition().zoom;
+                try {
+                    if (routePoints != null && !routePoints.isEmpty()) {
+                        // ⭐ 计算路线中心点（用所有点的经纬度平均值）
+                        double centerLat = 0, centerLng = 0;
+                        for (LatLng p : routePoints) {
+                            centerLat += p.latitude;
+                            centerLng += p.longitude;
+                        }
+                        int n = routePoints.size();
+                        LatLng routeCenter = new LatLng(centerLat / n, centerLng / n);
+
+                        // ⭐ 手动设置：center=路线中心，zoom=记录的自适应值，tilt=0，bearing=0
+                        aMap.moveCamera(CameraUpdateFactory.newCameraPosition(
+                                new CameraPosition(
+                                        routeCenter,       // 路线中心
+                                        restoreZoom,       // ⭐ 记录的自适应 zoom
+                                        0f,                // 完全俯视
+                                        0f                 // 正北方向
+                                )
+                        ));
+                        Log.d(TAG, "[ZOOM] 切回网络模式：center=" + routeCenter + ", zoom=" + restoreZoom);
+                    } else {
+                        // 没有路线数据，只重置 tilt/bearing
+                        aMap.moveCamera(CameraUpdateFactory.newCameraPosition(
+                                new CameraPosition(
+                                        aMap.getCameraPosition().target,
+                                        restoreZoom,
+                                        0f, 0f
+                                )
+                        ));
+                        Log.d(TAG, "[ZOOM] 切回网络模式：无路线数据，使用 zoom=" + restoreZoom);
+                    }
+                } catch (Throwable t) {
+                    Log.e(TAG, "setGpsMode(false) reset camera failed: " + t.getMessage(), t);
                 }
-
-                // 恢复2D视角
-                aMap.moveCamera(CameraUpdateFactory.newCameraPosition(
-                        new CameraPosition(
-                                aMap.getCameraPosition().target,
-                                aMap.getCameraPosition().zoom,
-                                0f,
-                                0f
-                        )
-                ));
 
                 lastGpsSuccessTimeMs = 0L;
             }
@@ -1151,27 +1130,17 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
     public void setTargetStation(double lat, double lng, int stationIndex) {
         this.targetStationPos = new LatLng(lat, lng);
         this.targetStationIndex = stationIndex;
-        Log.d(TAG, "[NAV] setTargetStation: lat=" + lat + ", lng=" + lng + ", index=" + stationIndex);
-    }
-
-    /**
-     * ⭐ 设置公交线路的起点站和终点站（GPS导航使用）
-     * @param startLat 起点站纬度
-     * @param startLng 起点站经度
-     * @param endLat 终点站纬度
-     * @param endLng 终点站经度
-     */
-    public void setBusLineStartAndEnd(double startLat, double startLng, double endLat, double endLng) {
-        // 起点：公交线路起点站（用于GPS导航的起点，用户当前位置会实时更新）
-        // 终点：公交线路终点站（用于GPS导航的终点）
-        this.targetStationPos = new LatLng(endLat, endLng);
-        this.targetStationIndex = -1;  // 终点站索引
-        Log.d(TAG, "[NAV] setBusLineStartAndEnd: 起点(" + startLat + "," + startLng + "), 终点(" + endLat + "," + endLng + ")");
+        // ⭐ 设置目标站点后，开启"跟随命中的车辆"模式
+        this.isFollowBusMode = true;
+        Log.d(TAG, "[NAV] setTargetStation: 开启跟随模式, stationIndex=" + stationIndex);
     }
 
     public void clearTargetStation() {
         this.targetStationPos = null;
         this.targetStationIndex = -1;
+        // ⭐ 清除目标站点后，关闭"跟随命中的车辆"模式
+        this.isFollowBusMode = false;
+        Log.d(TAG, "[NAV] clearTargetStation: 关闭跟随模式");
     }
 
     public long getLastGpsSuccessTimeMs() {
@@ -1396,9 +1365,12 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
             }
         }
 
+        // ⭐ 命中的车辆（提到外层，供跟随模式使用）
+        String nearestVehiclePlate = null;
+
         if (!isGpsMode && speedChangeListener != null && !busMarkers.isEmpty()) {
             int nearestVehicleStationIndex = -1;
-            String nearestVehiclePlate = null;
+            nearestVehiclePlate = null;
             float nearestVehicleSpeed = 0f;
 
             for (BusApiClient.BusPosition pos : positions) {
@@ -1452,6 +1424,31 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
                 }
             } else {
                 speedChangeListener.onSpeedChanged(-1f);
+            }
+        }
+
+        // ⭐ 网络模式 + 跟随模式 + 命中车辆存在：让地图跟随命中的车辆（动画位置）移动
+        //    不自动缩放，保持当前 zoom，只让车辆在地图居中
+        if (!isGpsMode && isFollowBusMode && nearestVehiclePlate != null) {
+            try {
+                SmoothMoveMarker smm = busMarkers.get(nearestVehiclePlate);
+                if (smm != null) {
+                    LatLng busPos = smm.getPosition();  // ⭐ 动画中的位置（不是目标位置）
+                    if (busPos != null && aMap != null) {
+                        CameraPosition cur = aMap.getCameraPosition();
+                        // 只更新 center（车辆位置），保持 zoom/tilt/bearing 不变
+                        aMap.moveCamera(CameraUpdateFactory.newCameraPosition(
+                                new CameraPosition(
+                                        busPos,                // ⭐ 跟随车辆动画位置
+                                        cur.zoom,              // 保持当前 zoom（不自动缩放）
+                                        cur.tilt,              // 保持当前 tilt
+                                        cur.bearing            // 保持当前 bearing
+                                )
+                        ));
+                    }
+                }
+            } catch (Throwable t) {
+                Log.w(TAG, "[FOLLOW] 跟随车辆失败: " + t.getMessage());
             }
         }
     }
