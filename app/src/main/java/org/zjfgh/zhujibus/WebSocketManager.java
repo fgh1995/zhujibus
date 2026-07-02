@@ -41,6 +41,7 @@ public class WebSocketManager {
     private static final String MSG_TYPE_DATA = "data";
     private static final String MSG_TYPE_EVENT = "event";
     private static final String MSG_TYPE_ONLINE = "online";  // ⭐ 在线人数广播
+    // ⭐ 版本号 JSON 消息格式：{"type":"version","version":"1.0.0(00001)"}
 
     private final Context context;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -288,11 +289,44 @@ public class WebSocketManager {
                 String msg = MSG_TYPE_ID + ":" + androidId;
                 sendMessage(msg);
                 Log.d(TAG, "发送 Android ID: " + msg);
+
+                // ⭐ 延迟 100ms 发送版本号，确保服务端先处理完 id 注册
+                mainHandler.postDelayed(this::sendAppVersion, 100);
             } else {
                 Log.w(TAG, "无法获取 Android ID");
             }
         } catch (Exception e) {
             Log.e(TAG, "获取 Android ID 失败", e);
+        }
+    }
+
+    /**
+     * ⭐ 发送应用版本号（JSON 格式）
+     *    消息格式：{"type":"version","version":"x.x.x(00000)"}
+     */
+    private void sendAppVersion() {
+        try {
+            String versionName = "";
+            int versionCode = 0;
+            try {
+                versionName = context.getPackageManager()
+                        .getPackageInfo(context.getPackageName(), 0).versionName;
+                versionCode = context.getPackageManager()
+                        .getPackageInfo(context.getPackageName(), 0).versionCode;
+            } catch (Exception e) {
+                Log.w(TAG, "获取版本号失败，使用默认值", e);
+            }
+
+            // 格式化为五位数（00000）
+            String versionStr = String.format("%s(%05d)",
+                    versionName != null ? versionName : "0.0.0", versionCode);
+
+            // ⭐ 用 JSON 封装
+            String json = "{\"type\":\"version\",\"version\":\"" + versionStr + "\"}";
+            sendMessage(json);
+            Log.d(TAG, "发送版本号 JSON: " + json);
+        } catch (Exception e) {
+            Log.e(TAG, "发送版本号失败", e);
         }
     }
 
