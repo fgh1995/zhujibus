@@ -12,6 +12,7 @@ android {
         targetSdk 35
         versionCode 102028
         versionName "1.2.28"
+        //wsServerAddress = `http://zhujibus.android.360967.xyz`
         //githubAddSpeed=`https://gh-proxy.org`
         //remote={"has_notice":true,"notice":"本软件仅支持浙江省诸暨市公交查询，查询时需要联网，网络模式下选择站点后，即可开始播报最近车辆，GPS导航模式下，需要前往当地乘坐对应公交，或者使用第三方定位模拟器方可体验。感谢您的使用，接口版权归诸暨市交通部。","has_update":true,"update_log":"1.[修复]修复了特定类型线路（如“专线”）无法正常载入地图或数据的问题。\n[修复]修复了点击“换向”按钮后，车辆LED屏上“欢迎乘坐”双语提示（中/英文）英文提示丢失的问题。\n3.[重构]优化了GPS模式下地图的导航展示，界面更贴近实际导航体验。\n4.[修复]补充起点站中文自动报站语音丢失片段。"}
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
