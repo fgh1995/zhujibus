@@ -78,6 +78,10 @@ public class NavigationMainFragment extends Fragment {
     private boolean isTwoWayLine = false;
     private int currentDirection = 1;
 
+    // ⭐ 网络模式下用户选中的跟踪车辆车牌（由 BusLineDetailActivity 回传）— 已废弃，仅保留兼容
+    @Deprecated
+    private String trackedVehiclePlate = null;
+
     // ---- 回调 ----
     private OnStationClickListener stationClickListener;
     private OnGpsArrivalListener gpsArrivalListener;
@@ -335,26 +339,16 @@ public class NavigationMainFragment extends Fragment {
 
     public void updateNextStation(String stationName) {
         if (navNextStation != null) {
-            if (stationName == null || stationName.isEmpty()) {
-                // ⭐ 不显示下一站
-                navNextStation.setText("");
-            } else {
-                navNextStation.setText("下一站: " + stationName);
-            }
+            navNextStation.setText("下一站: " + stationName);
         }
     }
 
     /**
-     * ⭐ 直接设置下一站显示文本（不加"下一站: "前缀，用于"到达: XX"等自定义文案）
-     * @param displayText null/空 → 不显示
+     * ⭐ 网络模式：跟踪车辆已到站时调用，显示"已到达 XXX"
      */
-    public void updateNextStationRaw(String displayText) {
+    public void updateArrivedStation(String stationName) {
         if (navNextStation != null) {
-            if (displayText == null || displayText.isEmpty()) {
-                navNextStation.setText("");
-            } else {
-                navNextStation.setText(displayText);
-            }
+            navNextStation.setText("已到达 " + stationName);
         }
     }
 
@@ -407,6 +401,21 @@ public class NavigationMainFragment extends Fragment {
 
         this.stations = directionData.stationList;
 
+        // ⭐ 设置公交线路起点和终点（用于GPS导航）
+        if (stations != null && !stations.isEmpty() && navigation != null) {
+            BusApiClient.BusLineStation startStation = stations.get(0);  // 起点站
+            BusApiClient.BusLineStation endStation = stations.get(stations.size() - 1);  // 终点站
+            
+            if (startStation.poiOriginLat != 0 && startStation.poiOriginLon != 0 &&
+                endStation.poiOriginLat != 0 && endStation.poiOriginLon != 0) {
+                navigation.setBusLineStartAndEnd(
+                        startStation.poiOriginLat, startStation.poiOriginLon,
+                        endStation.poiOriginLat, endStation.poiOriginLon
+                );
+                Log.d(TAG, "[GPS] 已设置导航起点和终点: 起点=" + startStation.stationName + ", 终点=" + endStation.stationName);
+            }
+        }
+
         // 0. 切换方向时，先清空旧方向的所有车辆 marker
         //    （避免上一方向的车辆残留在新方向地图上）
         if (navigation != null) {
@@ -456,82 +465,57 @@ public class NavigationMainFragment extends Fragment {
     }
 
     /**
-     * 更新车辆位置
+     * 更新车辆位置（地图 marker + 站点状态），不再在这里计算"下一站"
+     * "下一站"由 Activity 端用 BusLineDetailActivity#checkAndAnnounceArrival 同样的算法算好后
+     * 通过 setNextStationForNetwork(...) 喂进来——这样就和 next_station_info 的算法一致。
      */
     public void updateBusPositions(List<BusApiClient.BusPosition> positions) {
         if (iBusCloudLineView != null) {
             iBusCloudLineView.updateBusPositions(positions);
         }
-
         // 在地图上绘制所有车辆 marker（仅网络模式生效，GPS 模式内部会清空）
         if (navigation != null) {
             navigation.updateBusMarkers(positions);
         }
+        // ⚠️ 移除：原 updateNextStationForNetwork 自行选车逻辑——会与 Activity 端算法不一致
+    }
 
-        // ⭐ 自动更新下一站：找离用户选站最近且未到达的车辆，用它的下一站
-        //    如果用户没选目标站点、或者找不到匹配车辆、或者一开始没有数据 → 不显示下一站
-        //    如果命中的车辆已到站（isArrived=true）→ 显示"到达: XX"
-        if (positions != null && !positions.isEmpty() && stations != null && !stations.isEmpty()) {
-            int userTargetIndex = (gpsPositionIndex >= 0) ? gpsPositionIndex : -1;
-
-            String nextStationName = null;
-            int bestVehicleIndex = -1;
-            boolean bestVehicleArrived = false;
-
-            for (BusApiClient.BusPosition vehicle : positions) {
-                if (vehicle == null) continue;
-                if (vehicle.currentStationOrder <= 0 || vehicle.currentStationOrder > stations.size()) continue;
-
-                int vehicleIndex = vehicle.currentStationOrder - 1;
-
-                if (userTargetIndex >= 0) {
-                    if (vehicleIndex >= userTargetIndex) continue;
-                    if (vehicleIndex > bestVehicleIndex) {
-                        bestVehicleIndex = vehicleIndex;
-                        bestVehicleArrived = vehicle.isArrived;
-                    }
-                } else {
-                    // ⭐ 用户没选目标站点 → 不显示下一站
-                    break;
-                }
-            }
-
-            // ⭐ 用最佳车辆的下一站
-            String displayText = null;
-            if (userTargetIndex >= 0 && bestVehicleIndex >= 0) {
-                boolean isAtEndStation = (bestVehicleIndex == stations.size() - 1);
-
-                if (bestVehicleArrived && isAtEndStation) {
-                    // ⭐ 命中的车已到达终点站
-                    displayText = "已到达终点站";
-                } else if (bestVehicleArrived) {
-                    // ⭐ 命中的车到达中间站
-                    if (bestVehicleIndex + 1 < stations.size()) {
-                        String arriveStationName = stations.get(bestVehicleIndex + 1).stationName;
-                        displayText = "到达: " + arriveStationName;
-                    }
-                } else if (isAtEndStation) {
-                    // ⭐ 命中的车在途中，下一站是终点站
-                    displayText = "下一站: 终点站";
-                } else {
-                    // ⭐ 命中的车在途中，下一站是普通站
-                    if (bestVehicleIndex + 1 < stations.size()) {
-                        String nextName = stations.get(bestVehicleIndex + 1).stationName;
-                        displayText = "下一站: " + nextName;
-                    }
-                }
-            }
-
-            // null → 不显示
-            if (displayText != null) {
-                updateNextStationRaw(displayText);
-            } else {
-                updateNextStationRaw(null);
-            }
-        } else {
-            // ⭐ 一开始没有数据 → 不显示下一站
-            updateNextStationRaw(null);
+    /**
+     * ⭐ 网络模式：Activity 用 checkAndAnnounceArrival 同款算法算出 nearestVehicle 后，
+     * 把"下一站"或"已到达"通过此方法喂进 fragment 展示。
+     *
+     * @param stationName nearestVehicle 下一站的站名
+     * @param isArrived   nearestVehicle.isArrived（true 时显示"已到达 XXX"）
+     * @param isTerminal  nearestVehicle 已经在末站（用"终点站"文案）
+     */
+    public void setNextStationForNetwork(String stationName, boolean isArrived, boolean isTerminal) {
+        if (navNextStation == null) return;
+        if (stationName == null || stationName.isEmpty()) {
+            navNextStation.setText("加载中");
+            return;
         }
+        if (isArrived) {
+            navNextStation.setText("已到达 " + stationName);
+        } else if (isTerminal) {
+            navNextStation.setText("下一站: 终点站");
+        } else {
+            navNextStation.setText("下一站: " + stationName);
+        }
+    }
+
+    // ---- 以下方法保留兼容旧调用，但已不再用于"网络模式自动选车" ----
+
+    /** @deprecated 由 Activity 端用 checkAndAnnounceArrival 同款算法算出下一站并调用 setNextStationForNetwork */
+    @Deprecated
+    public void setTrackedVehicle(String plate) {
+        this.trackedVehiclePlate = plate;
+        Log.w(TAG, "[NAV] setTrackedVehicle 已废弃，请改用 setNextStationForNetwork");
+    }
+
+    /** @deprecated 无操作占位（旧的"自选车"逻辑已移除） */
+    @Deprecated
+    public void clearTrackedVehicle() {
+        this.trackedVehiclePlate = null;
     }
 
     /**

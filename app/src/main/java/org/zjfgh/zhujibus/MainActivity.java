@@ -473,7 +473,7 @@ public class MainActivity extends AppCompatActivity {
         boolean showUpdate = remoteConfig.hasUpdate && isRemoteNewer;
         if (showUpdate) {
             String text = "发现新版本 v" + remoteConfig.remoteVersionName
-                    + " (" + remoteConfig.remoteVersionCode + ") ，点击查看。";
+                    + " (build " + remoteConfig.remoteVersionCode + ") ，点击查看更新内容";
             if (hstvUpdateNotice != null) hstvUpdateNotice.setText(text);
             if (llUpdateNotice != null) {
                 llUpdateNotice.setVisibility(View.VISIBLE);
@@ -629,14 +629,7 @@ public class MainActivity extends AppCompatActivity {
         }).start();
     }
 
-    private int getLocalVersionCode() {
-        try {
-            return getPackageManager().getPackageInfo(getPackageName(), 0).versionCode;
-        } catch (Exception e) {
-            return 0;
-        }
-    }
-// ==================== WebSocket 状态 UI 更新 ====================
+    // ==================== WebSocket 状态 UI 更新 ====================
 
     private void updateWebSocketStatus(boolean isConnected, String statusText) {
         runOnUiThread(() -> {
@@ -650,7 +643,7 @@ public class MainActivity extends AppCompatActivity {
                 dot.setBackgroundResource(R.drawable.status_dot_online);
                 // ⭐ 已连接：显示"在线 N人使用中"（如果还没有人数数据，先显示"在线"）
                 if (currentOnlineCount >= 0) {
-                    tvStatus.setText(currentOnlineCount + " 人使用中");
+                    tvStatus.setText(currentOnlineCount + " 人在线");
                 } else {
                     tvStatus.setText("在线");
                 }
@@ -675,6 +668,15 @@ public class MainActivity extends AppCompatActivity {
         // 强制刷新状态显示（保持"在线"状态）
         updateWebSocketStatus(true, null);
     }
+
+    private int getLocalVersionCode() {
+        try {
+            return getPackageManager().getPackageInfo(getPackageName(), 0).versionCode;
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
     /**
      * 弹出更新对话框：显示更新日志，提供主下载链接和备用下载链接。
      * 使用自定义UI，美观的升级界面。

@@ -116,10 +116,12 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
     // 高德定位 SDK
     private AMapLocationClient locationClient;
     private AMapLocationClientOption locationOption;
-    private float lastCameraBearing = -1f;
 
     // ⭐ 导航 SDK 核心类
     private AMapNavi aMapNavi;
+
+    // ⭐ 自车位置管理 Overlay（官方方式：自定义车标）
+    private CarOverlay carOverlay;
 
     // 用于计算"运动方向"的历史位置
     private double lastLat = 0;
@@ -131,14 +133,16 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
     private boolean perspectiveAppliedOnFirstFix = false;
     // ⭐ 标记：当前是否为 GPS 模式（GPS 模式才应用 3D 导航视角，网络模式保持自由视角）
     private boolean isGpsMode = false;
+    // ⭐ 标记：GPS导航SDK是否已启动（避免重复启动）
+    private boolean gpsNavigationStarted = false;
+    // ⭐ 标记：地图锁车态（true=跟随车移动，false=用户可拖动）
+    private boolean isCarLocked = true;
+    // ⭐ Handler：用于触摸后延迟锁车
+    private final Handler carLockHandler = new Handler(Looper.getMainLooper());
+    private static final int CAR_LOCK_DELAY_MS = 3000;  // 3秒后自动锁车
     /** 最近一次 AMapLocation 定位成功（errorCode == 0）的时间戳（毫秒） */
     private volatile long lastGpsSuccessTimeMs = 0L;
-
-    /**
-     * ⭐ 记录网络模式 drawRoute 自适应后的 zoom（用于切回网络模式时恢复）
-     * drawRoute 调用 animateCamera(newLatLngBounds) 后，会把生效的 zoom 记到这里
-     * 切回网络模式时使用该 zoom 恢复（而不是 GPS 模式的贴地 zoom）
-     */
+    /** 网络模式下自适应 zoom（drawRoute 后 500ms 记录，切回网络模式时恢复） */
     private float lastNetworkAdaptiveZoom = -1f;
 
     // ---- 公交车辆 marker 管理（仅网络模式） ----
@@ -156,28 +160,46 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
     private final Map<String, Long> lastStationaryEndMs = new HashMap<>();
     /** 静止检测阈值：距离变化小于此值视为静止（米） */
     private static final double STATIONARY_THRESHOLD_M = 5.0;
+
+    // ---- 速度估算滑动窗口 ----
+    /** 速度估算窗口：记录一次移动样本 */
+    private static class SpeedSample {
+        final double distanceM;    // 本次移动距离（米）
+        final long movingTimeMs;   // 本次有效移动时间（毫秒，已排除静止时间）
+        final long timestampMs;    // 记录时间戳
+
+        SpeedSample(double distanceM, long movingTimeMs, long timestampMs) {
+            this.distanceM = distanceM;
+            this.movingTimeMs = movingTimeMs;
+            this.timestampMs = timestampMs;
+        }
+    }
+    /** 每个车辆的速度估算窗口（车牌 → 样本列表） */
+    private final Map<String, List<SpeedSample>> speedWindows = new HashMap<>();
+    /** 窗口时长：只统计最近 60 秒内的移动 */
+    private static final long SPEED_WINDOW_MS = 60000L;
+    /** 最小有效时间：累计有效时间少于此值时不计算速度（毫秒） */
+    private static final long MIN_MOVING_TIME_MS = 3000L;
     /** 目标站点位置（用于计算最近车辆的速度） */
     private LatLng targetStationPos = null;
     /** 目标站点索引（用于找到最近车辆，和 eta 逻辑一致） */
     private int targetStationIndex = -1;
+
+    // ⭐ 地图跟随车辆模式：选中站点后，地图跟 SmoothMoveMarker.getPosition() 走，不动 zoom/tilt/bearing
+    private boolean isFollowBusMode = false;
+    private String followedVehiclePlate = null;
     private BitmapDescriptor busIconDescriptor;
     private boolean busIconLoaded = false;
-
-    /**
-     * ⭐ 网络模式下：是否处于"跟随命中的车辆"模式
-     * 用户选择目标站点后开启，清除目标站点后关闭
-     */
-    private boolean isFollowBusMode = false;
 
     // ---- 路线点（用于车辆 marker 的 snap-to-road 平滑动画） ----
     private List<LatLng> routePoints = new ArrayList<>();
 
     /**
-     * 罗盘模式下的目标相机参数（贴地 + 3D 透视）
+     * 罗盘模式下的目标相机参数（完全俯视 + 适中缩放）
      * 使用 static final 防止在 onLocationChanged 中被重置
      */
-    public static final float TARGET_ZOOM = 18f;   // GPS 模式贴地导航
-    public static final float TARGET_TILT = 65f;   // GPS 模式 3D 俯视
+    public static final float TARGET_ZOOM = 15f;   // 适中缩放（不要太贴地）
+    public static final float TARGET_TILT = 0f;    // 完全俯视（2D视角）
 
     public AmapNavigationView(Context context, TextureMapView mapView) {
         this.appContext = context.getApplicationContext();
@@ -264,6 +286,9 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
         // ⭐ 预生成路线方向箭头 marker icon（参考 CSDN 方案：Marker + setRotation）
         arrowMarkerIcon = createArrowMarkerIcon();
 
+        // ⭐ 初始化自车位置管理 Overlay（官方方式）
+        carOverlay = new CarOverlay(appContext, mapView);
+
         // 监听地图加载成功/失败（排查 KEY/SHA1 不匹配的关键日志）
         if (aMap != null) {
             try {
@@ -272,6 +297,20 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
                     applyNavigationCameraPerspective();
                 });
                 aMap.setOnMapClickListener(latLng -> Log.v(TAG, "[MAP] click at " + latLng));
+
+                // ⭐ 监听地图触摸事件：解锁车 → 3秒后自动锁车
+                aMap.setOnMapTouchListener(motionEvent -> {
+                    if (isGpsMode && isCarLocked) {
+                        unlockCar();  // 用户触摸时解锁车
+                        // 3秒后自动锁车
+                        carLockHandler.removeCallbacks(this::lockCar);
+                        carLockHandler.postDelayed(this::lockCar, CAR_LOCK_DELAY_MS);
+                    }
+                });
+
+                // ⭐ GPS模式：不使用 MyLocationStyle，使用 CarOverlay 绘制车标
+                // 官方方式：完全自定义车标，禁用内置定位图层
+                aMap.setMyLocationEnabled(false);  // 禁用内置定位图层
 
                 // ⭐ 监听地图缩放变化 → 自适应调整箭头密度
                 aMap.setOnCameraChangeListener(new AMap.OnCameraChangeListener() {
@@ -296,7 +335,7 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
             }
         }
 
-        // UI 设置：左上角小罗盘（点击回正北）、禁用缩放按钮、启用定位按钮
+        // UI 设置：左上角小罗盘（点击回正北）、禁用缩放按钮、禁用定位按钮
         if (uiSettings != null) {
             uiSettings.setCompassEnabled(true);
             uiSettings.setZoomControlsEnabled(false);
@@ -306,25 +345,10 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
             uiSettings.setScaleControlsEnabled(false);
         }
 
-        // 定位样式：罗盘模式（地图跟随设备方向旋转，车头朝上）
-        // ⭐ 注意：网络模式（默认）下不启用 my-location、不开定位，省电
-        if (aMap != null && isGpsMode) {
-            try {
-                MyLocationStyle style = new MyLocationStyle();
-                style.myLocationType(MyLocationStyle.LOCATION_TYPE_LOCATION_ROTATE);
-                style.interval(2000);
-                style.strokeColor(0xFF1AAD19);
-                style.radiusFillColor(0x5500AAFF);
-                style.strokeWidth(2.0f);
-                aMap.setMyLocationStyle(style);
-
-                aMap.setLocationSource(this);
-                aMap.setMyLocationEnabled(true);
-
-                applyNavigationCameraPerspective();
-            } catch (Throwable t) {
-                Log.e(TAG, "setMyLocationStyle/setLocationSource failed: " + t.getMessage(), t);
-            }
+        // ⭐ GPS模式：不使用 MyLocationStyle，使用 CarOverlay 绘制车标（官方方式）
+        // 初始化时禁用内置定位图层
+        if (aMap != null) {
+            aMap.setMyLocationEnabled(false);  // 禁用内置定位图层
         }
 
         // 初始化高德定位 SDK（替代系统 GPS）
@@ -332,7 +356,8 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
     }
 
     /**
-     * 应用导航视角：3D 透视俯视 + 较高缩放 + 中心点偏移
+     * 应用导航视角：3D 透视俯视 + 较高缩放 + 禁止手势
+     * ⭐ 注意：只在导航启动时调用一次，后续通过定位回调更新地图位置
      */
     private void applyNavigationCameraPerspective() {
         if (aMap == null) return;
@@ -341,17 +366,59 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
             return;
         }
         try {
+            // ⭐ 导航视角：只设置 zoom、tilt，不设置 target 和 bearing
+            //    target 和 bearing 会通过定位回调自动更新（跟随车移动和旋转）
+            CameraPosition currentPos = aMap.getCameraPosition();
             CameraPosition cp = new CameraPosition.Builder()
-                    .target(new LatLng(0, 0))
-                    .zoom(TARGET_ZOOM)
-                    .tilt(TARGET_TILT)
-                    .bearing(0f)
+                    .target(currentPos.target)  // 保持当前位置
+                    .zoom(TARGET_ZOOM)          // 适中缩放（15级，不要太贴地）
+                    .tilt(TARGET_TILT)          // 完全俯视（0度，2D视角）
+                    .bearing(currentPos.bearing) // 保持当前方向
                     .build();
             aMap.moveCamera(CameraUpdateFactory.newCameraPosition(cp));
 
-            aMap.getUiSettings().setTiltGesturesEnabled(false);
+            // ⭐ 禁止用户手势改变视角（锁车态）
+            aMap.getUiSettings().setTiltGesturesEnabled(false);      // 禁止倾斜手势
+            aMap.getUiSettings().setRotateGesturesEnabled(false);    // 禁止旋转手势
+            // ⚠️ 不禁止缩放手势，让用户可以调整视野范围
+            
+            Log.d(TAG, "[MAP] 导航视角已应用：zoom=" + TARGET_ZOOM + ", tilt=" + TARGET_TILT + ", 锁车态已启用");
         } catch (Throwable t) {
             Log.e(TAG, "applyNavigationCameraPerspective failed: " + t.getMessage(), t);
+        }
+    }
+
+    /**
+     * ⭐ 锁车：地图跟随车移动和旋转
+     */
+    private void lockCar() {
+        isCarLocked = true;
+        Log.d(TAG, "[NAV] 锁车态已启用：地图跟随车移动和旋转");
+        if (carOverlay != null) {
+            carOverlay.setLock(true);  // ⭐ 调用 CarOverlay 的锁车方法
+        }
+        if (aMap != null) {
+            // 禁止用户手势（锁车态）
+            aMap.getUiSettings().setTiltGesturesEnabled(false);
+            aMap.getUiSettings().setRotateGesturesEnabled(false);
+        }
+    }
+
+    /**
+     * ⭐ 解锁车：用户可以拖动地图
+     */
+    private void unlockCar() {
+        isCarLocked = false;
+        Log.d(TAG, "[NAV] 解锁车态：用户可以拖动地图");
+        if (carOverlay != null) {
+            carOverlay.setLock(false);  // ⭐ 调用 CarOverlay 的解锁车方法
+        }
+        if (aMap != null) {
+            // 允许用户手势（但保持3D视角）
+            aMap.getUiSettings().setTiltGesturesEnabled(true);      // 允许倾斜手势
+            aMap.getUiSettings().setRotateGesturesEnabled(true);    // 允许旋转手势
+            aMap.getUiSettings().setZoomGesturesEnabled(true);      // 允许缩放手势
+            aMap.getUiSettings().setScrollGesturesEnabled(true);    // 允许拖动手势
         }
     }
 
@@ -373,7 +440,15 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
             locationClient.setLocationOption(locationOption);
             locationClient.setLocationListener(this);
 
-            Log.d(TAG, "[NAV] initAmapLocation ok, mode=Hight_Accuracy, interval=3000ms");
+            // ⭐ 启动后立即开始定位（不延迟到第一次进入 GPS 模式）
+            // 避免 GPS↔网络模式反复切换时反复冷启动 AMapLocationClient，导致第二次进入 GPS 模式
+            // 需要 1-3 秒才能拿到首个 fix 的"卡顿感"
+            try {
+                locationClient.startLocation();
+                Log.d(TAG, "[NAV] initAmapLocation + startLocation ok, mode=Hight_Accuracy, interval=3000ms");
+            } catch (Throwable t) {
+                Log.e(TAG, "initAmapLocation.startLocation failed: " + t.getMessage(), t);
+            }
         } catch (Throwable t) {
             Log.e(TAG, "initAmapLocation failed: " + t.getMessage(), t);
         }
@@ -445,80 +520,73 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
                 aMapLocation.getSpeed(),
                 aMapLocation.getProvider()));
 
-        if (locationListener == null) {
-            return;
-        }
+        // ⭐ 仅当 AMap SDK 注入了 LocationSource 的 listener 时才转发（只有 setMyLocationEnabled(true) 才会注入）
+        // 注意：即使 locationListener == null，**下面启动导航+应用视角的逻辑也必须继续执行**
+        if (locationListener != null) {
+            Location location = new Location(aMapLocation.getProvider());
+            location.setLatitude(aMapLocation.getLatitude());
+            location.setLongitude(aMapLocation.getLongitude());
+            location.setAccuracy(aMapLocation.getAccuracy());
+            location.setTime(aMapLocation.getTime());
+            location.setSpeed(aMapLocation.getSpeed());
 
-        Location location = new Location(aMapLocation.getProvider());
-        location.setLatitude(aMapLocation.getLatitude());
-        location.setLongitude(aMapLocation.getLongitude());
-        location.setAccuracy(aMapLocation.getAccuracy());
-        location.setTime(aMapLocation.getTime());
-        location.setSpeed(aMapLocation.getSpeed());
+            float speed = aMapLocation.getSpeed();
+            float deviceBearing = aMapLocation.getBearing();
+            float bearing = deviceBearing;
+            if (deviceBearing >= 0 && deviceBearing <= 360) {
+                bearing = deviceBearing;
+            } else {
+                bearing = -1f;
+            }
 
-        float speed = aMapLocation.getSpeed();
-        float deviceBearing = aMapLocation.getBearing();
-        float bearing = deviceBearing;
-        if (deviceBearing >= 0 && deviceBearing <= 360) {
-            bearing = deviceBearing;
-        } else {
-            bearing = -1f;
-        }
+            if (speed > SPEED_THRESHOLD_MPS) {
+                double curLat = aMapLocation.getLatitude();
+                double curLng = aMapLocation.getLongitude();
+                long curTime = aMapLocation.getTime();
 
-        if (speed > SPEED_THRESHOLD_MPS) {
-            double curLat = aMapLocation.getLatitude();
-            double curLng = aMapLocation.getLongitude();
-            long curTime = aMapLocation.getTime();
-
-            if (lastLocTimeMs > 0 && lastLat != 0) {
-                float movementBearing = computeBearing(lastLat, lastLng, curLat, curLng);
-                if (movementBearing >= 0) {
-                    bearing = movementBearing;
-                    Log.v(TAG, String.format("[NAV] using MOVEMENT bearing=%.1f (speed=%.1f m/s, dev=%.1f)",
-                            movementBearing, speed, deviceBearing));
+                if (lastLocTimeMs > 0 && lastLat != 0) {
+                    float movementBearing = computeBearing(lastLat, lastLng, curLat, curLng);
+                    if (movementBearing >= 0) {
+                        bearing = movementBearing;
+                        Log.v(TAG, String.format("[NAV] using MOVEMENT bearing=%.1f (speed=%.1f m/s, dev=%.1f)",
+                                movementBearing, speed, deviceBearing));
+                    }
                 }
-            }
 
-            lastLat = curLat;
-            lastLng = curLng;
-            lastLocTimeMs = curTime;
-        } else {
-            if (lastLat != 0) {
-                Log.v(TAG, String.format("[NAV] low speed (%.1f m/s), reset history, using DEVICE bearing=%.1f",
-                        speed, deviceBearing));
-            }
-            lastLat = 0;
-            lastLng = 0;
-            lastLocTimeMs = 0;
-        }
-
-        if (bearing >= 0 && bearing <= 360) {
-            location.setBearing(bearing);
-        }
-        locationListener.onLocationChanged(location);
-
-        if (!perspectiveAppliedOnFirstFix && aMap != null) {
-            perspectiveAppliedOnFirstFix = true;
-            applyNavigationCameraPerspective();
-        }
-
-        if (aMap != null && bearing >= 0 && bearing <= 360) {
-            if (Math.abs(bearing - lastCameraBearing) > 1.0f) {
-                try {
-                    CameraPosition current = aMap.getCameraPosition();
-                    aMap.animateCamera(CameraUpdateFactory.newCameraPosition(
-                            new CameraPosition(
-                                    current.target,
-                                    TARGET_ZOOM,
-                                    TARGET_TILT,
-                                    bearing
-                            )
-                    ));
-                    lastCameraBearing = bearing;
-                } catch (Throwable t) {
+                lastLat = curLat;
+                lastLng = curLng;
+                lastLocTimeMs = curTime;
+            } else {
+                if (lastLat != 0) {
+                    Log.v(TAG, String.format("[NAV] low speed (%.1f m/s), reset history, using DEVICE bearing=%.1f",
+                            speed, deviceBearing));
                 }
+                lastLat = 0;
+                lastLng = 0;
+                lastLocTimeMs = 0;
             }
+
+            if (bearing >= 0 && bearing <= 360) {
+                location.setBearing(bearing);
+            }
+            locationListener.onLocationChanged(location);
         }
+
+        // ⭐ GPS模式首次定位成功：启动导航SDK的算路+导航
+        if (isGpsMode && !gpsNavigationStarted && targetStationPos != null && aMapNavi != null) {
+            gpsNavigationStarted = true;
+            Log.d(TAG, "[NAV] GPS首次定位成功，启动导航SDK算路到目标站点");
+            startGpsNavigation(
+                    aMapLocation.getLatitude(),
+                    aMapLocation.getLongitude(),
+                    targetStationPos.latitude,
+                    targetStationPos.longitude
+            );
+        }
+
+        // ⭐ 注意：导航SDK启动后，不再使用 AMapLocationClient 的定位数据绘制车标
+        // 而是使用导航SDK的 onLocationChange(AMapNaviLocation) 回调
+        // （applyNavigationCameraPerspective 已在 setGpsMode(true) 立即调用，无需在此重复）
     }
 
     // ========== AMapNaviListener 接口（导航回调） ==========
@@ -536,6 +604,11 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
     @Override
     public void onStartNavi(int type) {
         Log.d(TAG, "[NAVI] onStartNavi —— 导航开始，type=" + type);
+        // ⭐ 导航启动时，强制应用导航视角（锁车态、3D视角）
+        if (aMap != null) {
+            applyNavigationCameraPerspective();
+            Log.d(TAG, "[NAVI] 导航视角已应用：锁车态 + 3D视角");
+        }
     }
 
     @Override
@@ -545,7 +618,13 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
 
     @Override
     public void onLocationChange(AMapNaviLocation location) {
-        Log.v(TAG, "[NAVI] onLocationChange —— 位置更新");
+        // ⭐ 导航SDK的定位回调（官方方式：使用这个回调绘制车标）
+        if (isGpsMode && carOverlay != null && location != null && aMap != null) {
+            LatLng carPos = new LatLng(location.getCoord().getLatitude(), location.getCoord().getLongitude());
+            float carBearing = location.getBearing();
+            carOverlay.draw(aMap, carPos, carBearing);  // ⭐ 绘制车标 + 更新地图视角（锁车态下）
+            //Log.d(TAG, "[NAVI] onLocationChange: lat=" + carPos.latitude + ", lng=" + carPos.longitude + ", bearing=" + carBearing);
+        }
     }
 
     @Override
@@ -681,35 +760,48 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
 
     @Override
     public void onCalculateRouteSuccess(AMapCalcRouteResult aMapCalcRouteResult) {
-        Log.d(TAG, "[NAVI] onCalculateRouteSuccess (new) —— 算路成功");
+        Log.d(TAG, "[NAVI] onCalculateRouteSuccess —— 算路成功");
 
-        if (aMapNavi == null) {
-            return;
+        // ⭐ 算路成功：绘制导航路线 + 启动GPS导航
+        if (aMapNavi != null && aMap != null) {
+            AMapNaviPath naviPath = aMapNavi.getNaviPath();
+            if (naviPath != null) {
+                // 绘制导航SDK的路线（使用自定义方式）
+                drawNaviRoute(naviPath);
+
+                // ⭐ 启动GPS导航
+                aMapNavi.startNavi(NaviType.GPS);
+                Log.d(TAG, "[NAVI] GPS导航已启动");
+            }
         }
+    }
 
-        // ⭐ GPS 模式：从导航SDK获取路线数据，自己画到地图上
-        if (isGpsMode) {
-            try {
-                AMapNaviPath naviPath = aMapNavi.getNaviPath();
-                if (naviPath != null) {
-                    java.util.List<NaviLatLng> naviLatLngList = naviPath.getCoordList();
-                    if (naviLatLngList != null && !naviLatLngList.isEmpty()) {
-                        java.util.List<LatLng> points = new java.util.ArrayList<>();
-                        for (NaviLatLng naviLatLng : naviLatLngList) {
-                            points.add(new LatLng(naviLatLng.getLatitude(), naviLatLng.getLongitude()));
-                        }
-                        // ⭐ 调用 drawRoute，会自动清空旧路线
-                        drawRoute(points);
-                        Log.d(TAG, "[NAVI] GPS模式路线已重新绘制，路径点数量=" + points.size());
-                    }
-                }
-            } catch (Throwable t) {
-                Log.e(TAG, "onCalculateRouteSuccess 画线失败: " + t.getMessage(), t);
+    /**
+     * ⭐ 绘制导航SDK的路线（官方方式）
+     */
+    private void drawNaviRoute(AMapNaviPath naviPath) {
+        if (aMap == null || naviPath == null) return;
+
+        try {
+            // ⭐ 获取路线坐标点（正确方法：getCoordList）
+            List<NaviLatLng> naviLatLngList = naviPath.getCoordList();
+            if (naviLatLngList == null || naviLatLngList.isEmpty()) {
+                Log.w(TAG, "[NAVI] drawNaviRoute: 路线坐标点为空");
+                return;
             }
 
-            // 启动GPS导航
-            aMapNavi.startNavi(NaviType.GPS);
-            Log.d(TAG, "[NAVI] GPS导航已启动");
+            // 转换为 LatLng 列表
+            List<LatLng> points = new ArrayList<>();
+            for (NaviLatLng naviLatLng : naviLatLngList) {
+                points.add(new LatLng(naviLatLng.getLatitude(), naviLatLng.getLongitude()));
+            }
+
+            // 绘制自定义路线（白色光晕 + 绿色主线）
+            drawRoute(points);
+
+            Log.d(TAG, "[NAVI] drawNaviRoute: 路线已绘制，点数=" + points.size());
+        } catch (Throwable t) {
+            Log.e(TAG, "[NAVI] drawNaviRoute failed: " + t.getMessage(), t);
         }
     }
 
@@ -1006,6 +1098,7 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
 
     /**
      * 设置/取消罗盘模式
+     * ⭐ 注意：GPS模式下不使用 MyLocationStyle，使用 CarOverlay 绘制车标
      */
     public void setCompassMode(boolean enabled) {
         if (Looper.myLooper() != Looper.getMainLooper()) {
@@ -1016,26 +1109,6 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
         this.isCompassMode = enabled;
         if (uiSettings != null) {
             uiSettings.setCompassEnabled(enabled);
-        }
-        if (aMap != null) {
-            try {
-                MyLocationStyle style = new MyLocationStyle();
-                style.myLocationType(enabled
-                        ? MyLocationStyle.LOCATION_TYPE_MAP_ROTATE
-                        : MyLocationStyle.LOCATION_TYPE_FOLLOW);
-                style.interval(2000);
-                style.strokeColor(0xFF1AAD19);
-                style.radiusFillColor(0x5500AAFF);
-                style.strokeWidth(2.0f);
-                aMap.setMyLocationStyle(style);
-
-                if (enabled) {
-                    aMap.setLocationSource(this);
-                    aMap.setMyLocationEnabled(true);
-                }
-            } catch (Throwable t) {
-                Log.e(TAG, "setCompassMode update style failed: " + t.getMessage());
-            }
         }
     }
 
@@ -1067,13 +1140,36 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
                 clearBusMarkers();
                 setCompassMode(true);
                 perspectiveAppliedOnFirstFix = false;
-                startAmapLocation();
+                gpsNavigationStarted = false;  // 重置导航启动标记，等待定位后启动
+                isCarLocked = true;            // ⭐ 初始状态：锁车态
+                carLockHandler.removeCallbacksAndMessages(null);  // 清除所有锁车任务
+                // ⭐ 不再调用 startAmapLocation() —— locationClient 已在 initAmapLocation 时常驻启动
+                // 模式切换时只切换 isGpsMode 标志位，onLocationChanged 内部据此过滤
+
+                // ⭐ 立即应用导航视角（zoom/tilt/锁车态）—— 不等首次定位，让用户立刻看到 3D 锁车视角
+                // 首次定位到达后，onLocationChanged 仍然会启动导航SDK的算路+导航
+                applyNavigationCameraPerspective();
+                perspectiveAppliedOnFirstFix = true;
+
+                // ⭐ GPS模式：如果有目标站点，立即启动导航SDK的算路+导航
+                if (targetStationPos != null && aMapNavi != null) {
+                    // 等待首次定位成功后再启动导航（在 onLocationChanged 中触发）
+                    Log.d(TAG, "[NAV] GPS模式已启用，等待定位数据后启动导航到目标站点: " + targetStationPos);
+                }
             } else {
-                // ⭐ 网络模式：关闭罗盘模式，停止导航，使用自定义路线
-                aMap.setMyLocationEnabled(false);
+                // ⭐ 网络模式：关闭罗盘模式，停止导航，清除车标，使用自定义路线
+                // ⭐ 清理速度窗口，切换模式时避免残留旧数据
+                speedWindows.clear();
+                aMap.setMyLocationEnabled(false);  // 禁用内置定位图层
                 setCompassMode(false);
                 stopGpsNavigation();  // 停止导航SDK的导航
-                stopAmapLocation();
+                // ⭐ 不再调用 stopAmapLocation() —— locationClient 持续运行以保持热启动
+                gpsNavigationStarted = false;  // 重置导航启动标记
+
+                // ⭐ 清除车标（CarOverlay）
+                if (carOverlay != null) {
+                    carOverlay.reset();  // 清除车标 Marker
+                }
 
                 // ⭐ 恢复到网络模式：自适应 zoom + 居中到路线中心（不沿用 GPS 模式的贴地 zoom）
                 //    如果还没记录 zoom（首次进入），用当前 zoom
@@ -1130,17 +1226,89 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
     public void setTargetStation(double lat, double lng, int stationIndex) {
         this.targetStationPos = new LatLng(lat, lng);
         this.targetStationIndex = stationIndex;
-        // ⭐ 设置目标站点后，开启"跟随命中的车辆"模式
-        this.isFollowBusMode = true;
-        Log.d(TAG, "[NAV] setTargetStation: 开启跟随模式, stationIndex=" + stationIndex);
+        // ⭐ 设置新目标站点时清理旧的速度窗口，避免残留旧车辆的窗口数据
+        speedWindows.clear();
+        Log.d(TAG, "[NAV] setTargetStation: lat=" + lat + ", lng=" + lng + ", index=" + stationIndex);
+    }
+
+    /**
+     * ⭐ 设置公交线路的起点站和终点站（GPS导航使用）
+     * @param startLat 起点站纬度
+     * @param startLng 起点站经度
+     * @param endLat 终点站纬度
+     * @param endLng 终点站经度
+     */
+    public void setBusLineStartAndEnd(double startLat, double startLng, double endLat, double endLng) {
+        // 起点：公交线路起点站（用于GPS导航的起点，用户当前位置会实时更新）
+        // 终点：公交线路终点站（用于GPS导航的终点）
+        this.targetStationPos = new LatLng(endLat, endLng);
+        this.targetStationIndex = -1;  // 终点站索引
+        Log.d(TAG, "[NAV] setBusLineStartAndEnd: 起点(" + startLat + "," + startLng + "), 终点(" + endLat + "," + endLng + ")");
     }
 
     public void clearTargetStation() {
         this.targetStationPos = null;
         this.targetStationIndex = -1;
-        // ⭐ 清除目标站点后，关闭"跟随命中的车辆"模式
+        // ⭐ 清理速度窗口，避免下次跟踪时残留旧车辆的窗口数据
+        speedWindows.clear();
+    }
+
+    /**
+     * ⭐ 地图跟随：若 isFollowBusMode 开启，且当前 SMM 对应的就是被跟随的车，
+     * 用 aMap.moveCamera(newLatLng(...)) 跟随其动画位置（保持当前 zoom/tilt/bearing，不自动缩放）
+     */
+    private void maybeFollowBus(SmoothMoveMarker smm, String plate) {
+        if (!isFollowBusMode || smm == null || aMap == null) return;
+        if (followedVehiclePlate == null || !followedVehiclePlate.equals(plate)) return;
+        try {
+            LatLng pos = smm.getPosition();
+            if (pos != null) {
+                aMap.moveCamera(CameraUpdateFactory.newLatLng(pos));
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "[NAV] follow camera move failed: " + t.getMessage());
+        }
+    }
+
+    /**
+     * 设置地图跟随的车辆。设置后 updateBusMarkers 中会对该车的 SmoothMoveMarker
+     * 调 aMap.moveCamera(newLatLng(...))，保持 zoom/tilt/bearing 不变。
+     * 若该车的 marker 已在 busMarkers 中，会立即把地图移过去。
+     */
+    public void setFollowedVehicle(String plate) {
+        if (plate == null || plate.isEmpty()) {
+            clearFollowedVehicle();
+            return;
+        }
+        boolean changed = !plate.equals(this.followedVehiclePlate);
+        this.followedVehiclePlate = plate;
+        this.isFollowBusMode = true;
+        Log.d(TAG, "[NAV] setFollowedVehicle: " + plate + " (changed=" + changed + ")");
+
+        // 立即把地图移过去，避免等下一次刷新
+        if (aMap != null && busMarkers.containsKey(plate)) {
+            SmoothMoveMarker smm = busMarkers.get(plate);
+            try {
+                LatLng pos = smm.getPosition();
+                if (pos != null) {
+                    aMap.moveCamera(CameraUpdateFactory.newLatLng(pos));
+                }
+            } catch (Throwable t) {
+                Log.w(TAG, "[NAV] follow camera move failed: " + t.getMessage());
+            }
+        }
+    }
+
+    public void clearFollowedVehicle() {
+        if (this.followedVehiclePlate != null || this.isFollowBusMode) {
+            Log.d(TAG, "[NAV] clearFollowedVehicle");
+        }
+        this.followedVehiclePlate = null;
         this.isFollowBusMode = false;
-        Log.d(TAG, "[NAV] clearTargetStation: 关闭跟随模式");
+    }
+
+    public boolean isFollowBusMode() {
+        return isFollowBusMode;
     }
 
     public long getLastGpsSuccessTimeMs() {
@@ -1291,12 +1459,16 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
                     }
                     busMarkers.put(plate, smm);
                     applyRotateToSmm(smm, rotateDeg);
+                    // ⭐ 新 SMM 也挂上 MoveListener（虽然暂无动画，但下一帧数据来时就有动画了）
+                    attachRotationListener(smm, plate);
                 } catch (Throwable t) {
                     Log.e(TAG, "[BUS] create SmoothMoveMarker failed for " + plate + ": " + t.getMessage());
                 }
                 if (smm != null) {
                     lastBusPos.put(plate, snappedPos);
                     lastBusUpdateMs.put(plate, nowMs);
+                    // ⭐ 新 SMM 创建后立即检查是否需要跟随
+                    maybeFollowBus(smm, plate);
                 }
                 continue;
             }
@@ -1350,6 +1522,8 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
             setSmmTitle(smm, plate, pos.isArrived);
             lastBusPos.put(plate, snappedPos);
             lastBusUpdateMs.put(plate, nowMs);
+            // ⭐ 已存在 SMM 更新位置/动画后，若是被跟随车，地图 moveCamera 到动画位置
+            maybeFollowBus(smm, plate);
         }
 
         Iterator<Map.Entry<String, SmoothMoveMarker>> it = busMarkers.entrySet().iterator();
@@ -1365,13 +1539,9 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
             }
         }
 
-        // ⭐ 命中的车辆（提到外层，供跟随模式使用）
-        String nearestVehiclePlate = null;
-
         if (!isGpsMode && speedChangeListener != null && !busMarkers.isEmpty()) {
             int nearestVehicleStationIndex = -1;
-            nearestVehiclePlate = null;
-            float nearestVehicleSpeed = 0f;
+            String nearestVehiclePlate = null;
 
             for (BusApiClient.BusPosition pos : positions) {
                 if (pos == null || pos.plateNumber == null) continue;
@@ -1384,73 +1554,94 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
                         nearestVehicleStationIndex = vehicleStationIndex;
                         nearestVehiclePlate = plate;
 
+                        // ⭐ 滑动窗口速度估算算法
                         LatLng lastPos = lastMovingPos.get(plate);
                         Long lastTime = lastMovingTimeMs.get(plate);
                         Long stationaryEnd = lastStationaryEndMs.get(plate);
 
                         if (lastPos == null) {
+                            // 首次记录：初始化位置和时间
                             lastMovingPos.put(plate, currentPos);
                             lastMovingTimeMs.put(plate, nowMs);
                             lastStationaryEndMs.put(plate, nowMs);
-                            nearestVehicleSpeed = 0f;
+                            // 初始化窗口
+                            speedWindows.put(plate, new ArrayList<>());
                             continue;
                         }
 
                         double distM = computeDistanceMeters(lastPos, currentPos);
 
+                        // 获取或初始化该车辆的窗口
+                        List<SpeedSample> window = speedWindows.get(plate);
+                        if (window == null) {
+                            window = new ArrayList<>();
+                            speedWindows.put(plate, window);
+                        }
+
                         if (distM > STATIONARY_THRESHOLD_M) {
+                            // ⭐ 检测到移动：计算有效移动时间（去掉静止时间）
                             long movingTimeMs = nowMs - (stationaryEnd != null ? stationaryEnd : lastTime);
                             if (movingTimeMs > 0 && movingTimeMs < 120000) {
-                                double speedMps = distM / (movingTimeMs / 1000.0);
-                                nearestVehicleSpeed = (float) (speedMps * 3.6);
+                                // 添加到窗口
+                                window.add(new SpeedSample(distM, movingTimeMs, nowMs));
                             }
 
+                            // 更新移动位置和时间
                             lastMovingPos.put(plate, currentPos);
                             lastMovingTimeMs.put(plate, nowMs);
                             lastStationaryEndMs.put(plate, nowMs);
                         } else {
+                            // ⭐ 静止时不添加新样本，只记录静止结束时间
+                            // 窗口中保留之前的移动记录，速度会基于历史数据自然衰减
                             lastStationaryEndMs.put(plate, nowMs);
-                            nearestVehicleSpeed = 0f;
                         }
+
+                        // ⭐ 清理窗口中超过 60 秒的旧样本
+                        long cutoffTime = nowMs - SPEED_WINDOW_MS;
+                        window.removeIf(sample -> sample.timestampMs < cutoffTime);
                     }
                 }
             }
 
+            // ⭐ 计算最近车辆的窗口速度
             if (targetStationIndex >= 0 && nearestVehiclePlate != null) {
-                if (nearestVehicleSpeed > 0) {
-                    speedChangeListener.onSpeedChanged(nearestVehicleSpeed);
-                } else {
-                    speedChangeListener.onSpeedChanged(-1f);
-                }
+                List<SpeedSample> window = speedWindows.get(nearestVehiclePlate);
+                float windowSpeed = calculateWindowSpeed(window);
+                speedChangeListener.onSpeedChanged(windowSpeed);
             } else {
                 speedChangeListener.onSpeedChanged(-1f);
             }
         }
+    }
 
-        // ⭐ 网络模式 + 跟随模式 + 命中车辆存在：让地图跟随命中的车辆（动画位置）移动
-        //    不自动缩放，保持当前 zoom，只让车辆在地图居中
-        if (!isGpsMode && isFollowBusMode && nearestVehiclePlate != null) {
-            try {
-                SmoothMoveMarker smm = busMarkers.get(nearestVehiclePlate);
-                if (smm != null) {
-                    LatLng busPos = smm.getPosition();  // ⭐ 动画中的位置（不是目标位置）
-                    if (busPos != null && aMap != null) {
-                        CameraPosition cur = aMap.getCameraPosition();
-                        // 只更新 center（车辆位置），保持 zoom/tilt/bearing 不变
-                        aMap.moveCamera(CameraUpdateFactory.newCameraPosition(
-                                new CameraPosition(
-                                        busPos,                // ⭐ 跟随车辆动画位置
-                                        cur.zoom,              // 保持当前 zoom（不自动缩放）
-                                        cur.tilt,              // 保持当前 tilt
-                                        cur.bearing            // 保持当前 bearing
-                                )
-                        ));
-                    }
-                }
-            } catch (Throwable t) {
-                Log.w(TAG, "[FOLLOW] 跟随车辆失败: " + t.getMessage());
-            }
+    /**
+     * 计算滑动窗口内的累计速度
+     * @param window 速度样本窗口
+     * @return 速度（km/h），窗口为空或有效时间不足时返回 0
+     */
+    private float calculateWindowSpeed(List<SpeedSample> window) {
+        if (window == null || window.isEmpty()) {
+            return 0f;
         }
+
+        // 累计窗口内所有样本的距离和有效移动时间
+        double totalDistanceM = 0;
+        long totalMovingTimeMs = 0;
+
+        for (SpeedSample sample : window) {
+            totalDistanceM += sample.distanceM;
+            totalMovingTimeMs += sample.movingTimeMs;
+        }
+
+        // 累计有效时间不足时返回 0（避免瞬时速度误差）
+        if (totalMovingTimeMs < MIN_MOVING_TIME_MS) {
+            return 0f;
+        }
+
+        // 速度 = 累计距离 / 累计有效时间（去掉静止时间）
+        // 例如：100米走了10秒，其中静止2秒 → 速度 = 100/8 = 12.5 m/s
+        double speedMps = totalDistanceM / (totalMovingTimeMs / 1000.0);
+        return (float) (speedMps * 3.6);  // m/s → km/h
     }
 
     private void setSmmTitle(SmoothMoveMarker smm, String plate, boolean isArrived) {
@@ -1493,6 +1684,15 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
                         float rotateDeg = normalizeAngle(finalBearing - HEAD_BEARING_OFFSET);
                         Marker m = smm.getMarker();
                         if (m != null) m.setRotateAngle(rotateDeg);
+
+                        // ⭐ 地图跟随：与 rotation 完全同步，在 SMM 动画的每一帧都 moveCamera，
+                        //    解决"车在动，地图在后面追"的滞后感
+                        if (isFollowBusMode && followedVehiclePlate != null
+                                && followedVehiclePlate.equals(plate) && aMap != null) {
+                            try {
+                                aMap.moveCamera(CameraUpdateFactory.newLatLng(snappedCur));
+                            } catch (Throwable ignore2) {}
+                        }
                     } catch (Throwable ignore) {}
                 }
             });
@@ -1518,6 +1718,7 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
         lastMovingPos.clear();
         lastMovingTimeMs.clear();
         lastStationaryEndMs.clear();
+        speedWindows.clear();  // ⭐ 清理速度窗口
     }
 
     private Object[] snapToRouteAndSegmentBearing(LatLng pos) {

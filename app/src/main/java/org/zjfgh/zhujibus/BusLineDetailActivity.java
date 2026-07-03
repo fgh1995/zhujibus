@@ -1830,6 +1830,13 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
 
         currentDirection = (currentDirection == 1) ? 2 : 1;
         trackedVehiclePlate = null;
+        // ⭐ 换向后重置 fragment 显示状态
+        lastFragmentDisplayStationOrder = -2;
+        lastFragmentDisplayIsArrived = false;
+        // ⭐ 换向后停止地图跟随（下一次 refresh 会基于新方向重新设）
+        if (navigationMainFragment != null && navigationMainFragment.getNavigation() != null) {
+            navigationMainFragment.getNavigation().clearFollowedVehicle();
+        }
         Log.e(TAG + "-BusInfo-", "切换方向到: " + (currentDirection == 1 ? "上行" : "下行"));
         updateStartEndStations();
         showDirection();
@@ -2333,6 +2340,13 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             busLineView.setSelectedPosition(position);
         }
         trackedVehiclePlate = null;
+        // ⭐ 重置"已到达/下一站"显示状态记忆，让新选的站能立刻显示对应的车
+        lastFragmentDisplayStationOrder = -2;
+        lastFragmentDisplayIsArrived = false;
+        // ⭐ 换选了站：先清掉旧的跟随，下一次 refresh 会基于新 nearestVehicle 重新设置
+        if (navigationMainFragment != null && navigationMainFragment.getNavigation() != null) {
+            navigationMainFragment.getNavigation().clearFollowedVehicle();
+        }
     }
 
     @SuppressLint("DefaultLocale")
@@ -2574,6 +2588,16 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             lastVehicleWasArrived = nearestVehicle.isArrived;
         }
 
+        // ⭐ 地图跟随：让地图跟 nearestVehicle 的 SmoothMoveMarker 走（不向目标坐标移动）
+        if (navigationMainFragment != null && navigationMainFragment.getNavigation() != null) {
+            if (nearestVehicle != null && nearestVehicle.plateNumber != null && !nearestVehicle.plateNumber.isEmpty()) {
+                navigationMainFragment.getNavigation().setFollowedVehicle(nearestVehicle.plateNumber);
+            } else {
+                // 所有车都已越过选站 → 停止跟随
+                navigationMainFragment.getNavigation().clearFollowedVehicle();
+            }
+        }
+
         if (nearestVehicle != null && lastVoiceStationOrder != nearestVehicle.currentStationOrder) {
             int nextStationIndex = nearestVehicle.currentStationOrder + 1;
             if (nextStationIndex > 0 && nextStationIndex <= realTimeManager.getStationList().size()) {
@@ -2585,11 +2609,44 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             }
         }
 
+        // ⭐ fragment 端"下一站/已到达"显示（与 next_station_info 同源，但带 isArrived 分支）
+        // 独立状态记忆，确保 isArrived 切换（如车刚到站）也能立即反映
+        if (nearestVehicle != null && (lastFragmentDisplayStationOrder != nearestVehicle.currentStationOrder
+                || lastFragmentDisplayIsArrived != nearestVehicle.isArrived)) {
+            List<BusApiClient.BusLineStation> stations = realTimeManager.getStationList();
+            String displayName = null;
+            boolean isArrived = nearestVehicle.isArrived;
+            boolean isTerminal = false;
+            if (isArrived) {
+                // 已到站：显示"已到达 [当前站]"
+                int arrivedIdx = nearestVehicle.currentStationOrder - 1;
+                if (arrivedIdx >= 0 && arrivedIdx < stations.size()) {
+                    displayName = stations.get(arrivedIdx).stationName;
+                }
+            } else {
+                // 未到站：显示"下一站: [next]"
+                int nextIdx = nearestVehicle.currentStationOrder;  // currentStationOrder 是 1-indexed,数组 0-indexed
+                if (nextIdx >= 0 && nextIdx < stations.size()) {
+                    displayName = stations.get(nextIdx).stationName;
+                } else {
+                    isTerminal = true;
+                }
+            }
+            if (navigationMainFragment != null) {
+                navigationMainFragment.setNextStationForNetwork(displayName, isArrived, isTerminal);
+            }
+            lastFragmentDisplayStationOrder = nearestVehicle.currentStationOrder;
+            lastFragmentDisplayIsArrived = isArrived;
+        }
+
     }
 
     int lastVoiceStationOrder;
     boolean lastVehicleWasArrived = false;
     private String trackedVehiclePlate = null;
+    // ⭐ fragment 端"下一站/已到达"显示状态记忆（独立于 lastVoiceStationOrder）
+    private int lastFragmentDisplayStationOrder = -2;
+    private boolean lastFragmentDisplayIsArrived = false;
 
     private void startErrorBlinkAnimation() {
         errorBlinkAnimator = ValueAnimator.ofFloat(0f, 1f);
