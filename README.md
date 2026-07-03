@@ -1,5 +1,5 @@
 # UI界面
-<img width="1200" height="2670" alt="Screenshot" src="https://github.com/user-attachments/assets/e95935c5-4992-4559-8526-4696aa31479f" />
+<img width="1740" height="1920" alt="zhuji01" src="https://github.com/user-attachments/assets/b523403a-28ff-4adc-80d0-ebaef477660e" />
 
 # 音频文件统一规格说明
 
