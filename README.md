@@ -1,3 +1,6 @@
+# UI界面
+<img width="1200" height="2670" alt="Screenshot" src="https://github.com/user-attachments/assets/e95935c5-4992-4559-8526-4696aa31479f" />
+
 # 音频文件统一规格说明
 
 > 适用版本：v1.1.5（101050）及以上  
