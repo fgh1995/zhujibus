@@ -501,7 +501,8 @@
         const day = d.getDate().toString().padStart(2, '0');
         const hour = d.getHours().toString().padStart(2, '0');
         const minute = d.getMinutes().toString().padStart(2, '0');
-        return year + '-' + month + '-' + day + ' ' + hour + ':' + minute;
+        const second = d.getSeconds().toString().padStart(2, '0');
+        return year + '-' + month + '-' + day + ' ' + hour + ':' + minute + ':' + second;
     }
 
     function escapeHtml(s) {
