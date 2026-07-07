@@ -1,45 +1,42 @@
 package org.zjfgh.zhujibus;
 
-import android.Manifest;
-import android.annotation.SuppressLint;
 import android.app.Dialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Intent;
-import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
 import android.location.Location;
 import android.location.LocationListener;
-import android.location.LocationManager;
 import android.net.Uri;
-import android.os.Build;
 import android.os.Bundle;
 import io.sgr.geometry.Coordinate;
 import io.sgr.geometry.utils.GeometryUtils;
+import android.text.SpannableString;
+import android.text.Spanned;
 import android.text.TextUtils;
+import android.text.style.ForegroundColorSpan;
+import android.text.style.StyleSpan;
 import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
-import android.widget.ViewFlipper;
-import android.widget.Button;
 
-import androidx.activity.EdgeToEdge;
 import androidx.annotation.NonNull;
-import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.cardview.widget.CardView;
-import androidx.core.app.ActivityCompat;
 import androidx.recyclerview.widget.DividerItemDecoration;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import com.autonavi.amap.mapcore.interfaces.IAMap;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -131,6 +128,15 @@ public class MainActivity extends AppCompatActivity {
                     startActivity(intent);
                 } catch (Exception e) {
                     Log.e("MainActivity", "跳转搜索页面失败", e);
+                    Toast.makeText(MainActivity.this, "页面跳转失败", Toast.LENGTH_SHORT).show();
+                }
+            });
+            autoScrollTextView.setOnClickListener(v -> {
+                try {
+                    Intent intent = new Intent(MainActivity.this, NoticeListActivity.class);
+                    startActivity(intent);
+                } catch (Exception e) {
+                    Log.e("MainActivity", "跳转公告列表失败", e);
                     Toast.makeText(MainActivity.this, "页面跳转失败", Toast.LENGTH_SHORT).show();
                 }
             });
@@ -473,7 +479,7 @@ public class MainActivity extends AppCompatActivity {
         boolean showUpdate = remoteConfig.hasUpdate && isRemoteNewer;
         if (showUpdate) {
             String text = "发现新版本 v" + remoteConfig.remoteVersionName
-                    + " (build " + remoteConfig.remoteVersionCode + ") ，点击查看更新内容";
+                    + " (" + remoteConfig.remoteVersionCode + ") 点击查看";
             if (hstvUpdateNotice != null) hstvUpdateNotice.setText(text);
             if (llUpdateNotice != null) {
                 llUpdateNotice.setVisibility(View.VISIBLE);
@@ -709,12 +715,17 @@ public class MainActivity extends AppCompatActivity {
         TextView tvPrimaryDownloadDesc = dialog.findViewById(R.id.tv_primary_download_desc);
         TextView tvBackupDownloadDesc = dialog.findViewById(R.id.tv_backup_download_desc);
         CardView cardBackupDownload = dialog.findViewById(R.id.card_backup_download);
-        TextView tvLater = dialog.findViewById(R.id.tv_later);
+        ImageView ivLater = dialog.findViewById(R.id.iv_later);
 
         // 设置版本信息
-        String versionInfo = "当前版本：v" + getLocalVersionName()
-                + "\n最新版本：v" + remoteConfig.remoteVersionName
-                + " (build " + remoteConfig.remoteVersionCode + ")";
+        String currentVersionInfo = "当前版本：v" + getLocalVersionName()
+                + " (" + getLocalVersionCode() + ")";
+        String latestVersionInfo = "最新版本：v" + remoteConfig.remoteVersionName
+                + " (" + remoteConfig.remoteVersionCode + ")";
+        SpannableString versionInfo = new SpannableString(currentVersionInfo + "\n" + latestVersionInfo);
+        int latestStart = currentVersionInfo.length() + 1;
+        versionInfo.setSpan(new ForegroundColorSpan(Color.parseColor("#0d8dfb")), latestStart, versionInfo.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        versionInfo.setSpan(new StyleSpan(Typeface.BOLD), latestStart, versionInfo.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         tvVersionInfo.setText(versionInfo);
 
         // 设置更新日志
@@ -733,7 +744,8 @@ public class MainActivity extends AppCompatActivity {
             tvPrimaryDownloadDesc.setText("推荐使用，下载更快");
             cardPrimaryDownload.setCardBackgroundColor(Color.parseColor("#4CAF50"));
             cardPrimaryDownload.setOnClickListener(v -> {
-                copyUrlToClipboard(primaryUrl, "加速下载地址已复制，请在浏览器中打开下载");
+                copyUrlToClipboard(primaryUrl, "下载地址已复制，请在浏览器中打开下载");
+                openInBrowser(primaryUrl);
                 dialog.dismiss();
             });
         } else {
@@ -744,6 +756,7 @@ public class MainActivity extends AppCompatActivity {
             cardPrimaryDownload.setOnClickListener(v -> {
                 if (backupUrl != null) {
                     copyUrlToClipboard(backupUrl, "下载地址已复制，请在浏览器中打开下载");
+                    openInBrowser(backupUrl);
                 }
                 dialog.dismiss();
             });
@@ -756,16 +769,15 @@ public class MainActivity extends AppCompatActivity {
             tvBackupDownloadDesc.setText("公益服代理，下载较慢");
             cardBackupDownload.setOnClickListener(v -> {
                 copyUrlToClipboard(backupUrl, "备用下载地址已复制，请在浏览器中打开下载");
+                openInBrowser(backupUrl);
                 dialog.dismiss();
             });
         } else {
             // 没有加速链接时，隐藏备用按钮
             cardBackupDownload.setVisibility(View.GONE);
         }
-
         // 稍后再说按钮
-        tvLater.setOnClickListener(v -> dialog.dismiss());
-
+        ivLater.setOnClickListener(v -> dialog.dismiss());
         dialog.show();
     }
 

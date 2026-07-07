@@ -290,6 +290,12 @@ public class BusApiClient {
         getBusAnnouncementsWithRetry(page, size, callback, 0);
     }
 
+    public void getNoticeList(int page, int offset,
+                              ApiCallback<NoticeListResponse> callback) {
+        NoticeListRequest request = new NoticeListRequest(page, offset);
+        callApiAsync("/gzcx-spaceServer/index/information/getNoticeList", request, NoticeListResponse.class, callback);
+    }
+
     private void getBusAnnouncementsWithRetry(int page, int size,
                                               ApiCallback<BusAnnouncementResponse> callback,
                                               int retryCount) {
@@ -637,6 +643,33 @@ public class BusApiClient {
         public List<BusAnnouncement> data;
     }
 
+    public static class NoticeListRequest {
+        public int page;
+        public int offset;
+        public String userId = "8afac9aa6026aa3f0160438c881035b9";
+        public String secondStage = "41";
+
+        public NoticeListRequest(int page, int offset) {
+            this.page = page;
+            this.offset = offset;
+        }
+    }
+
+    public static class NoticeListResponse {
+        public String returnFlag;
+        public String returnInfo;
+        public String code;
+        public String msg;
+        public NoticeListData data;
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class NoticeListData {
+        public int total;
+        public List<BusAnnouncement> list;
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class BusAnnouncement {
         public long id;
         public String createDate;

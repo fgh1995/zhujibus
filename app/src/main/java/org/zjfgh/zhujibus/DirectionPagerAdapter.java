@@ -137,8 +137,6 @@ public class DirectionPagerAdapter extends RecyclerView.Adapter<DirectionPagerAd
                         boolean isHighlighted, boolean isGrayed) {
             busRouteName.setText(String.format("%s(%s公交)", direction.lineName, direction.lineTypeName));
             busStations.setText(String.format("%s-%s", direction.startStation, direction.endStation));
-            firstBusTime.setTypeface(typeface);
-            lastBusTime.setTypeface(typeface);
             firstBusTime.setText(direction.departureTime);
             lastBusTime.setText(direction.collectTime);
 

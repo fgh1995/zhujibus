@@ -42,6 +42,14 @@
             android:name="com.amap.api.location.APSService"
             android:exported="false" />
         <activity
+            android:name=".NoticeDetailActivity"
+            android:exported="false"
+            android:theme="@style/Theme.诸暨公交" />
+        <activity
+            android:name=".NoticeListActivity"
+            android:exported="false"
+            android:theme="@style/Theme.诸暨公交" />
+        <activity
             android:name=".BusLineDetailActivity"
             android:exported="false"
             android:theme="@style/Theme.诸暨公交" />

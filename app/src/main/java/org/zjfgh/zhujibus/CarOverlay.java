@@ -36,8 +36,8 @@ public class CarOverlay {
     protected TextureMapView mapView;
 
     // 导航视角参数
-    private static final float NAVI_ZOOM = 18f;   // 导航缩放级别（适中，不要太贴地）
-    private static final float NAVI_TILT = 0f;    // 导航俯视角度（完全俯视，2D视角）
+    private static final float NAVI_ZOOM = 15f;   // 导航缩放级别（适中，不要太贴地）
+    private static final float NAVI_TILT = 20f;    // 导航俯视角度（完全俯视，2D视角）
 
     // ⭐ 图标缩放比例（调整车标和方向指示器的大小）
     private static final float CAR_ICON_SCALE = 0.4f;        // 车标缩小到 50%
