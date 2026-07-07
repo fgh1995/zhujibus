@@ -762,17 +762,15 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
     public void onCalculateRouteSuccess(AMapCalcRouteResult aMapCalcRouteResult) {
         Log.d(TAG, "[NAVI] onCalculateRouteSuccess —— 算路成功");
 
-        // ⭐ 算路成功：绘制导航路线 + 启动GPS导航
+        // ⭐ GPS模式：不绘制导航SDK的路线，使用公交车线路（routePoints）
+        //    导航SDK只用于导航引导（语音、方向提示），路线显示用公交实际路线
         if (aMapNavi != null && aMap != null) {
-            AMapNaviPath naviPath = aMapNavi.getNaviPath();
-            if (naviPath != null) {
-                // 绘制导航SDK的路线（使用自定义方式）
-                drawNaviRoute(naviPath);
+            // ⭐ 不调用 drawNaviRoute，保留已有的公交路线（routePoints）
+            //    公交路线在 NavigationMainFragment.drawRoute() 中已绘制
 
-                // ⭐ 启动GPS导航
-                aMapNavi.startNavi(NaviType.GPS);
-                Log.d(TAG, "[NAVI] GPS导航已启动");
-            }
+            // ⭐ 启动GPS导航（仅用于导航引导，不绘制路线）
+            aMapNavi.startNavi(NaviType.GPS);
+            Log.d(TAG, "[NAVI] GPS导航已启动（使用公交车线路，不绘制导航路线）");
         }
     }
 
