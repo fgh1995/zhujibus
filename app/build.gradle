@@ -14,7 +14,7 @@ android {
         versionName "1.2.31"
         //wsServerAddress = `http://zhujibus.360967.xyz/ws`
         //githubAddSpeed=`https://gh-proxy.org`
-        //remote={"has_notice":true,"notice":"本软件仅支持浙江省诸暨市公交查询，查询时需要联网，网络模式下选择站点后，即可开始播报最近车辆，GPS导航模式下，需要前往当地乘坐对应公交，或者使用第三方定位模拟器方可体验。感谢您的使用，接口版权归诸暨市交通部。","has_update":true,"update_log":"1.修复GPS导航模式下，导航规划的路线错误地覆盖在地图公交线路上，导致显示混乱的问题。\n2.首页公告现已支持点击查看详情，信息获取更便捷。\n3.美化更新提示界面。"}
+        //remote={"has_notice":true,"notice":"本软件仅支持浙江省诸暨市公交查询，查询时需要联网，网络模式下选择站点后，即可开始播报最近车辆，GPS导航模式下，需要前往当地乘坐对应公交，或者使用第三方定位模拟器方可体验。感谢您的使用，接口版权归诸暨市交通部。","has_update":false,"update_log":"1.修复GPS导航模式下，导航规划的路线错误地覆盖在地图公交线路上，导致显示混乱的问题。\n2.首页公告现已支持点击查看详情，信息获取更便捷。\n3.美化更新提示界面。"}
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 
