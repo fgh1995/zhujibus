@@ -1,5 +1,7 @@
 package org.zjfgh.zhujibus;
 
+import android.graphics.Color;
+import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
 import android.text.TextUtils;
 import android.util.Log;
@@ -8,12 +10,14 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.fragment.app.Fragment;
 
+import java.util.Calendar;
 import java.util.List;
 import java.util.Locale;
 
@@ -28,10 +32,14 @@ public class ScheduleFragment extends Fragment {
     private LinearLayout tvTitle;
     private TextView tvLoading;
     private LinearLayout scheduleTableContainer;
+    private ScrollView scheduleScrollView;
 
     // 请求取消相关变量
     private String currentRequestTag = null;
     private boolean isLoadingData = false;
+
+    // 下一班车行的索引（用于高亮）
+    private int nextBusRowIndex = -1;
 
     public static ScheduleFragment newInstance() {
         return new ScheduleFragment();
@@ -49,6 +57,7 @@ public class ScheduleFragment extends Fragment {
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
         scheduleTableContainer = view.findViewById(R.id.schedule_table_container);
+        scheduleScrollView = view.findViewById(R.id.schedule_scroll_view);
     }
 
     @Override
@@ -59,6 +68,7 @@ public class ScheduleFragment extends Fragment {
         tvTitle = null;
         tvLoading = null;
         scheduleTableContainer = null;
+        scheduleScrollView = null;
     }
 
     /**
@@ -238,35 +248,125 @@ public class ScheduleFragment extends Fragment {
             scheduleTableContainer.removeAllViews();
         }
 
+        // 重置下一班车索引
+        nextBusRowIndex = -1;
+
         try {
             final String firstBusTime = scheduleTimes.get(0);
+            final String lastBusTime = scheduleTimes.get(scheduleTimes.size() - 1);
             final String startStation = lineDirection.startStation;
             final String endStation = lineDirection.endStation;
             // 根据线路长度(公里)和367米/分钟计算运行时间(分钟)
             final int travelMinutes = (int) Math.ceil(lineDirection.lineLength * 1000.0 / 367.0);
 
+            // 获取当前时间
+            Calendar now = Calendar.getInstance();
+            int currentHour = now.get(Calendar.HOUR_OF_DAY);
+            int currentMinute = now.get(Calendar.MINUTE);
+            int currentTotalMinutes = currentHour * 60 + currentMinute;
+
+            // 解析末班车时间
+            int lastBusTotalMinutes = parseTimeToMinutes(lastBusTime);
+
+            // 判断是否超过末班车时间
+            boolean isAfterLastBus = currentTotalMinutes > lastBusTotalMinutes;
+            Log.d(TAG, "当前时间: " + currentHour + ":" + currentMinute + ", 末班车: " + lastBusTime + ", 是否超过: " + isAfterLastBus);
+
             // 1. 出场行
             String[] outBound = computeOutboundTime(firstBusTime);
-            addTableRow(1, true, false, outBound[0], outBound[1], lineName, "", "", startStation);
+            addTableRow(1, true, false, outBound[0], outBound[1], lineName, "", "", startStation, false);
 
             // 2. 中间班次（普通行）
             int scheduleIndex = 1;
             String lastArrivalTime = firstBusTime;
+            int rowIndex = 1;  // 行索引（从1开始，0是出场行）
+
             for (int i = 0; i < scheduleTimes.size(); i++) {
                 String departure = scheduleTimes.get(i);
                 String arrival = computeArrivalTime(departure, travelMinutes);
                 lastArrivalTime = arrival;
-                addTableRow(scheduleIndex++, false, false, departure, arrival, lineName, "全程", startStation, endStation);
+
+                // 计算该班次发车时间的分钟数
+                int departureMinutes = parseTimeToMinutes(departure);
+
+                // 判断是否为下一班车（当前时间之后的第一班）
+                boolean isNextBus = false;
+                if (!isAfterLastBus && nextBusRowIndex == -1 && departureMinutes > currentTotalMinutes) {
+                    isNextBus = true;
+                    nextBusRowIndex = rowIndex;
+                    Log.d(TAG, "找到下一班车: 第" + scheduleIndex + "班, 发车时间: " + departure);
+                }
+
+                addTableRow(scheduleIndex++, false, false, departure, arrival, lineName, "全程", startStation, endStation, isNextBus);
+                rowIndex++;
             }
 
             // 3. 进场行：发车=末班车到达时间，到达=发车+3分钟
             String inboundArrival = computeInboundArrivalTime(lastArrivalTime);
-            addTableRow(0, false, true, lastArrivalTime, inboundArrival, lineName, "", endStation, "");
+            addTableRow(0, false, true, lastArrivalTime, inboundArrival, lineName, "", endStation, "", false);
+
+            // 如果未超过末班车时间且找到了下一班车，则滚动到该位置并高亮
+            if (!isAfterLastBus && nextBusRowIndex > 0) {
+                scrollToNextBus();
+            }
 
         } catch (Exception e) {
             Log.e(TAG, "渲染时刻表失败", e);
             showError("时刻表渲染失败: " + e.getMessage());
         }
+    }
+
+    /**
+     * 将时间字符串转换为分钟数（从00:00开始）
+     */
+    private int parseTimeToMinutes(String timeStr) {
+        try {
+            String[] parts = timeStr.split(":");
+            if (parts.length != 2) {
+                return -1;
+            }
+            int hour = Integer.parseInt(parts[0]);
+            int minute = Integer.parseInt(parts[1]);
+            return hour * 60 + minute;
+        } catch (Exception e) {
+            Log.e(TAG, "解析时间失败: " + timeStr, e);
+            return -1;
+        }
+    }
+
+    /**
+     * 滚动到下一班车位置
+     */
+    private void scrollToNextBus() {
+        if (scheduleScrollView == null || scheduleTableContainer == null || nextBusRowIndex <= 0) {
+            return;
+        }
+
+        // 延迟执行滚动，确保视图已经渲染完成
+        scheduleScrollView.postDelayed(() -> {
+            if (!isAdded() || scheduleTableContainer == null || scheduleScrollView == null) {
+                return;
+            }
+
+            // 获取下一班车行视图
+            View nextBusRow = scheduleTableContainer.getChildAt(nextBusRowIndex);
+            if (nextBusRow == null) {
+                Log.w(TAG, "未找到下一班车行视图, index=" + nextBusRowIndex);
+                return;
+            }
+
+            // 计算滚动位置：将该行居中显示
+            int rowTop = nextBusRow.getTop();
+            int rowHeight = nextBusRow.getHeight();
+            int scrollViewHeight = scheduleScrollView.getHeight();
+
+            // 滚动到使该行居中（或接近居中）的位置
+            int scrollY = rowTop - (scrollViewHeight / 2) + (rowHeight / 2);
+            if (scrollY < 0) scrollY = 0;
+
+            Log.d(TAG, "滚动到下一班车: rowTop=" + rowTop + ", scrollY=" + scrollY);
+            scheduleScrollView.smoothScrollTo(0, scrollY);
+        }, 300);
     }
 
     /**
@@ -341,16 +441,28 @@ public class ScheduleFragment extends Fragment {
      * @param dispatch 调度
      * @param startPoint 起点
      * @param endPoint 终点
+     * @param isNextBus 是否为下一班车（高亮绿色）
      */
     private void addTableRow(int sequence, boolean isOutbound, boolean isInbound,
                              String departure, String arrival,
-                             String line, String dispatch, String startPoint, String endPoint) {
+                             String line, String dispatch, String startPoint, String endPoint,
+                             boolean isNextBus) {
         if (scheduleTableContainer == null || !isAdded()) return;
 
         LinearLayout row = new LinearLayout(requireContext());
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(0, 6, 0, 6);
+
+        // 如果是下一班车，设置圆角绿色背景高亮
+        if (isNextBus) {
+            GradientDrawable roundedBg = new GradientDrawable();
+            roundedBg.setShape(GradientDrawable.RECTANGLE);
+            roundedBg.setCornerRadius(8f);  // 圆角半径
+            roundedBg.setColor(0x4000FF00);  // 半透明绿色
+            row.setBackground(roundedBg);
+            Log.d(TAG, "高亮下一班车行: 序号=" + sequence);
+        }
 
         String[] values = new String[]{
                 String.valueOf(sequence),
@@ -381,9 +493,14 @@ public class ScheduleFragment extends Fragment {
                 } else {
                     cell.setText(val);
                 }
-                cell.setTextColor(0xFFFFFFFF);
             } else {
                 cell.setText(val);
+            }
+
+            // 如果是下一班车，设置绿色文字
+            if (isNextBus) {
+                cell.setTextColor(Color.GREEN);
+            } else {
                 cell.setTextColor(0xFFFFFFFF);
             }
 
