@@ -13,13 +13,17 @@
         android:gravity="center"
         android:background="@drawable/nav_panel_bg"
         android:paddingTop="2dp">
-        <!-- 未登录 -->
+        <!-- 拍POV -->
         <LinearLayout
+            android:id="@+id/nav_icon_pov"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
             android:gravity="center"
-            android:layout_marginBottom="5dp">
+            android:layout_marginBottom="5dp"
+            android:clickable="true"
+            android:focusable="true"
+            android:background="?attr/selectableItemBackground">
             <ImageView
                 android:layout_width="32dp"
                 android:layout_height="32dp"
@@ -28,7 +32,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
-                android:text="未登录"
+                android:text="拍POV"
                 android:textColor="#FFFFFF"
                 android:textSize="11sp" />
         </LinearLayout>

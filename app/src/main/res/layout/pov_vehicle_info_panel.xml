@@ -1,0 +1,289 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:orientation="vertical"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:padding="10dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="5dp"
+        android:background="@drawable/pov_white_bg_rounded">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical">
+
+            <ImageView
+                android:layout_width="25dp"
+                android:layout_height="25dp"
+                android:layout_marginStart="11dp"
+                android:layout_marginEnd="5dp"
+                android:layout_gravity="center"
+                android:src="@drawable/icon_zhuji_bus_city" />
+            <ImageView
+                android:layout_width="25dp"
+                android:layout_height="25dp"
+                android:layout_marginEnd="5dp"
+                android:layout_gravity="center"
+                android:src="@drawable/icon_zhuji_bus_ur" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="10sp"
+                android:layout_marginEnd="10dp"
+                android:text="诸暨公交\nZhuji Bus"
+                android:textAlignment="center"
+                android:textColor="@color/black"
+                android:textStyle="bold" />
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:paddingHorizontal="2dp"
+                android:paddingVertical="0dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="@drawable/bg_line_purple">
+                <!-- 路线号数字 -->
+                <TextView
+                    android:id="@+id/pov_line_number"
+                    android:background="@drawable/bg_line_purple"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="XX路"
+                    android:textColor="#FFFFFF"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:gravity="center">
+
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:layout_marginStart="10dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="起点站"
+                        android:textColor="#DCA800"
+                        android:textSize="15sp" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:layout_marginStart="10dp">
+                    <!-- 起点站名称（滚动显示） -->
+                    <org.zjfgh.zhujibus.HorizontalScrollTextView
+                        android:id="@+id/pov_start_station_name"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        app:hsText="这里是起点站"
+                        app:hsTextColor="#000000"
+                        app:hsTextSize="20sp"
+                        app:hsGravity="center"
+                        app:hsTextGap="60dp"
+                        app:hsAnimationMode="infinite" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:gravity="center">
+
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:layout_marginStart="30dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="终点站"
+                        android:textColor="#DCA800"
+                        android:textSize="15sp" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:layout_marginStart="10dp">
+                    <!-- 终点站名称（滚动显示） -->
+                    <org.zjfgh.zhujibus.HorizontalScrollTextView
+                        android:id="@+id/pov_end_station_name"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        app:hsText="这里是终点站"
+                        app:hsTextColor="#000000"
+                        app:hsTextSize="20sp"
+                        app:hsGravity="center"
+                        app:hsTextGap="60dp"
+                        app:hsAnimationMode="infinite" />
+                </LinearLayout>
+            </LinearLayout>
+            <!--实时车速-->
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="10dp"
+                android:layout_marginEnd="10dp"
+                android:gravity="center_vertical"
+                android:orientation="vertical">
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical">
+
+                    <TextView
+                        android:id="@+id/pov_realtime_speed"
+                        android:layout_width="100dp"
+                        android:layout_height="wrap_content"
+                        android:textAlignment="center"
+                        android:text="000km/h"
+                        android:textColor="#DCA800"
+                        android:textSize="20sp"
+                        android:textStyle="bold" />
+                </LinearLayout>
+            </LinearLayout>
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:layout_marginTop="2dp"
+            android:paddingStart="10dp"
+            android:paddingEnd="10dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                android:paddingTop="4dp"
+                android:paddingBottom="4dp"
+                android:background="@drawable/bg_yellow_dash_8radius"
+                android:gravity="center_vertical">
+                <!--坐标信息-->
+                <LinearLayout
+                    android:id="@+id/pov_coordinate_container"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:gravity="center">
+
+                    <ImageView
+                        android:layout_width="17dp"
+                        android:layout_height="17dp"
+                        android:background="@drawable/pov_location_icon" />
+
+                    <TextView
+                        android:id="@+id/tv_pov_gps_coordinate"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="5dp"
+                        android:layout_marginEnd="20dp"
+                        android:text="---.----------,--.----------"
+                        android:textStyle="bold"
+                        android:textColor="@color/black"
+                        android:textSize="14sp" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:gravity="center">
+
+                    <TextView
+                        android:id="@+id/pov_next_station_tips"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textSize="17sp"
+                        android:text=""
+                        android:textAlignment="center"
+                        android:textColor="@color/black"
+                        android:textStyle="bold" />
+                    <!-- 下一站名称（滚动显示） -->
+                    <org.zjfgh.zhujibus.HorizontalScrollTextView
+                        android:id="@+id/pov_next_station_name"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        app:hsAnimationMode="infinite"
+                        app:hsGravity="left"
+                        app:hsText="等待进站"
+                        app:hsTextColor="#000000"
+                        app:hsTextGap="60dp"
+                        app:hsTextSize="17sp" />
+                </LinearLayout>
+
+                <!-- 开门动效 -->
+                <LinearLayout
+                    android:id="@+id/pov_door_container"
+                    android:layout_width="100dp"
+                    android:layout_height="wrap_content"
+                    android:gravity="center">
+                    <!-- 左侧门 -->
+                    <LinearLayout
+                        android:id="@+id/pov_door_left"
+                        android:layout_width="wrap_content"
+                        android:layout_height="30dp"
+                        android:background="@drawable/bg_pov_info_panel_door"
+                        android:orientation="horizontal">
+                        <!-- 顶部白色圆角栏 -->
+                        <View
+                            android:layout_width="10dp"
+                            android:layout_height="10dp"
+                            android:background="@drawable/bg_pov_info_panel_door_window"/>
+                    </LinearLayout>
+                    <!-- 右侧门 -->
+                    <LinearLayout
+                        android:id="@+id/pov_door_right"
+                        android:layout_width="wrap_content"
+                        android:layout_height="30dp"
+                        android:background="@drawable/bg_pov_info_panel_door"
+                        android:orientation="horizontal">
+                        <!-- 顶部白色圆角栏 -->
+                        <View
+                            android:layout_width="10dp"
+                            android:layout_height="10dp"
+                            android:background="@drawable/bg_pov_info_panel_door_window"/>
+                    </LinearLayout>
+                </LinearLayout>
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:gravity="center">
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textSize="14sp"
+                        android:text="本侧开门"
+                        android:textAlignment="center"
+                        android:textColor="@color/black"
+                        android:textStyle="bold"/>
+                </LinearLayout>
+
+            </LinearLayout>
+        </LinearLayout>
+
+    </LinearLayout>
+
+</LinearLayout>

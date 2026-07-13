@@ -300,7 +300,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showStationDetailsDialog(String stationName) {
-        StationDetailsFragment stationDetailsFragment = new StationDetailsFragment(stationName);
+        StationDetailsFragment stationDetailsFragment = StationDetailsFragment.newInstance(stationName);
         stationDetailsFragment.show(getSupportFragmentManager(), "dialog_tag");
     }
 
@@ -851,4 +851,5 @@ public class MainActivity extends AppCompatActivity {
             Toast.makeText(this, "无法打开浏览器：" + e.getMessage(), Toast.LENGTH_LONG).show();
         }
     }
+
 }

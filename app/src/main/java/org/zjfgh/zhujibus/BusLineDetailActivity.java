@@ -59,6 +59,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private String lineName;
     private String startStation;
     private String endStation;
+    private HorizontalScrollTextView endStationNameView;  // ⭐ 保存终点站View引用，供POV面板读取
     private BusApiClient busApiClient;
     private HorizontalScrollTextView routeNumber;
     private TextView navHasNotification;
@@ -81,6 +82,11 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private final List<BusEtaItem> etaItems = new ArrayList<>();
     private BusEtaAdapter busEtaAdapter;
     private static final String TAG = "BusLineDetailActivity";
+
+    // ===== POV模式静态引用 =====
+    /** ⭐ 当前 Activity 实例的静态引用（用于POV模式暂停/恢复业务） */
+    private static BusLineDetailActivity currentInstance = null;
+
     MoreFragment moreFragment;
     String priceText = "0.00";
     // ⭐ 导航模块视图引用已迁移到 NavigationMainFragment，Activity 不再持有：
@@ -163,6 +169,140 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private volatile double exitStationRadius = DEFAULT_EXIT_STATION_RADIUS;
     // 后台 GPS 线程会读，主线程在 showDirection 中赋值，volatile 保证可见性
     private volatile List<io.sgr.geometry.Coordinate> routePoints;
+
+    /**
+     * ⭐ 获取当前公交线路路线点（供CameraActivity的POV地图使用）
+     */
+    public static List<io.sgr.geometry.Coordinate> getCurrentRoutePoints() {
+        BusLineDetailActivity instance = currentInstance;
+        if (instance != null) {
+            return instance.routePoints;
+        }
+        return null;
+    }
+
+    /**
+     * ⭐ 获取当前公交线路起点站和终点站坐标（供CameraActivity的POV导航使用）
+     * @return [startLat, startLng, endLat, endLng]，如果无法获取则返回null
+     */
+    public static double[] getCurrentStartEndStationCoords() {
+        BusLineDetailActivity instance = currentInstance;
+        if (instance != null && instance.realTimeManager != null) {
+            List<BusApiClient.BusLineStation> stations = instance.realTimeManager.getStationList();
+            if (stations != null && stations.size() >= 2) {
+                BusApiClient.BusLineStation first = stations.get(0);
+                BusApiClient.BusLineStation last = stations.get(stations.size() - 1);
+                if (first.poiOriginLat != 0 && first.poiOriginLon != 0
+                        && last.poiOriginLat != 0 && last.poiOriginLon != 0) {
+                    return new double[]{
+                            first.poiOriginLat, first.poiOriginLon,
+                            last.poiOriginLat, last.poiOriginLon
+                    };
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * ⭐ 获取当前公交线路名称（供CameraActivity的POV信息面板使用）
+     */
+    public static String getCurrentLineName() {
+        BusLineDetailActivity instance = currentInstance;
+        return instance != null ? instance.lineName : null;
+    }
+
+    /**
+     * ⭐ 获取当前公交终点站名称（供CameraActivity的POV信息面板使用）
+     */
+    public static String getCurrentEndStation() {
+        BusLineDetailActivity instance = currentInstance;
+        if (instance == null) return null;
+        // 优先从View读取当前显示的终点站名（换向后endStation字段可能还没更新）
+        if (instance.endStationNameView != null) {
+            String viewText = instance.endStationNameView.getText();
+            if (viewText != null && !viewText.isEmpty()) return viewText;
+        }
+        return instance.endStation;
+    }
+
+    /**
+     * ⭐ 获取起点站名称（供POV面板使用）
+     */
+    public static String getCurrentStartStation() {
+        BusLineDetailActivity instance = currentInstance;
+        return instance != null ? instance.startStation : null;
+    }
+
+    /**
+     * ⭐ 获取当前GPS坐标（供POV面板使用）
+     */
+    public static double[] getCurrentGpsCoords() {
+        BusLineDetailActivity instance = currentInstance;
+        if (instance != null) {
+            return new double[]{instance.currentGpsLat, instance.currentGpsLon};
+        }
+        return null;
+    }
+
+    /**
+     * ⭐ 获取站点列表（供CameraActivity回退计算下一站使用）
+     */
+    public static List<BusApiClient.BusLineStation> getCurrentStationList() {
+        BusLineDetailActivity instance = currentInstance;
+        if (instance != null && instance.realTimeManager != null) {
+            return instance.realTimeManager.getStationList();
+        }
+        return null;
+    }
+
+    /**
+     * ⭐ 获取进站半径（供CameraActivity判断进出站使用）
+     */
+    public static double getEnterStationRadius() {
+        BusLineDetailActivity instance = currentInstance;
+        return instance != null ? instance.enterStationRadius : DEFAULT_ENTER_STATION_RADIUS;
+    }
+
+    /**
+     * ⭐ 获取出站半径（供CameraActivity判断进出站使用）
+     */
+    public static double getExitStationRadius() {
+        BusLineDetailActivity instance = currentInstance;
+        return instance != null ? instance.exitStationRadius : DEFAULT_EXIT_STATION_RADIUS;
+    }
+
+    /**
+     * ⭐ 获取POV下一站/当前站信息（供CameraActivity面板使用）
+     * @return [isAtStation, stationName]
+     *   isAtStation=true: 在站内，stationName=当前站名
+     *   isAtStation=false: 出站，stationName=下一站名
+     */
+    public static Object[] getPovNextStationInfo() {
+        BusLineDetailActivity instance = currentInstance;
+        if (instance == null || instance.realTimeManager == null) return null;
+        List<BusApiClient.BusLineStation> stations = instance.realTimeManager.getStationList();
+        if (stations == null || stations.isEmpty()) return null;
+
+        boolean atStation = instance.isInsideStationRadius;
+        int currentIndex = instance.gpsCurrentStationIndex;
+
+        if (atStation && currentIndex >= 0 && currentIndex < stations.size()) {
+            // 在站内：显示当前站
+            return new Object[]{true, stations.get(currentIndex).stationName};
+        } else {
+            // 出站：显示下一站
+            int nextIndex = currentIndex + 1;
+            if (nextIndex < stations.size()) {
+                return new Object[]{false, stations.get(nextIndex).stationName};
+            } else if (currentIndex >= 0 && currentIndex < stations.size()) {
+                // 已到终点站
+                return new Object[]{true, stations.get(currentIndex).stationName};
+            }
+            return null;
+        }
+    }
+
     private static final double STATION_PROXIMITY_THRESHOLD_METERS = 50.0;
 
     private double lastLocationLat = 0;
@@ -1216,6 +1356,8 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        // ⭐ 保存当前实例的静态引用（用于POV模式）
+        currentInstance = this;
         setContentView(R.layout.activity_bus_line_details);
         Intent intent = getIntent();
         if (intent != null) {
@@ -1266,11 +1408,11 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         navHasNotification.setVisibility(View.GONE);
         noticeText = findViewById(R.id.notice_text);
         noticeBar.setVisibility(View.GONE);
-        HorizontalScrollTextView endStationName = findViewById(R.id.end_station_name);
-        endStationName.setGravity(2);
-        endStationName.setText(endStation);
-        endStationName.setTypeface(dottedSongti);
-        endStationName.setScrollSpeed(180f);
+        endStationNameView = findViewById(R.id.end_station_name);
+        endStationNameView.setGravity(2);
+        endStationNameView.setText(endStation);
+        endStationNameView.setTypeface(dottedSongti);
+        endStationNameView.setScrollSpeed(180f);
         tips = findViewById(R.id.tips);
         tips.setTypeface(dottedSongti);
         tips.setGravity(1);
@@ -1396,7 +1538,21 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             navIconSpeakView.setOnClickListener(v -> toggleSpeakPage());
         }
 
-        // 6. 绑定左侧"更多应用"图标点击
+        // 6. 绑定左侧"拍POV"图标点击
+        View navIconPov = findViewById(R.id.nav_icon_pov);
+        if (navIconPov != null) {
+            navIconPov.setOnClickListener(v -> {
+                Intent intent = new Intent(this, CameraActivity.class);
+                intent.putExtra("line_id", lineID);
+                intent.putExtra("line_name", lineName);
+                intent.putExtra("start_station", startStation);
+                intent.putExtra("end_station", endStation);
+                intent.putExtra("direction", currentDirection);
+                startActivity(intent);
+            });
+        }
+
+        // 7. 绑定左侧"更多应用"图标点击
                 View navIconMoreView = findViewById(R.id.nav_icon_more);
                 if (navIconMoreView != null) {
                     navIconMoreImg = navIconMoreView.findViewById(R.id.nav_icon_more_img);
@@ -1869,8 +2025,9 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
 
         if (lineDirection != null) {
             runOnUiThread(() -> {
-                HorizontalScrollTextView endStationName = findViewById(R.id.end_station_name);
-                endStationName.setText(lineDirection.endStation);
+                if (endStationNameView != null) {
+                    endStationNameView.setText(lineDirection.endStation);
+                }
                 startStation = lineDirection.startStation;
                 endStation = lineDirection.endStation;
                 if (navigationMainFragment != null) {
@@ -2931,10 +3088,75 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         }
         // ⭐ Fragment.onDestroyView() 会自动调用 tencentNavigation.onDestroy() 并清空实例引用
         navigationMainFragment = null;
+        // ⭐ 清除静态引用
+        currentInstance = null;
     }
 
     private String getCurrentDirectionId() {
         BusApiClient.BusLineDirection direction = getCurrentDirectionData();
         return direction != null ? direction.id : "";
+    }
+
+    // ===== POV模式暂停/恢复业务 =====
+
+    /**
+     * ⭐ 进入POV时暂停其他业务
+     * 停止线路网络更新、GPS定位更新等，避免与CameraActivity的定位冲突
+     */
+    public static void pauseForPOV() {
+        Log.d(TAG, "进入POV模式，暂停其他业务");
+        if (currentInstance == null) {
+            Log.w(TAG, "pauseForPOV: 当前Activity实例为空");
+            return;
+        }
+
+        // ⭐ 停止 BusRealTimeManager 的更新
+        if (currentInstance.realTimeManager != null) {
+            currentInstance.realTimeManager.stopTracking();
+            Log.d(TAG, "POV: 已停止 BusRealTimeManager 更新");
+        }
+
+        // ⭐ 停止网络刷新倒计时
+        currentInstance.stopNetworkRefreshCountdown();
+        Log.d(TAG, "POV: 已停止网络刷新倒计时");
+
+        // ⭐ 不停止 GpsWarmingUp —— 让GPS站判断(handleGpsLocation)继续运行
+        // CameraActivity的POV面板需要读取 isInsideStationRadius/gpsCurrentStationIndex
+        // GpsWarmingUp 的定位和 BusLineDetailActivity 的 handleGpsLocation 互不冲突
+        Log.d(TAG, "POV: 保持GpsWarmingUp运行（供POV面板读取站判断状态）");
+
+        // ⭐ 暂停 AmapNavigationView 的定位
+        if (currentInstance.navigationMainFragment != null
+                && currentInstance.navigationMainFragment.getNavigation() != null) {
+            currentInstance.navigationMainFragment.getNavigation().pauseLocationForPOV();
+            Log.d(TAG, "POV: 已暂停 AmapNavigationView 定位");
+        }
+    }
+
+    /**
+     * ⭐ 退出POV时恢复其他业务
+     * 恢复线路网络更新、GPS定位更新等
+     */
+    public static void resumeAfterPOV() {
+        Log.d(TAG, "退出POV模式，恢复其他业务");
+        if (currentInstance == null) {
+            Log.w(TAG, "resumeAfterPOV: 当前Activity实例为空");
+            return;
+        }
+
+        // ⭐ 恢复 AmapNavigationView 的定位
+        if (currentInstance.navigationMainFragment != null
+                && currentInstance.navigationMainFragment.getNavigation() != null) {
+            currentInstance.navigationMainFragment.getNavigation().resumeLocationAfterPOV();
+            Log.d(TAG, "POV: 已恢复 AmapNavigationView 定位");
+        }
+
+        // ⭐ 恢复 GPS 定位（GpsWarmingUp）会在 Activity.onResume() 中自动执行
+        // 不需要手动恢复，因为 GpsWarmingUp.startWarmingUp() 在 onResume 中会被调用
+
+        // ⭐ 恢复网络刷新倒计时会在 Activity.onResume() 中自动执行
+        // startNetworkRefreshCountdown() 在 onResume 中会被调用
+
+        Log.d(TAG, "POV: 业务恢复完成（定位和网络刷新将在 onResume 中自动恢复）");
     }
 }

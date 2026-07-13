@@ -30,11 +30,12 @@ import java.util.List;
 import java.util.Set;
 
 public class StationDetailsFragment extends DialogFragment {
+    private static final String ARG_STATION_NAME = "station_name";
     private BusApiClient busApiClient;
     private TTSUtils ttsUtils;
     private RecyclerView recyclerView;
     private BusStationAdapter adapter;
-    private final String currentStationName;
+    private String currentStationName;
     private Set<String> announcedVehicles = new HashSet<>();
     private Handler refreshHandler;
     private Runnable refreshRunnable;
@@ -46,14 +47,25 @@ public class StationDetailsFragment extends DialogFragment {
     private DirectionMarker currentSelectedMarker;
     private MarkerSearchAdapter markerSearchAdapter;
 
-    public StationDetailsFragment(String currentStationName) {
-        this.currentStationName = currentStationName;
+    public static StationDetailsFragment newInstance(String stationName) {
+        StationDetailsFragment fragment = new StationDetailsFragment();
+        Bundle args = new Bundle();
+        args.putString(ARG_STATION_NAME, stationName);
+        fragment.setArguments(args);
+        return fragment;
+    }
+
+    public StationDetailsFragment() {
+        // 无参构造函数，供系统恢复状态时调用
     }
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setStyle(DialogFragment.STYLE_NORMAL, R.style.TransparentDialog);
+        if (getArguments() != null) {
+            currentStationName = getArguments().getString(ARG_STATION_NAME);
+        }
         busApiClient = new BusApiClient();
         dbHelper = DirectionMarkerDatabaseHelper.getInstance(requireContext());
         ttsUtils = TTSUtils.getInstance(requireContext());

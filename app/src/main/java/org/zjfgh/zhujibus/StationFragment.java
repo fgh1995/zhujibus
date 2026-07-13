@@ -54,7 +54,7 @@ public class StationFragment extends Fragment {
     }
 
     private void showBusStationDetails(String stationName) {
-        StationDetailsFragment stationDetailsFragment = new StationDetailsFragment(stationName);
+        StationDetailsFragment stationDetailsFragment = StationDetailsFragment.newInstance(stationName);
         stationDetailsFragment.show(requireActivity().getSupportFragmentManager(), "dialog_tag");
     }
 

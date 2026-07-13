@@ -89,10 +89,23 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
         void onSpeedChanged(float speedKmh);
     }
 
+    public interface OnLocationUpdateListener {
+        void onLocationUpdated(Location location);
+    }
+
+    private static final long POV_LOCATION_CALLBACK_INTERVAL_MS = 1000L;
+
     private OnSpeedChangeListener speedChangeListener;
+    private OnLocationUpdateListener locationUpdateListener;
+    private Location lastPovCallbackLocation;
+    private long lastPovCallbackTime;
 
     public void setSpeedChangeListener(OnSpeedChangeListener listener) {
         this.speedChangeListener = listener;
+    }
+
+    public void setLocationUpdateListener(OnLocationUpdateListener listener) {
+        this.locationUpdateListener = listener;
     }
 
     private final Context appContext;
@@ -127,6 +140,21 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
     private double lastLat = 0;
     private double lastLng = 0;
     private long lastLocTimeMs = 0;
+
+    // ⭐ 最新定位坐标（不受速度影响，供POV面板显示）
+    private double currentLocLat = 0;
+    private double currentLocLng = 0;
+
+    /**
+     * ⭐ 获取最新GPS坐标（供POV面板显示）
+     * @return [lat, lng] 或 null（无定位时）
+     */
+    public double[] getLastLocation() {
+        if (currentLocLat != 0 && currentLocLng != 0) {
+            return new double[]{currentLocLat, currentLocLng};
+        }
+        return null;
+    }
     // 速度阈值：> 1.5 m/s (≈ 5.4 km/h) 用运动方向，≤ 1.5 m/s 用设备方向
     private static final float SPEED_THRESHOLD_MPS = 1.5f;
     // ⭐ 标记：是否已应用首次导航视角（首次收到定位时强制应用一次）
@@ -144,6 +172,9 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
     private volatile long lastGpsSuccessTimeMs = 0L;
     /** 网络模式下自适应 zoom（drawRoute 后 500ms 记录，切回网络模式时恢复） */
     private float lastNetworkAdaptiveZoom = -1f;
+
+    // ⭐ 标记：进入POV模式前的模式（true=GPS模式, false=网络模式）
+    private boolean modeBeforePovIsGps = false;
 
     // ---- 公交车辆 marker 管理（仅网络模式） ----
     /** 当前线路方向的所有公交车辆 SmoothMoveMarker（车牌 → marker） */
@@ -200,11 +231,21 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
      */
     public static final float TARGET_ZOOM = 15f;   // 适中缩放（不要太贴地）
     public static final float TARGET_TILT = 0f;    // 完全俯视（2D视角）
+    private float navigationZoom = TARGET_ZOOM;
+    private float navigationTilt = TARGET_TILT;
 
     public AmapNavigationView(Context context, TextureMapView mapView) {
         this.appContext = context.getApplicationContext();
         this.mapView = mapView;  // ⭐ 使用 TextureMapView（官方自定义方式）
         Log.d(TAG, "[INIT] AmapNavigationView constructor called, mapView=" + mapView);
+    }
+
+    public void setNavigationCamera(float zoom, float tilt) {
+        navigationZoom = zoom > 0 ? zoom : TARGET_ZOOM;
+        navigationTilt = tilt;
+        if (isGpsMode && aMap != null) {
+            applyNavigationCameraPerspective();
+        }
     }
 
     /**
@@ -371,8 +412,8 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
             CameraPosition currentPos = aMap.getCameraPosition();
             CameraPosition cp = new CameraPosition.Builder()
                     .target(currentPos.target)  // 保持当前位置
-                    .zoom(TARGET_ZOOM)          // 适中缩放（15级，不要太贴地）
-                    .tilt(TARGET_TILT)          // 完全俯视（0度，2D视角）
+                    .zoom(navigationZoom)       // 可由不同页面单独配置
+                    .tilt(navigationTilt)       // 可由不同页面单独配置
                     .bearing(currentPos.bearing) // 保持当前方向
                     .build();
             aMap.moveCamera(CameraUpdateFactory.newCameraPosition(cp));
@@ -382,7 +423,7 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
             aMap.getUiSettings().setRotateGesturesEnabled(false);    // 禁止旋转手势
             // ⚠️ 不禁止缩放手势，让用户可以调整视野范围
             
-            Log.d(TAG, "[MAP] 导航视角已应用：zoom=" + TARGET_ZOOM + ", tilt=" + TARGET_TILT + ", 锁车态已启用");
+            Log.d(TAG, "[MAP] 导航视角已应用：zoom=" + navigationZoom + ", tilt=" + navigationTilt + ", 锁车态已启用");
         } catch (Throwable t) {
             Log.e(TAG, "applyNavigationCameraPerspective failed: " + t.getMessage(), t);
         }
@@ -497,6 +538,34 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
         }
     }
 
+    // ========== POV模式暂停/恢复定位 ==========
+
+    /**
+     * ⭐ 进入POV模式
+     * 1. 记录当前模式。
+     * 2. 强制切到GPS模式（以确保能持续获取最新坐标供POV面板显示）。
+     * 3. 注意：不再 stopAmapLocation()，因为POV面板需要实时坐标。
+     */
+    public void pauseLocationForPOV() {
+        this.modeBeforePovIsGps = this.isGpsMode;
+        Log.d(TAG, "[POV] 进入POV，保存原始模式: " + (modeBeforePovIsGps ? "GPS" : "网络"));
+
+        if (!isGpsMode) {
+            setGpsMode(true);
+            Log.d(TAG, "[POV] 进入POV，强制切换到GPS模式以获取更新");
+        }
+    }
+
+    /**
+     * ⭐ 退出POV模式
+     * 恢复到进入POV之前的原始状态（网络模式或GPS模式）
+     */
+    public void resumeLocationAfterPOV() {
+        Log.d(TAG, "[POV] 退出POV，准备恢复原始模式: " + (modeBeforePovIsGps ? "GPS" : "网络"));
+        setGpsMode(modeBeforePovIsGps);
+        Log.d(TAG, "[POV] 模式已恢复");
+    }
+
     // ========== AMapLocationListener 接口 ==========
 
     @Override
@@ -511,6 +580,10 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
             return;
         }
         lastGpsSuccessTimeMs = System.currentTimeMillis();
+
+        // ⭐ 始终更新最新定位坐标（不受速度影响，供POV面板显示）
+        currentLocLat = aMapLocation.getLatitude();
+        currentLocLng = aMapLocation.getLongitude();
 
         Log.d(TAG, String.format("[NAV] loc: lat=%.6f, lng=%.6f, acc=%.1fm, bearing=%.1f, speed=%.1f, provider=%s",
                 aMapLocation.getLatitude(),
@@ -569,7 +642,19 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
             if (bearing >= 0 && bearing <= 360) {
                 location.setBearing(bearing);
             }
+            notifyLocationUpdated(location);
             locationListener.onLocationChanged(location);
+        } else {
+            Location location = new Location(aMapLocation.getProvider());
+            location.setLatitude(aMapLocation.getLatitude());
+            location.setLongitude(aMapLocation.getLongitude());
+            location.setAccuracy(aMapLocation.getAccuracy());
+            location.setTime(aMapLocation.getTime());
+            location.setSpeed(aMapLocation.getSpeed());
+            if (aMapLocation.getBearing() >= 0 && aMapLocation.getBearing() <= 360) {
+                location.setBearing(aMapLocation.getBearing());
+            }
+            notifyLocationUpdated(location);
         }
 
         // ⭐ GPS模式首次定位成功：启动导航SDK的算路+导航
@@ -587,6 +672,23 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
         // ⭐ 注意：导航SDK启动后，不再使用 AMapLocationClient 的定位数据绘制车标
         // 而是使用导航SDK的 onLocationChange(AMapNaviLocation) 回调
         // （applyNavigationCameraPerspective 已在 setGpsMode(true) 立即调用，无需在此重复）
+    }
+
+    private void notifyLocationUpdated(Location location) {
+        if (locationUpdateListener == null || location == null) return;
+        long now = System.currentTimeMillis();
+        if (lastPovCallbackLocation != null) {
+            long elapsed = now - lastPovCallbackTime;
+            if (elapsed < POV_LOCATION_CALLBACK_INTERVAL_MS) {
+                lastPovCallbackLocation.set(location);
+                return;
+            }
+            lastPovCallbackLocation.set(location);
+        } else {
+            lastPovCallbackLocation = new Location(location);
+        }
+        lastPovCallbackTime = now;
+        locationUpdateListener.onLocationUpdated(location);
     }
 
     // ========== AMapNaviListener 接口（导航回调） ==========
@@ -619,7 +721,20 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
     @Override
     public void onLocationChange(AMapNaviLocation location) {
         // ⭐ 导航SDK的定位回调（官方方式：使用这个回调绘制车标）
-        if (isGpsMode && carOverlay != null && location != null && aMap != null) {
+        if (location == null || location.getCoord() == null) return;
+        Location androidLocation = new Location("amap_navi");
+        androidLocation.setLatitude(location.getCoord().getLatitude());
+        androidLocation.setLongitude(location.getCoord().getLongitude());
+        androidLocation.setTime(System.currentTimeMillis());
+        if (location.getSpeed() >= 0) {
+            androidLocation.setSpeed(location.getSpeed());
+        }
+        if (location.getBearing() >= 0 && location.getBearing() <= 360) {
+            androidLocation.setBearing(location.getBearing());
+        }
+        notifyLocationUpdated(androidLocation);
+
+        if (isGpsMode && carOverlay != null && aMap != null) {
             LatLng carPos = new LatLng(location.getCoord().getLatitude(), location.getCoord().getLongitude());
             float carBearing = location.getBearing();
             carOverlay.draw(aMap, carPos, carBearing);  // ⭐ 绘制车标 + 更新地图视角（锁车态下）
@@ -1833,10 +1948,69 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
         aMap = null;
         uiSettings = null;
         locationListener = null;
+        locationUpdateListener = null;
+        lastPovCallbackLocation = null;
         mapView = null;
         locationClient = null;
         aMapNavi = null;
 
         Log.d(TAG, "[DESTROY] onDestroy() finished");
+    }
+
+    /**
+     * ⭐ POV模式专用销毁：清理所有资源，但**不销毁AMapNavi单例**
+     * 因为AMapNavi是全局单例，BusLineDetailActivity仍在使用
+     * 仅移除自身作为listener，不调用AMapNavi.destroy()
+     */
+    public void onDestroyWithoutNavi() {
+        stopAmapLocation();
+
+        clearBusMarkers();
+        if (busIconDescriptor != null) {
+            try { busIconDescriptor.recycle(); } catch (Throwable t) { }
+            busIconDescriptor = null;
+        }
+        busIconLoaded = false;
+
+        clearArrowMarkers();
+        if (arrowMarkerIcon != null) {
+            try { arrowMarkerIcon.recycle(); } catch (Throwable t) { }
+            arrowMarkerIcon = null;
+        }
+
+        // ⭐ 只移除listener，不销毁AMapNavi单例
+        if (aMapNavi != null) {
+            try {
+                aMapNavi.removeAMapNaviListener(this);
+            } catch (Throwable t) {
+                Log.e(TAG, "aMapNavi.removeListener failed: " + t.getMessage());
+            }
+        }
+
+        if (locationClient != null) {
+            try {
+                locationClient.onDestroy();
+            } catch (Throwable t) {
+                Log.e(TAG, "locationClient.onDestroy failed: " + t.getMessage());
+            }
+        }
+
+        // ⭐ 清除CarOverlay
+        if (carOverlay != null) {
+            try {
+                carOverlay.reset();
+            } catch (Throwable t) { }
+        }
+
+        aMap = null;
+        uiSettings = null;
+        locationListener = null;
+        locationUpdateListener = null;
+        lastPovCallbackLocation = null;
+        // ⭐ 不置null mapView，让调用方（CameraActivity）可以继续调用mapView.onDestroy()
+        locationClient = null;
+        aMapNavi = null;
+
+        Log.d(TAG, "[DESTROY] onDestroyWithoutNavi() finished (AMapNavi singleton preserved)");
     }
 }
