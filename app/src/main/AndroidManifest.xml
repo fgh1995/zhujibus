@@ -2,24 +2,51 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- 网络 -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+
+    <!-- 位置：Android 12+ 需同时申请 FINE 和 COARSE -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+    <!-- 相机/麦克风：视频录制必备，Android 6.0+ 需运行时申请 -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
-    <!-- 高德地图/定位额外权限 -->
-    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
-    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
-    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+
+    <!-- 存储权限：分级适配 Android 7-15 -->
+    <!-- Android 13+ (API33+)：读视频用 READ_MEDIA_VIDEO；写入 MediaStore 不需要权限 -->
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <!-- Android 12 及以下 (API<=32)：读相册用 READ_EXTERNAL_STORAGE -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <!-- Android 9 及以下 (API<=28)：写外部存储用 WRITE_EXTERNAL_STORAGE -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+
+    <!-- Android 13+ (API33+)：通知权限独立申请 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- 前台服务：录制后台运行 -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- Android 14+：前台服务按场景拆分 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+
+    <!-- 高德地图/定位 SDK -->
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <!-- 高德 SDK 9.3.0 内部会向 Settings.System 写入状态/隐私协议标记，必须声明此权限 -->
     <uses-permission android:name="android.permission.WRITE_SETTINGS" />
     <!-- MIUI 蓝牙定位（MiuiBlueLocationManager#noteOpUseMyIdentity）需要声明，否则日志会刷屏警告 -->
     <uses-permission android:name="miui.permission.USE_MY_IDENTITY" />
+
     <queries>
         <!-- 查询已安装的TTS引擎 -->
         <intent>

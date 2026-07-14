@@ -514,6 +514,9 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             GpsWarmingUp.startWarmingUp(this);
             GpsWarmingUp.addListener(gpsActivityListener);
             GpsWarmingUp.addSatelliteListener(satelliteCountListener);
+            if (!PermissionUtils.checkLocationWithToast(this)) {
+                Log.w(TAG, "位置权限未授予,GPS 功能不可用");
+            }
             Location lastLocation = GpsWarmingUp.getLastKnownLocation();
             if (lastLocation != null) {
                 // post 到 GPS 后台线程，避免重计算阻塞主线程

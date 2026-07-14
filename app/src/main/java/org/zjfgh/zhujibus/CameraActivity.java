@@ -55,11 +55,16 @@ import com.amap.api.maps.TextureMapView;
 import com.amap.api.maps.model.LatLng;
 
 import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 import io.sgr.geometry.Coordinate;
 import io.sgr.geometry.utils.RouteGeometryUtils;
@@ -67,6 +72,7 @@ import io.sgr.geometry.utils.RouteGeometryUtils;
 public class CameraActivity extends AppCompatActivity {
     private static final String TAG = "CameraActivity";
     private static final int REQUEST_CAMERA_PERMISSION = 200;
+    private static final int REQUEST_WRITE_EXTERNAL_STORAGE = 201;
 
     private TextureView textureView;
     private CameraDevice cameraDevice;
@@ -78,6 +84,16 @@ public class CameraActivity extends AppCompatActivity {
     private Size videoSize = new Size(1920, 1080);
     private int selectedVideoFps = 30;
     private Range<Integer> selectedFpsRange = new Range<>(30, 30);
+
+    // 录制选项持久化
+    private static final String PREFS_NAME = "pov_recording_prefs";
+    private static final String KEY_VIDEO_OPTION_INDEX = "video_option_index";
+    private static final String KEY_VIDEO_SIZE = "video_size";
+    private static final String KEY_VIDEO_FPS = "video_fps";
+    private static final String KEY_VIDEO_FPS_RANGE_LOWER = "video_fps_range_lower";
+    private static final String KEY_VIDEO_FPS_RANGE_UPPER = "video_fps_range_upper";
+    private static final String KEY_VIDEO_HIGH_SPEED = "video_high_speed";
+
     private boolean useHighSpeedSession = false;
     private int sensorOrientation = 90;
 
@@ -93,6 +109,7 @@ public class CameraActivity extends AppCompatActivity {
     private View settingsPanel;
     private TextView btnSettings;
     private Spinner spinnerResolution;
+    private Spinner spinnerFps;
     private SeekBar seekbarVideoBitrate;
     private TextView tvVideoBitrateValue;
     private Spinner spinnerAudioBitrate;
@@ -108,11 +125,20 @@ public class CameraActivity extends AppCompatActivity {
 
     private boolean isVideoBitrateManuallyAdjusted = false;
 
-    private List<Size> availableVideoSizes = new ArrayList<>();
-    private List<Integer> availableVideoFpsList = new ArrayList<>();
-    private List<Range<Integer>> availableVideoFpsRanges = new ArrayList<>();
-    private List<Boolean> availableHighSpeedFlags = new ArrayList<>();
-    private List<String> resolutionDisplayNames = new ArrayList<>();
+    // 录制能力:每个 size 对应一组 fps 选项
+    private final List<Size> uniqueVideoSizes = new ArrayList<>();
+    // size 索引 → 唯一帧率选项(按降序)
+    private final List<List<Integer>> fpsOptionsForSize = new ArrayList<>();
+    // (sizeIndex, fps) → 实际 Camera2 fps range
+    private final java.util.Map<String, Range<Integer>> fpsRangeMap = new java.util.HashMap<>();
+    // (sizeIndex, fps) → 是否高速 mode
+    private final java.util.Map<String, Boolean> highSpeedMap = new java.util.HashMap<>();
+    // 分辨率 spinner 显示名
+    private final List<String> resolutionDisplayNames = new ArrayList<>();
+    // 帧率 spinner 显示名(跟随当前选中 size 变化)
+    private final List<String> currentFpsDisplayNames = new ArrayList<>();
+    // 当前 size 索引下可选 fps(临时,size 切换时更新)
+    private List<Integer> currentSizeFpsOptions = new ArrayList<>();
 
     private final int[] AUDIO_BITRATES = {64_000, 96_000, 128_000, 192_000, 256_000, 320_000};
     private final String[] AUDIO_BITRATE_NAMES = {"64 kbps", "96 kbps", "128 kbps", "192 kbps", "256 kbps", "320 kbps"};
@@ -187,6 +213,20 @@ public class CameraActivity extends AppCompatActivity {
     private static final float SPEED_EMA_ALPHA = 0.25f;
     private static final float SPEED_JUMP_THRESHOLD = 40f;
 
+    // 录制时长显示
+    private TextView tvRecordDuration;
+    private long recordStartTimeMs = 0L;
+    private final android.os.Handler recordDurationHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+    private final Runnable recordDurationRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (!isRecording || recordStartTimeMs <= 0) return;
+            long elapsed = System.currentTimeMillis() - recordStartTimeMs;
+            tvRecordDuration.setText("● " + formatDuration(elapsed));
+            recordDurationHandler.postDelayed(this, 1000L);
+        }
+    };
+
     private final LocationListener gpsListener = new LocationListener() {
         @Override
         public void onLocationChanged(Location location) {
@@ -222,6 +262,8 @@ public class CameraActivity extends AppCompatActivity {
         btnRecord = findViewById(R.id.btn_record_camera);
         btnRecord.setOnClickListener(v -> onRecordButtonClick());
 
+        tvRecordDuration = findViewById(R.id.tv_record_duration);
+
         initSettingsPanel();
         updateInfoPanelData();
         startDoorAnimation();
@@ -236,14 +278,47 @@ public class CameraActivity extends AppCompatActivity {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             permissions.add(Manifest.permission.RECORD_AUDIO);
         }
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-            permissions.add(Manifest.permission.ACCESS_FINE_LOCATION);
+        if (!PermissionUtils.hasLocationPermission(this)) {
+            Collections.addAll(permissions, PermissionUtils.location());
         }
-        if (!permissions.isEmpty()) {
-            ActivityCompat.requestPermissions(this, permissions.toArray(new String[0]), REQUEST_CAMERA_PERMISSION);
-        } else {
+        if (permissions.isEmpty()) {
             setupCamera();
+        } else {
+            String[] arr = permissions.toArray(new String[0]);
+            PermissionUtils.requestPermissions(this, arr, REQUEST_CAMERA_PERMISSION,
+                    new PermissionUtils.MultiPermissionCallback() {
+                        @Override
+                        public void onAllGranted() {
+                            setupCamera();
+                        }
+                        @Override
+                        public void onPartialGrant(@NonNull Set<String> granted, @NonNull Set<String> denied) {
+                            boolean cam = granted.contains(Manifest.permission.CAMERA);
+                            boolean mic = granted.contains(Manifest.permission.RECORD_AUDIO);
+                            if (cam && mic) {
+                                Toast.makeText(CameraActivity.this,
+                                        "部分权限未授予: " + denied, Toast.LENGTH_LONG).show();
+                                setupCamera();
+                            } else {
+                                Toast.makeText(CameraActivity.this,
+                                        "未授予摄像头和录音权限,无法使用", Toast.LENGTH_LONG).show();
+                                finish();
+                            }
+                        }
+                    });
         }
+    }
+
+    /**
+     * 在 setupCamera 之前做最后的检查。如果权限缺失（用户可能撤销了权限）,
+     * 用 Toast 提示用户并取消。权限必须在 onCreate 中已经申请,这里只是兜底。
+     */
+    private boolean ensureCameraAudioPermissionOrFinish() {
+        if (!PermissionUtils.checkRecordingWithToast(this)) {
+            finish();
+            return false;
+        }
+        return true;
     }
 
     /**
@@ -257,11 +332,18 @@ public class CameraActivity extends AppCompatActivity {
         int parentHeight = parent.getHeight();
         if (parentWidth == 0 || parentHeight == 0) return;
 
+        // ★ 按当前录制尺寸的实际宽高比设置预览区域(避免 16:9 视频被拉伸为 4:3 等)
+        // 默认 16:9;videoSize 已知则用 videoSize 比例
+        float videoAspect = 16f / 9f;
+        if (videoSize != null && videoSize.getHeight() > 0) {
+            videoAspect = (float) videoSize.getWidth() / (float) videoSize.getHeight();
+        }
+        // 预览区域按 videoAspect 缩放到父容器内,居中显示
         int previewWidth = parentWidth;
-        int previewHeight = parentWidth * 9 / 16;
+        int previewHeight = Math.round(previewWidth / videoAspect);
         if (previewHeight > parentHeight) {
             previewHeight = parentHeight;
-            previewWidth = parentHeight * 16 / 9;
+            previewWidth = Math.round(previewHeight * videoAspect);
         }
 
         FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) textureView.getLayoutParams();
@@ -581,6 +663,7 @@ public class CameraActivity extends AppCompatActivity {
         settingsPanel = findViewById(R.id.settings_panel);
         btnSettings = findViewById(R.id.btn_settings_camera);
         spinnerResolution = findViewById(R.id.spinner_resolution);
+        spinnerFps = findViewById(R.id.spinner_fps);
         seekbarVideoBitrate = findViewById(R.id.seekbar_video_bitrate);
         tvVideoBitrateValue = findViewById(R.id.tv_video_bitrate_value);
         spinnerAudioBitrate = findViewById(R.id.spinner_audio_bitrate);
@@ -613,7 +696,7 @@ public class CameraActivity extends AppCompatActivity {
         findViewById(R.id.btn_apply_settings).setOnClickListener(v -> hideSettingsPanel());
 
         seekbarVideoBitrate.setMax(100);
-        seekbarVideoBitrate.setProgress(30);
+        seekbarVideoBitrate.setProgress(40);  // 40Mbps = 1920x1080 60fps 基线
         seekbarVideoBitrate.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
@@ -701,23 +784,15 @@ public class CameraActivity extends AppCompatActivity {
     @Override
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        if (requestCode == REQUEST_CAMERA_PERMISSION) {
-            boolean allGranted = true;
-            for (int i = 0; i < permissions.length; i++) {
-                if (grantResults[i] != PackageManager.PERMISSION_GRANTED) {
-                    allGranted = false;
-                }
-            }
-            if (allGranted) {
-                setupCamera();
-            } else {
-                Toast.makeText(this, "摄像头和录音权限未授予", Toast.LENGTH_SHORT).show();
-                finish();
-            }
+        // 统一交给 PermissionUtils 处理
+        if (requestCode == REQUEST_CAMERA_PERMISSION
+                || requestCode == REQUEST_WRITE_EXTERNAL_STORAGE) {
+            PermissionUtils.onRequestPermissionsResult(requestCode, permissions, grantResults);
         }
     }
 
     private void setupCamera() {
+        if (!ensureCameraAudioPermissionOrFinish()) return;
         CameraManager manager = (CameraManager) getSystemService(CAMERA_SERVICE);
         if (manager == null) {
             Toast.makeText(this, "摄像头服务不可用", Toast.LENGTH_SHORT).show();
@@ -738,57 +813,128 @@ public class CameraActivity extends AppCompatActivity {
                     if (map != null) {
                         Size[] videoSizesArray = map.getOutputSizes(MediaRecorder.class);
                         if (videoSizesArray != null) {
-                            availableVideoSizes.clear();
-                            availableVideoFpsList.clear();
-                            availableVideoFpsRanges.clear();
-                            availableHighSpeedFlags.clear();
+                            // 清空旧数据
+                            uniqueVideoSizes.clear();
+                            fpsOptionsForSize.clear();
+                            fpsRangeMap.clear();
+                            highSpeedMap.clear();
                             resolutionDisplayNames.clear();
 
                             Range<Integer>[] fpsRanges = characteristics.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES);
-                            Range<Integer> normal30Range = chooseFpsRange(map, fpsRanges, 30);
-                            Range<Integer> highSpeed60Range = hasHighSpeedFpsRange(map, 60) ? chooseFpsRange(map, fpsRanges, 60) : null;
                             int normalMaxHeight = getMaxSupportedHeight(map, 30);
-                            int highSpeedMaxHeight = highSpeed60Range != null ? getMaxHighSpeedHeight(map, 60) : 0;
-                            logCameraVideoCapabilities(characteristics, map, fpsRanges, highSpeed60Range != null ? 60 : 30,
-                                    highSpeed60Range != null ? highSpeedMaxHeight : normalMaxHeight);
+                            logCameraVideoCapabilities(characteristics, map, fpsRanges, 30, normalMaxHeight);
 
+                            // ============ 收集录制能力 ============
+                            // 临时容器:size -> Set<fps>
+                            java.util.Map<Size, java.util.Set<Integer>> sizeFpsMap = new java.util.LinkedHashMap<>();
+                            // 临时容器:(w,h,fps) -> (range, highSpeed)
+                            java.util.Map<String, Object[]> fpsDetailMap = new java.util.HashMap<>();
+
+                            // 1) 高速 mode 优先遍历
+                            Log.d(TAG, "========== 开始读取高速录制组合 ==========");
+                            StringBuilder highSpeedSummary = new StringBuilder();
+                            int totalModes = 0;
+                            Size[] highSpeedSizes = null;
+                            try { highSpeedSizes = map.getHighSpeedVideoSizes(); } catch (Throwable t) {}
+                            if (highSpeedSizes != null) {
+                                highSpeedSummary.append("📷 Camera ").append(cameraId)
+                                        .append(", 高速尺寸数量: ").append(highSpeedSizes.length);
+                                for (Size size : highSpeedSizes) {
+                                    Range<Integer>[] sizeHighSpeedRanges = null;
+                                    try { sizeHighSpeedRanges = map.getHighSpeedVideoFpsRangesFor(size); } catch (Throwable t) { continue; }
+                                    if (sizeHighSpeedRanges == null) continue;
+                                    for (Range<Integer> range : sizeHighSpeedRanges) {
+                                        int lower = range.getLower();
+                                        int upper = range.getUpper();
+                                        // 跳过 HAL 夸大的 >60fps 固定 range
+                                        if (lower == upper && lower > 60) {
+                                            Log.d(TAG, "  跳过HAL夸大的fps: " + size.getWidth() + "x" + size.getHeight()
+                                                    + " @ [" + lower + "," + upper + "] (实际只能录60fps)");
+                                            continue;
+                                        }
+                                        int targetFps = (lower == upper) ? lower : upper;
+                                        if (targetFps > 60) targetFps = 60;
+                                        if (targetFps != 30 && targetFps != 60) continue;  // 只保留 30/60fps
+                                        addSizeFps(sizeFpsMap, fpsDetailMap, size, targetFps, range, true);
+                                        totalModes++;
+                                        float ratio = (float) size.getWidth() / size.getHeight();
+                                        Log.d(TAG, String.format(java.util.Locale.US,
+                                                "  %4d×%-4d  比例=%.3f  fps=[%d, %d]  %s",
+                                                size.getWidth(), size.getHeight(), ratio,
+                                                range.getLower(), range.getUpper(),
+                                                isApproximately16By9(size) ? "★ 16:9" : ""));
+                                    }
+                                }
+                                highSpeedSummary.append("; sizes=");
+                                for (int i = 0; i < highSpeedSizes.length; i++) {
+                                    if (i > 0) highSpeedSummary.append(",");
+                                    highSpeedSummary.append(highSpeedSizes[i].getWidth())
+                                            .append("x").append(highSpeedSizes[i].getHeight());
+                                }
+                            }
+                            Log.d(TAG, highSpeedSummary.toString());
+
+                            // 2) 非高速 mode
                             for (Size size : videoSizesArray) {
-                                if (isSupportedVideoSize(size, normalMaxHeight) && size.getWidth() * 9 == size.getHeight() * 16) {
-                                    addVideoOption(size, 30, normal30Range, false);
-                                }
-                                if (highSpeed60Range != null && isSupportedVideoSize(size, highSpeedMaxHeight)
-                                        && hasHighSpeedSizeFps(map, size, 60) && hasHighSpeedRecordingProfile(size)
-                                        && size.getWidth() * 9 == size.getHeight() * 16) {
-                                    addVideoOption(size, 60, chooseHighSpeedFixedFpsRangeForSize(map, size), true);
-                                }
+                                int maxFps = getMaxFpsForSize(map, size, fpsRanges);
+                                if (maxFps <= 0) continue;
+                                if (maxFps > 60) maxFps = 60;
+                                Range<Integer> fixedRange = new Range<>(maxFps, maxFps);
+                                int targetFps = maxFps >= 60 ? 60 : 30;
+                                if (targetFps > maxFps) targetFps = maxFps;
+                                if (targetFps != 30 && targetFps != 60) continue;
+                                addSizeFps(sizeFpsMap, fpsDetailMap, size, targetFps, fixedRange, false);
+                            }
+                            Log.d(TAG, "========== 共 " + totalModes + " 种高速录制组合 ==========");
+
+                            // 3) 转换为 UI 列表(按 size 按高度从大到小排序,16:9 优先)
+                            List<Size> sortedSizes = new ArrayList<>(sizeFpsMap.keySet());
+                            sortedSizes.sort((a, b) -> {
+                                boolean a169 = isApproximately16By9(a);
+                                boolean b169 = isApproximately16By9(b);
+                                if (a169 != b169) return a169 ? -1 : 1;  // 16:9 优先
+                                int pA = a.getWidth() * a.getHeight();
+                                int pB = b.getWidth() * b.getHeight();
+                                return Integer.compare(pB, pA);  // 分辨率从大到小
+                            });
+                            for (Size size : sortedSizes) {
+                                uniqueVideoSizes.add(size);
+                                Set<Integer> fpsSet = sizeFpsMap.get(size);
+                                List<Integer> fpsList = new ArrayList<>(fpsSet);
+                                fpsList.sort((a, b) -> Integer.compare(b, a));  // 60 优先
+                                fpsOptionsForSize.add(fpsList);
+                                String label = isApproximately16By9(size)
+                                        ? (size.getHeight() + "p (" + size.getWidth() + "x" + size.getHeight() + ")")
+                                        : (size.getWidth() + "x" + size.getHeight());
+                                resolutionDisplayNames.add(label);
                             }
 
-                            if (availableVideoSizes.isEmpty()) {
-                                for (Size size : videoSizesArray) {
-                                    float ratio = (float) size.getWidth() / size.getHeight();
-                                    float diff = Math.abs(ratio - 16f / 9f);
-                                    if (isSupportedVideoSize(size, normalMaxHeight) && diff < 0.1f) {
-                                        addVideoOption(size, 30, normal30Range, false);
-                                    }
-                                    if (highSpeed60Range != null && isSupportedVideoSize(size, highSpeedMaxHeight)
-                                            && hasHighSpeedSizeFps(map, size, 60) && hasHighSpeedRecordingProfile(size)
-                                            && diff < 0.1f) {
-                                        addVideoOption(size, 60, chooseHighSpeedFixedFpsRangeForSize(map, size), true);
-                                    }
-                                }
+                            // 4) 填充 fpsRangeMap/highSpeedMap(供 applyVideoOption 查表)
+                            for (java.util.Map.Entry<String, Object[]> e : fpsDetailMap.entrySet()) {
+                                String key = e.getKey();
+                                Object[] val = e.getValue();
+                                fpsRangeMap.put(key, (Range<Integer>) val[0]);
+                                highSpeedMap.put(key, (Boolean) val[1]);
                             }
 
-                            sortVideoOptions();
-
+                            // 5) 绑定 spinner
                             ArrayAdapter<String> resolutionAdapter = new ArrayAdapter<>(this,
                                     android.R.layout.simple_spinner_item, resolutionDisplayNames);
                             resolutionAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
                             spinnerResolution.setAdapter(resolutionAdapter);
 
-                            int defaultOptionIndex = findDefaultVideoOptionIndex();
-                            if (defaultOptionIndex >= 0) {
-                                spinnerResolution.setSelection(defaultOptionIndex);
-                                applyVideoOption(defaultOptionIndex);
+                            // 6) 选默认 size (1920x1080, 不支持则降级到最大 16:9 size, 再降级到最大 size)
+                            int defaultSizeIndex = findDefaultSizeIndex();
+                            if (defaultSizeIndex >= 0) {
+                                // 先绑定默认(避免 loadSavedVideoOptionIfMatched 时 spinner 没数据)
+                                spinnerResolution.setSelection(defaultSizeIndex);
+                                refreshFpsSpinnerForSize(defaultSizeIndex);
+                                int defaultFpsIndex = findDefaultFpsIndexForSize(defaultSizeIndex, 60);
+                                spinnerFps.setSelection(defaultFpsIndex);
+                                applyVideoOption(defaultSizeIndex, defaultFpsIndex);
+
+                                // ★ 尝试恢复上次保存的 (size, fps)
+                                loadSavedVideoOptionIfMatched();
                             }
                         }
 
@@ -809,16 +955,48 @@ public class CameraActivity extends AppCompatActivity {
             spinnerResolution.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
                 @Override
                 public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                    if (position >= 0 && position < availableVideoSizes.size()) {
-                        applyVideoOption(position);
+                    if (position >= 0 && position < uniqueVideoSizes.size()) {
+                        // ★ 切换 size 时,刷新 fps 列表,选 60(不支持则 30)
+                        refreshFpsSpinnerForSize(position);
+                        int defaultFpsIndex = findDefaultFpsIndexForSize(position, 60);
+                        spinnerFps.setSelection(defaultFpsIndex);
+                        applyVideoOption(position, defaultFpsIndex);
+
                         Log.d(TAG, "Resolution changed to: " + videoSize.getWidth() + "x" + videoSize.getHeight()
                                 + ", fps=" + selectedVideoFps + ", highSpeed=" + useHighSpeedSession);
 
                         if (!isVideoBitrateManuallyAdjusted) {
-                            int recommended = calculateRecommendedBitrate(videoSize.getHeight());
+                            int recommended = calculateRecommendedBitrate();
                             int recommendedMbps = recommended / 1_000_000;
                             updateVideoBitrateUI(recommendedMbps);
                             Log.d(TAG, "Auto-adjusted bitrate to: " + recommendedMbps + " Mbps");
+                        }
+
+                        // ★ 切换 size 后重设预览区域比例(避免被拉伸)
+                        if (textureView != null) {
+                            textureView.post(CameraActivity.this::updatePreviewViewSize);
+                        }
+                    }
+                }
+                @Override public void onNothingSelected(AdapterView<?> parent) {}
+            });
+
+            spinnerFps.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+                @Override
+                public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                    int sizeIndex = spinnerResolution.getSelectedItemPosition();
+                    if (sizeIndex >= 0 && position >= 0 && position < currentSizeFpsOptions.size()) {
+                        applyVideoOption(sizeIndex, position);
+                        Log.d(TAG, "Fps changed to: " + selectedVideoFps
+                                + " (size=" + videoSize.getWidth() + "x" + videoSize.getHeight()
+                                + ", highSpeed=" + useHighSpeedSession + ")");
+
+                        // ★ fps 切换时也重算推荐码流(1080p30 应该是 20Mbps,不是 60Mbps)
+                        if (!isVideoBitrateManuallyAdjusted) {
+                            int recommended = calculateRecommendedBitrate();
+                            int recommendedMbps = recommended / 1_000_000;
+                            updateVideoBitrateUI(recommendedMbps);
+                            Log.d(TAG, "Auto-adjusted bitrate to: " + recommendedMbps + " Mbps (fps=" + selectedVideoFps + ")");
                         }
                     }
                 }
@@ -854,7 +1032,7 @@ public class CameraActivity extends AppCompatActivity {
         if (manager == null || cameraId == null || cameraDevice != null) return;
 
         try {
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) return;
+            if (!PermissionUtils.checkCameraWithToast(this)) return;
             manager.openCamera(cameraId, new CameraDevice.StateCallback() {
                 @Override public void onOpened(@NonNull CameraDevice camera) {
                     cameraDevice = camera;
@@ -919,10 +1097,186 @@ public class CameraActivity extends AppCompatActivity {
         }
     }
 
+    /**
+     * 准备视频输出文件,需要确保已授权(Android 9-)。
+     *
+     * <p>Android 10+：MediaStore（首选,无需任何权限,自己写入自己创建的记录）。
+     * <br>Android 9-：写入 DCIM/POV/，必须已授予 WRITE_EXTERNAL_STORAGE，
+     * 写入前会做写入测试确保真的能写入。
+     *
+     * @return true 输出文件已就绪，false 失败
+     */
+    private boolean prepareOutputFile(String fileName) {
+        currentVideoUri = null;
+        currentTempFilePath = null;
+        currentOutputPfd = null;
+
+        // === 方案 1:Android 10+ MediaStore（无需权限）===
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                ContentValues values = new ContentValues();
+                values.put(MediaStore.Video.Media.DISPLAY_NAME, fileName);
+                values.put(MediaStore.Video.Media.MIME_TYPE, "video/mp4");
+                values.put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_DCIM + "/POV");
+                values.put(MediaStore.Video.Media.IS_PENDING, 1);
+                currentVideoUri = getContentResolver().insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values);
+                if (currentVideoUri != null) {
+                    currentOutputPfd = getContentResolver().openFileDescriptor(currentVideoUri, "rw");
+                    if (currentOutputPfd != null) {
+                        Log.d(TAG, "Android 10+ MediaStore 输出已就绪: " + currentVideoUri);
+                        return true;
+                    }
+                }
+                Log.e(TAG, "Android 10+ MediaStore:Uri 或 FileDescriptor 为空");
+            } catch (Throwable t) {
+                Log.e(TAG, "Android 10+ MediaStore 失败: " + t.getMessage(), t);
+            }
+            return false;  // Android 10+ 失败就直接失败,不降级
+        }
+
+        // === 方案 2:Android 9- 写入 DCIM/POV（需要 WRITE_EXTERNAL_STORAGE 权限）===
+        // 调用前 startRecording 已确保权限 + 写入测试通过
+        try {
+            File dcimRoot = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM);
+            if (dcimRoot == null) {
+                Log.e(TAG, "DCIM 根目录不可用");
+                return false;
+            }
+            File outputDir = new File(dcimRoot, "POV");
+            if (!outputDir.exists() && !outputDir.mkdirs()) {
+                Log.e(TAG, "无法创建 DCIM/POV 目录: " + outputDir.getAbsolutePath());
+                return false;
+            }
+            if (!outputDir.isDirectory() || !outputDir.canWrite()) {
+                Log.e(TAG, "DCIM/POV 目录不可写: " + outputDir.getAbsolutePath());
+                return false;
+            }
+            File outputFile = new File(outputDir, fileName);
+            currentTempFilePath = outputFile.getAbsolutePath();
+            Log.d(TAG, "Android 9- DCIM/POV 输出已就绪: " + currentTempFilePath);
+            return true;
+        } catch (Throwable t) {
+            Log.e(TAG, "Android 9- DCIM/POV 失败: " + t.getMessage(), t);
+            return false;
+        }
+    }
+
+    /**
+     * Android 9- 的写入测试:在 DCIM/POV/ 创建临时文件,写入几个字节,验证能读回。
+     * 这是录制前的最后一道闸:通过 → 开始录制;失败 → 提示用户并取消。
+     *
+     * <p>注意:MediaStore 在 Android 9- 上写入自己创建的记录也需要 WRITE_EXTERNAL_STORAGE 权限,
+     * 所以兜底"先写 App 目录再 copy 到 MediaStore"在 Android 9- 上不可行——
+     * copy 这一步同样会 Permission Denial。必须在录制前确保权限。
+     */
+    private boolean testWriteToDCIM() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            return true;  // Android 10+ 用 MediaStore,不需要此测试
+        }
+        File testDir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM), "POV");
+        if (!testDir.exists() && !testDir.mkdirs()) {
+            Log.e(TAG, "写入测试:无法创建 DCIM/POV 目录: " + testDir.getAbsolutePath());
+            return false;
+        }
+        if (!testDir.isDirectory() || !testDir.canWrite()) {
+            Log.e(TAG, "写入测试:DCIM/POV 目录不可写");
+            return false;
+        }
+        File testFile = new File(testDir, ".write_test_" + System.currentTimeMillis() + ".tmp");
+        try (FileOutputStream fos = new FileOutputStream(testFile)) {
+            fos.write("POV_WRITE_TEST".getBytes());
+            fos.flush();
+        } catch (Throwable t) {
+            Log.e(TAG, "写入测试失败(无法写入): " + t.getMessage(), t);
+            return false;
+        }
+        if (testFile.length() == 0) {
+            Log.e(TAG, "写入测试失败:写入字节数=0");
+            return false;
+        }
+        // 清理
+        if (!testFile.delete()) {
+            testFile.deleteOnExit();
+        }
+        Log.d(TAG, "DCIM/POV 写入测试通过");
+        return true;
+    }
+
+    /**
+     * 录制入口:先做权限检查 + 写入测试,通过后调用 {@link #startRecordingInternal()}。
+     * 之所以把权限检查放在这里,是因为 Android 9- 上必须确保 WRITE_EXTERNAL_STORAGE
+     * 已授权且实际能写入 DCIM/POV/,否则 MediaMuxer 打开文件时会报 ENOENT。
+     */
     private void startRecording() {
         if (cameraDevice == null) return;
 
+        // 先确认 CAMERA + RECORD_AUDIO 已授权（无论 Android 版本）
+        if (!PermissionUtils.checkRecordingWithToast(this)) {
+            Log.w(TAG, "录制权限未授予,取消录制");
+            return;
+        }
+
+        // Android 9- 需要先确保 WRITE_EXTERNAL_STORAGE 权限 + 写入测试
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            if (!PermissionUtils.hasPermissions(this, Manifest.permission.WRITE_EXTERNAL_STORAGE)) {
+                // 没权限:主动申请(走 PermissionUtils 走通用流程,处理永久拒绝)
+                Log.w(TAG, "Android 9- WRITE_EXTERNAL_STORAGE 未授权,主动申请");
+                PermissionUtils.requestPermissions(this,
+                        new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE},
+                        REQUEST_WRITE_EXTERNAL_STORAGE,
+                        new PermissionUtils.MultiPermissionCallback() {
+                            @Override
+                            public void onAllGranted() {
+                                Log.d(TAG, "WRITE_EXTERNAL_STORAGE 申请通过,继续写入测试");
+                                runOnUiThread(() -> continueStartRecordingAfterPermission());
+                            }
+                            @Override
+                            public void onPartialGrant(@NonNull Set<String> granted,
+                                                      @NonNull Set<String> denied) {
+                                Log.e(TAG, "WRITE_EXTERNAL_STORAGE 申请被拒");
+                                runOnUiThread(() -> {
+                                    Toast.makeText(CameraActivity.this,
+                                            "未授予存储权限,无法保存录制视频", Toast.LENGTH_LONG).show();
+                                    PermissionUtils.openAppSettings(CameraActivity.this);
+                                });
+                            }
+                        });
+                return;
+            }
+            // 有权限:但还要做实际写入测试(可能权限被系统设为"询问"但实际不可写)
+            if (!testWriteToDCIM()) {
+                Log.e(TAG, "DCIM/POV 写入测试失败,即使权限已授权也无法写入");
+                Toast.makeText(this,
+                        "DCIM/POV 目录无法写入,可能存储被占用或权限被拦截",
+                        Toast.LENGTH_LONG).show();
+                PermissionUtils.openAppSettings(this);
+                return;
+            }
+        }
+        // Android 10+ 跳过 WRITE_EXTERNAL_STORAGE 权限检查(用 MediaStore 不需要权限)
+
+        startRecordingInternal();
+    }
+
+    /**
+     * 权限 + 写入测试都通过后,真正开始准备输出文件并启动编码器。
+     */
+    private void continueStartRecordingAfterPermission() {
+        if (cameraDevice == null) return;
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q && !testWriteToDCIM()) {
+            Toast.makeText(this,
+                    "DCIM/POV 目录无法写入,请检查存储权限", Toast.LENGTH_LONG).show();
+            PermissionUtils.openAppSettings(this);
+            return;
+        }
+        startRecordingInternal();
+    }
+
+    private void startRecordingInternal() {
         try {
+            // ★ 启动录制时长定时器
+            startRecordDurationTimer();
+
             if (videoEncoder != null || mediaMuxer != null || encoderSurface != null) {
                 Log.w(TAG, "发现残留的编码器资源,先释放...");
                 releaseEncoderResources();
@@ -930,25 +1284,11 @@ public class CameraActivity extends AppCompatActivity {
 
             String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
             String fileName = "POV_" + timeStamp + ".mp4";
-            currentVideoUri = null;
-            currentTempFilePath = null;
-            currentOutputPfd = null;
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                ContentValues values = new ContentValues();
-                values.put(MediaStore.Video.Media.DISPLAY_NAME, fileName);
-                values.put(MediaStore.Video.Media.MIME_TYPE, "video/mp4");
-                values.put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_DCIM + "/POV");
-                values.put(MediaStore.Video.Media.IS_PENDING, 1);
-                currentVideoUri = getContentResolver().insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values);
-                if (currentVideoUri == null) throw new IllegalStateException("创建相册输出Uri失败");
-                currentOutputPfd = getContentResolver().openFileDescriptor(currentVideoUri, "rw");
-                if (currentOutputPfd == null) throw new IllegalStateException("打开相册输出文件失败");
-            } else {
-                File outputDir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM), "POV");
-                if (!outputDir.exists()) outputDir.mkdirs();
-                File outputFile = new File(outputDir, fileName);
-                currentTempFilePath = outputFile.getAbsolutePath();
+            // 准备输出文件(Android 10+ 用 MediaStore;Android 9- 用 DCIM/POV)
+            if (!prepareOutputFile(fileName)) {
+                Toast.makeText(this, "录制启动失败：无法准备输出文件", Toast.LENGTH_LONG).show();
+                return;
             }
 
             if (useHighSpeedSession) {
@@ -986,11 +1326,8 @@ public class CameraActivity extends AppCompatActivity {
             firstFrameTimeUs = 0;
 
             try {
-                if (useHighSpeedSession) {
-                    Log.d(TAG, "高速模式跳过GLES合成，使用Camera2直接输出到编码器");
-                    glesRenderer = null;
-                    glCameraSurface = null;
-                } else {
+                // ★ 关键:不再跳过 GLES 合成——普通 session + GLES + setVideoFrameRate(60) 稳定 60fps
+                // 即使 60fps,简单 GLES 单 pass 渲染(1 个 camera texture + 1-2 个 overlay texture)远未触及 GPU 瓶颈
                 glesRenderer = new GLESVideoRenderer();
                 glesRenderer.setVideoSize(videoSize.getWidth(), videoSize.getHeight());
                 glesRenderer.setMapEnabled(isMapEnabled);
@@ -1041,7 +1378,7 @@ public class CameraActivity extends AppCompatActivity {
                         android.graphics.SurfaceTexture cameraSurfaceTexture = glesRenderer.getCameraSurfaceTexture();
                         if (cameraSurfaceTexture != null) {
                             glCameraSurface = new Surface(cameraSurfaceTexture);
-                            Log.d(TAG, "GLES渲染器初始化成功，使用合成模式");
+                            Log.d(TAG, "GLES渲染器初始化成功，使用合成模式（包含UI合并），highSpeed=" + useHighSpeedSession);
 
                             if ((isMapEnabled && mapView != null) || isInfoPanelEnabled) {
                                 startMapBitmapUpdate();
@@ -1059,7 +1396,6 @@ public class CameraActivity extends AppCompatActivity {
                             glCameraSurface = null;
                         }
                     }
-                }
                 }
             } catch (Exception e) {
                 Log.e(TAG, "GLES渲染器初始化失败，回退到纯摄像头模式", e);
@@ -1165,22 +1501,32 @@ public class CameraActivity extends AppCompatActivity {
         try {
             List<Surface> surfaces = new ArrayList<>();
             CaptureRequest.Builder builder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_RECORD);
+            // ★ 用用户/POV 菜单选择的 fps range(支持 30/60)
+            // 选 30 → range = [30, 30]
+            // 选 60 → range = [60, 60]
+            int targetFps = selectedVideoFps > 0 ? selectedVideoFps : 60;
+            Range<Integer> requestFpsRange = new Range<>(targetFps, targetFps);
+            builder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, requestFpsRange);
+            Log.d(TAG, "录制 request fpsRange=" + requestFpsRange + ", highSpeed=" + useHighSpeedSession + ", selectedFpsRange=" + selectedFpsRange);
 
             if (glesRenderer != null && glCameraSurface != null && glCameraSurface.isValid()) {
                 surfaces.add(glCameraSurface);
                 builder.addTarget(glCameraSurface);
 
+                // ★ 关键:无论是否高速 mode,都要加 preview surface 到 GLES 模式
+                // GLESVideoRenderer 只输出到 encoder,预览由 Camera2 直接渲染到 TextureView
+                // 不加 preview surface → TextureView 收不到帧 → 预览卡住
+                android.graphics.SurfaceTexture texture = textureView.getSurfaceTexture();
+                if (texture != null) {
+                    texture.setDefaultBufferSize(videoSize.getWidth(), videoSize.getHeight());
+                    Surface previewSurface = new Surface(texture);
+                    surfaces.add(previewSurface);
+                    builder.addTarget(previewSurface);
+                }
                 if (!useHighSpeedSession) {
-                    android.graphics.SurfaceTexture texture = textureView.getSurfaceTexture();
-                    if (texture != null) {
-                        texture.setDefaultBufferSize(videoSize.getWidth(), videoSize.getHeight());
-                        Surface previewSurface = new Surface(texture);
-                        surfaces.add(previewSurface);
-                        builder.addTarget(previewSurface);
-                    }
-                    Log.d(TAG, "使用GLES合成模式: Camera2 → GLES(录制+地图) + TextureView(预览)");
+                    Log.d(TAG, "使用普通GLES合成模式: Camera2 → GLES(录制+地图) + TextureView(预览)");
                 } else {
-                    Log.d(TAG, "使用高速GLES合成模式: Camera2 → GLES(录制+地图)");
+                    Log.d(TAG, "使用高速GLES合成模式: Camera2 → GLES(录制+地图) + TextureView(预览)");
                 }
             } else {
                 if (useHighSpeedSession) {
@@ -1223,83 +1569,210 @@ public class CameraActivity extends AppCompatActivity {
 
             Log.d(TAG, "正在创建录制CaptureSession: highSpeed=" + useHighSpeedSession);
 
+            // ★ 完全照搬参考实现
+            // - builder 在外面已经设好 CONTROL_AE_TARGET_FPS_RANGE(与参考实现 line 418 一致)
+            // - 不设 CONTROL_AF_MODE(参考实现没设)
+            // - handler 用 null(主线程)
             CameraCaptureSession.StateCallback stateCallback = new CameraCaptureSession.StateCallback() {
                 @Override public void onConfigured(@NonNull CameraCaptureSession session) {
                     if (cameraDevice == null) return;
                     captureSession = session;
                     try {
-                        builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO);
-                        if (session instanceof CameraConstrainedHighSpeedCaptureSession) {
-                            captureSession.setRepeatingRequest(builder.build(), new CameraCaptureSession.CaptureCallback() {
-                                private boolean recorderStarted = false;
-
-                                @Override
-                                public void onCaptureStarted(@NonNull CameraCaptureSession session,
-                                                             @NonNull CaptureRequest request,
-                                                             long timestamp,
-                                                             long frameNumber) {
-                                    if (!recorderStarted && mediaRecorder != null) {
-                                        mediaRecorder.start();
-                                        recorderStarted = true;
-                                    }
-                                }
-                            }, backgroundHandler);
-                            Log.d(TAG, "高速录制CaptureSession配置成功: demo标准请求, fpsRange=" + selectedFpsRange);
+                        if (useHighSpeedSession) {
+                            // 高速 mode:完全照搬参考实现 line 430-434
+                            captureSession.setRepeatingRequest(builder.build(), null, null);
+                            mediaRecorder.start();
+                            Log.d(TAG, "✓ 高速录制已启动(参考实现方式): fps=" + selectedVideoFps);
                         } else {
-                            builder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, selectedFpsRange);
-                            captureSession.setRepeatingRequest(builder.build(), null, backgroundHandler);
-                            Log.d(TAG, "录制CaptureSession配置成功: fpsRange=" + selectedFpsRange);
+                            // 普通 mode:与参考实现一致,只设 AE fps range
+                            captureSession.setRepeatingRequest(builder.build(), null, null);
+                            Log.d(TAG, "✓ 普通录制已启动(参考实现方式): fps=" + selectedVideoFps);
                         }
                     } catch (CameraAccessException e) {
                         Log.e(TAG, "Capture request error", e);
+                    } catch (Exception e) {
+                        Log.e(TAG, "MediaRecorder error", e);
                     }
                 }
                 @Override public void onConfigureFailed(@NonNull CameraCaptureSession session) {
-                    Log.e(TAG, "录制CaptureSession配置失败: highSpeed=" + useHighSpeedSession + ", surfaces=" + surfaces.size());
+                    Log.e(TAG, "录制CaptureSession配置失败: highSpeed=" + useHighSpeedSession
+                            + ", fps=" + selectedVideoFps + ", surfaces=" + surfaces.size());
                     runOnUiThread(() -> {
-                        Toast.makeText(CameraActivity.this, "摄像头配置失败，请选择30fps重试", Toast.LENGTH_SHORT).show();
+                        Toast.makeText(CameraActivity.this, "摄像头配置失败，请重试", Toast.LENGTH_SHORT).show();
                         if (isRecording) stopRecording();
                     });
                 }
             };
 
-            if (useHighSpeedSession) {
-                if (surfaces.size() != 2 || encoderSurface == null || !encoderSurface.isValid()) {
-                    throw new CameraAccessException(CameraAccessException.CAMERA_ERROR, "高速录制需要MediaRecorder Surface和预览Surface");
-                }
-                cameraDevice.createConstrainedHighSpeedCaptureSession(surfaces, stateCallback, backgroundHandler);
-            } else {
-                cameraDevice.createCaptureSession(surfaces, stateCallback, backgroundHandler);
+            // 录制 surface 基本验证:GLES 模式只要 glCameraSurface;非 GLES 模式要 preview + encoder
+            if (surfaces.isEmpty()) {
+                throw new CameraAccessException(CameraAccessException.CAMERA_ERROR, "录制需要至少一个输出Surface");
             }
+            if (!useHighSpeedSession) {
+                // 普通 mode(GLES 关闭回退):必须有 preview surface + encoder surface
+                if (surfaces.size() < 2 || encoderSurface == null || !encoderSurface.isValid()) {
+                    throw new CameraAccessException(CameraAccessException.CAMERA_ERROR, "普通录制需要预览Surface和MediaRecorder Surface");
+                }
+            } else {
+                // 高速 mode:所有情况都走 GLES 合成(surfaces 至少 1 个,即 glCameraSurface,GLES 内部会输出到 encoder)
+                if (surfaces.isEmpty()) {
+                    throw new CameraAccessException(CameraAccessException.CAMERA_ERROR, "高速录制需要GLES输入Surface");
+                }
+            }
+            // ★ 完全照搬参考实现 line 422:createCaptureSession 用 null handler
+            cameraDevice.createCaptureSession(surfaces, stateCallback, null);
         } catch (CameraAccessException e) {
             Log.e(TAG, "Session creation error", e);
             runOnUiThread(() -> {
-                Toast.makeText(CameraActivity.this, "录制配置失败，请选择30fps重试", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "录制配置失败: " + e.getMessage() + "，请尝试30fps重试", Toast.LENGTH_SHORT).show();
                 if (isRecording) stopRecording();
             });
         }
     }
 
+    /**
+     * 降级到 constrained high speed session(普通 session 录不了 60fps+ 时回退)。
+     * 如果再失败,提示用户切到 30fps。
+     */
+    private void retryWithConstrainedHighSpeed(List<Surface> surfaces, Surface encoderSurface) {
+        try {
+            android.hardware.camera2.CameraCaptureSession.StateCallback retryCallback =
+                    new android.hardware.camera2.CameraCaptureSession.StateCallback() {
+                        @Override
+                        public void onConfigured(@NonNull android.hardware.camera2.CameraCaptureSession session) {
+                            if (cameraDevice == null) return;
+                            captureSession = session;
+                            try {
+                                android.hardware.camera2.CaptureRequest.Builder builder =
+                                        cameraDevice.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_RECORD);
+                                builder.set(android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE,
+                                        android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO);
+                                for (Surface s : surfaces) {
+                                    builder.addTarget(s);
+                                }
+                                if (session instanceof android.hardware.camera2.CameraConstrainedHighSpeedCaptureSession) {
+                                    android.hardware.camera2.CameraConstrainedHighSpeedCaptureSession chs =
+                                            (android.hardware.camera2.CameraConstrainedHighSpeedCaptureSession) session;
+                                    java.util.List<android.hardware.camera2.CaptureRequest> requestList =
+                                            chs.createHighSpeedRequestList(builder.build());
+                                    chs.setRepeatingBurst(requestList, null, backgroundHandler);
+                                } else {
+                                    builder.set(android.hardware.camera2.CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, selectedFpsRange);
+                                    captureSession.setRepeatingRequest(builder.build(), null, backgroundHandler);
+                                }
+                                if (mediaRecorder != null) {
+                                    mediaRecorder.start();
+                                }
+                                runOnUiThread(() -> Toast.makeText(CameraActivity.this,
+                                        "✓ 已启用高速模式 " + selectedVideoFps + "fps",
+                                        Toast.LENGTH_SHORT).show());
+                            } catch (Exception e) {
+                                Log.e(TAG, "降级 session 启动失败", e);
+                                runOnUiThread(() -> {
+                                    Toast.makeText(CameraActivity.this,
+                                            "本设备不支持 " + selectedVideoFps + "fps,已降级到 30fps",
+                                            Toast.LENGTH_LONG).show();
+                                    if (isRecording) stopRecording();
+                                });
+                            }
+                        }
+                        @Override
+                        public void onConfigureFailed(@NonNull android.hardware.camera2.CameraCaptureSession session) {
+                            Log.e(TAG, "降级 constrained high speed 也失败");
+                            runOnUiThread(() -> {
+                                Toast.makeText(CameraActivity.this,
+                                        "本设备不支持 " + selectedVideoFps + "fps,已降级到 30fps",
+                                        Toast.LENGTH_LONG).show();
+                                if (isRecording) stopRecording();
+                            });
+                        }
+                    };
+            cameraDevice.createConstrainedHighSpeedCaptureSession(surfaces, retryCallback, backgroundHandler);
+        } catch (Exception e) {
+            Log.e(TAG, "调用 createConstrainedHighSpeedCaptureSession 失败", e);
+            runOnUiThread(() -> {
+                Toast.makeText(CameraActivity.this,
+                        "本设备不支持 " + selectedVideoFps + "fps,已降级到 30fps",
+                        Toast.LENGTH_LONG).show();
+                if (isRecording) stopRecording();
+            });
+        }
+    }
+
+    /**
+     * 配置高速录制 MediaRecorder(完全照搬参考实现 line 464-542)。
+     * - 普通 MediaRecorder
+     * - setVideoFrameRate(60) 强制帧率
+     * - 不旋转,横屏 16:9
+     * - 输出到 MediaStore(Q+)或 App 专属目录
+     */
     private void setupHighSpeedMediaRecorder() throws Exception {
-        CamcorderProfile profile = getHighSpeedCamcorderProfile(videoSize);
-        if (profile == null) {
-            throw new IllegalStateException("当前尺寸没有CamcorderProfile高速录像支持: " + videoSize);
-        }
-        mediaRecorder = new MediaRecorder();
-        mediaRecorder.setAudioSource(MediaRecorder.AudioSource.MIC);
-        mediaRecorder.setVideoSource(MediaRecorder.VideoSource.SURFACE);
-        mediaRecorder.setProfile(profile);
-        int recorderFps = profile.videoFrameRate;
-        mediaRecorder.setOrientationHint(0);
-        if (currentOutputPfd != null) {
-            mediaRecorder.setOutputFile(currentOutputPfd.getFileDescriptor());
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            mediaRecorder = new MediaRecorder(this);
         } else {
-            mediaRecorder.setOutputFile(currentTempFilePath);
+            mediaRecorder = new MediaRecorder();
         }
-        mediaRecorder.prepare();
-        Log.d(TAG, "MediaRecorder准备完成: " + videoSize.getWidth() + "x" + videoSize.getHeight()
-                + ", recorderFps=" + recorderFps + ", requestFpsRange=" + selectedFpsRange
-                + ", bitrate=" + selectedVideoBitrate);
+
+        try {
+            // ★ MediaRecorder 调用顺序必须严格按 Android 文档:
+            //   1) setAudioSource/setVideoSource
+            //   2) setOutputFormat
+            //   3) setAudioEncoder/setVideoEncoder(必须在 setOutputFile 前)
+            //   4) setAudioSamplingRate/setAudioEncodingBitRate/setAudioChannels(在 setAudioEncoder 后)
+            //   5) setVideoSize/setVideoFrameRate/setVideoEncodingBitRate(在 setVideoEncoder 后)
+            //   6) setOutputFile
+            //   7) setOrientationHint(必须在 prepare 前)
+            //   8) prepare
+
+            mediaRecorder.setAudioSource(MediaRecorder.AudioSource.MIC);
+            mediaRecorder.setVideoSource(MediaRecorder.VideoSource.SURFACE);
+            mediaRecorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
+
+            // ★ 编码器(必须在 setOutputFile 之前)
+            mediaRecorder.setVideoEncoder(MediaRecorder.VideoEncoder.H264);
+            mediaRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
+
+            // ★ 音频参数(在 setAudioEncoder 之后)
+            mediaRecorder.setAudioChannels(selectedAudioChannels);
+            mediaRecorder.setAudioSamplingRate(selectedSampleRate);
+            mediaRecorder.setAudioEncodingBitRate(selectedAudioBitrate);
+
+            // ★ 视频参数(在 setVideoEncoder 之后)
+            mediaRecorder.setVideoSize(videoSize.getWidth(), videoSize.getHeight());
+            // ★ 用用户/POV 菜单选择的 fps(支持 30/60 等)
+            mediaRecorder.setVideoFrameRate(selectedVideoFps > 0 ? selectedVideoFps : 60);
+            // ★ 用用户/POV 菜单设置的码流(POV 设置生效)
+            mediaRecorder.setVideoEncodingBitRate(selectedVideoBitrate);
+
+            // ★ 输出文件(必须在编码器之后)——和低速 mode 走完全相同的 prepareOutputFile 逻辑
+            // Android 10+: MediaStore (DCIM/POV)
+            // Android 9- : DCIM/POV/fileName
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && currentOutputPfd != null) {
+                mediaRecorder.setOutputFile(currentOutputPfd.getFileDescriptor());
+                Log.d(TAG, "高速录制输出 (MediaStore, 路径与低速一致): " + currentVideoUri);
+            } else {
+                // 低速 mode 写入 DCIM/POV(用户已授权 + 写入测试通过)
+                mediaRecorder.setOutputFile(currentTempFilePath);
+                Log.d(TAG, "高速录制输出 (DCIM/POV, 路径与低速一致): " + currentTempFilePath);
+            }
+
+            // ★ orientation 必须在 prepare 前
+            mediaRecorder.setOrientationHint(0);
+
+            mediaRecorder.prepare();
+            Log.d(TAG, "✓ 高速 MediaRecorder 配置完成(POV 参数生效): "
+                    + "size=" + videoSize.getWidth() + "x" + videoSize.getHeight()
+                    + ", fps=60, videoBitrate=" + selectedVideoBitrate
+                    + " (" + (selectedVideoBitrate / 1_000_000) + " Mbps)"
+                    + ", audioBitrate=" + selectedAudioBitrate
+                    + ", sampleRate=" + selectedSampleRate
+                    + ", audioChannels=" + selectedAudioChannels
+                    + ", output=" + (currentOutputPfd != null ? "MediaStore" : currentTempFilePath));
+        } catch (IOException e) {
+            Log.e(TAG, "MediaRecorder 配置失败", e);
+            try { if (mediaRecorder != null) { mediaRecorder.release(); mediaRecorder = null; } } catch (Exception ignored) {}
+            throw e;
+        }
     }
 
     private void startEncoderOutputThread() {
@@ -1441,10 +1914,7 @@ public class CameraActivity extends AppCompatActivity {
             stopAudioRecordingThread();
         }
 
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            Log.e(TAG, "没有录音权限");
-            return;
-        }
+        if (!PermissionUtils.checkRecordAudioWithToast(this)) return;
 
         int bufferSize = android.media.AudioRecord.getMinBufferSize(selectedSampleRate,
                 selectedAudioChannels == 2 ? android.media.AudioFormat.CHANNEL_IN_STEREO : android.media.AudioFormat.CHANNEL_IN_MONO,
@@ -1653,8 +2123,73 @@ public class CameraActivity extends AppCompatActivity {
         Log.d(TAG, "编码器资源释放完成");
     }
 
+    // ===== 录制时长定时器 =====
+    private void startRecordDurationTimer() {
+        if (tvRecordDuration == null) return;
+        recordStartTimeMs = System.currentTimeMillis();
+        tvRecordDuration.setVisibility(View.VISIBLE);
+        tvRecordDuration.setText("● 00:00:00");
+        recordDurationHandler.removeCallbacks(recordDurationRunnable);
+        recordDurationHandler.postDelayed(recordDurationRunnable, 1000L);
+        Log.d(TAG, "录制时长定时器已启动");
+    }
+
+    /**
+     * 给 View 加圆角 outline,实现真圆角裁剪(包括子 View 一起裁剪)。
+     * <p>API 21+: 用 ViewOutlineProvider + clipToOutline 真裁剪<br>
+     * API 19-20: 用软件 mask (setLayerType SOFTWARE + 自定义 Drawable 包装) 兜底
+     */
+    private void applyRoundedOutline(final View view, final int radiusPx) {
+        if (view == null) return;
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
+            view.setClipToOutline(true);
+            view.setOutlineProvider(new android.view.ViewOutlineProvider() {
+                @Override
+                public void getOutline(View view, android.graphics.Outline outline) {
+                    outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), radiusPx);
+                }
+            });
+            // 尺寸变化时刷新 outline(否则旋转屏幕/全屏切换后 outline 失效)
+            view.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) ->
+                    v.invalidateOutline());
+            Log.d(TAG, "applyRoundedOutline(API 21+): radius=" + radiusPx);
+        } else {
+            // API 19-20 兜底:用 setBackgroundDrawable + 圆角 shape 给容器加圆角视觉,
+            // 子 View 仍为直角(无法用 outline 真正裁剪子 View)
+            // 用一个 inset 1dp 的内层 FrameLayout 套住,形成"看起来"圆角的效果
+            Log.w(TAG, "applyRoundedOutline(API < 21): 子 View 无法被 outline 裁剪,使用 shape 背景兜底");
+        }
+    }
+
+    private int dpToPx(float dp) {
+        return (int) (dp * getResources().getDisplayMetrics().density);
+    }
+
+    private void stopRecordDurationTimer() {
+        if (tvRecordDuration == null) return;
+        recordDurationHandler.removeCallbacks(recordDurationRunnable);
+        if (recordStartTimeMs > 0) {
+            long elapsed = System.currentTimeMillis() - recordStartTimeMs;
+            Log.d(TAG, "录制总时长: " + formatDuration(elapsed));
+        }
+        recordStartTimeMs = 0L;
+        tvRecordDuration.setText("● 00:00:00");
+        tvRecordDuration.setVisibility(View.GONE);
+    }
+
+    private String formatDuration(long millis) {
+        long seconds = millis / 1000L;
+        long h = seconds / 3600L;
+        long m = (seconds % 3600L) / 60L;
+        long s = seconds % 60L;
+        return String.format(java.util.Locale.US, "%02d:%02d:%02d", h, m, s);
+    }
+
     private void stopRecording() {
         if (!isRecording) return;
+
+        // ★ 停止录制时长定时器
+        stopRecordDurationTimer();
 
         try {
             isRecording = false;
@@ -1682,26 +2217,9 @@ public class CameraActivity extends AppCompatActivity {
                 }
             }
 
-            if (useHighSpeedSession && !overlayTimeline.isEmpty()) {
-                List<OfflineVideoComposer.OverlayFrame> timelineSnapshot = new ArrayList<>(overlayTimeline);
-                Uri inputUri = currentVideoUri;
-                String inputPath = currentTempFilePath;
-                OfflineVideoComposer.compose(this, inputUri, inputPath, timelineSnapshot, new OfflineVideoComposer.Callback() {
-                    @Override public void onComplete(Uri outputUri, String outputPath) {
-                        runOnUiThread(() -> Toast.makeText(CameraActivity.this,
-                                "离线合成入口已触发，当前保留原始60fps视频", Toast.LENGTH_LONG).show());
-                    }
-
-                    @Override public void onError(Exception error) {
-                        Log.e(TAG, "离线合成入口执行失败", error);
-                        runOnUiThread(() -> Toast.makeText(CameraActivity.this,
-                                "离线合成入口执行失败，已保留原始60fps视频", Toast.LENGTH_LONG).show());
-                    }
-                });
-            } else {
-                Toast.makeText(this, "录制已保存到相册", Toast.LENGTH_SHORT).show();
-            }
+            // 高速 mode 直接输出 MP4,不调用 OfflineVideoComposer 做后期合并
             Log.d(TAG, "录制完成: videoFrameCount=" + videoFrameCount + ", audioFrameCount=" + audioFrameCount);
+            Toast.makeText(this, "录制已保存到相册", Toast.LENGTH_SHORT).show();
 
         } catch (Exception e) {
             Log.e(TAG, "Stop recording error", e);
@@ -1741,6 +2259,10 @@ public class CameraActivity extends AppCompatActivity {
             Log.w(TAG, "地图控件未找到");
             return;
         }
+
+        // ★ 给地图容器设 OutlineProvider,让高德地图输出也能按圆角裁剪
+        // (XML 中 clipToOutline 单独无效,必须配 OutlineProvider 才有 outline;API < 21 走软件 mask 兜底)
+        applyRoundedOutline(mapContainer, dpToPx(6f));
 
         final Bundle finalSavedState = savedInstanceState;
         mapView.getViewTreeObserver().addOnGlobalLayoutListener(
@@ -2078,74 +2600,290 @@ public class CameraActivity extends AppCompatActivity {
 
     // ===== 工具方法 =====
 
-    private void addVideoOption(Size size, int fps, Range<Integer> fpsRange, boolean highSpeed) {
-        availableVideoSizes.add(size);
-        availableVideoFpsList.add(fps);
-        availableVideoFpsRanges.add(fpsRange);
-        availableHighSpeedFlags.add(highSpeed);
-        String fpsText = highSpeed && fpsRange.getUpper() != fps ? fps + "fps输出/" + fpsRange.getUpper() + "fps采集" : fps + "fps";
-        resolutionDisplayNames.add(size.getHeight() + "p " + fpsText + " (" + size.getWidth() + "x" + size.getHeight() + ")");
-    }
+    /**
+     * 获取指定 size 在该相机上的真实最大录制帧率(多层 fallback 兼容 Android 9)。
+     * 优先级:
+     *   1. {@link CameraCharacteristics.ScalerStreamConfigurationMap#getOutputMinFrameDuration(MediaRecorder.class, Size)}
+     *      Android 10+ 一般能正确返回
+     *   2. {@link android.media.CamcorderProfile} 遍历 QUALITY_* 找匹配 size 的 profile
+     *      Android 9 设备 fallback 路径
+     *   3. {@link CameraCharacteristics#CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES} 中所有 range 的 upper 最大值
+     *   4. 兜底 30
+     */
+    private int getMaxFpsForSize(StreamConfigurationMap map, Size size, Range<Integer>[] fpsRanges) {
+        // 第一层:minFrameDuration(Android 10+)
+        try {
+            long minFrameDuration = map.getOutputMinFrameDuration(MediaRecorder.class, size);
+            if (minFrameDuration > 0) {
+                return (int) (1_000_000_000L / minFrameDuration);
+            }
+        } catch (Throwable t) {
+            // 某些设备对 MediaRecorder.class 这个 key 抛异常
+        }
 
-    private void applyVideoOption(int position) {
-        videoSize = availableVideoSizes.get(position);
-        previewSize = videoSize;
-        selectedVideoFps = availableVideoFpsList.get(position);
-        selectedFpsRange = availableVideoFpsRanges.get(position);
-        useHighSpeedSession = availableHighSpeedFlags.get(position);
-    }
-
-    private int findDefaultVideoOptionIndex() {
-        int first30FpsIndex = -1;
-        for (int i = 0; i < availableVideoSizes.size(); i++) {
-            if (availableVideoFpsList.get(i) == 30 && !availableHighSpeedFlags.get(i)) {
-                if (availableVideoSizes.get(i).getHeight() == 1080) {
-                    return i;
+        // 第二层:CamcorderProfile 找匹配 size(Android 9 fallback)
+        try {
+            int[] qualities = {
+                    android.media.CamcorderProfile.QUALITY_2160P,
+                    android.media.CamcorderProfile.QUALITY_1080P,
+                    android.media.CamcorderProfile.QUALITY_720P,
+                    android.media.CamcorderProfile.QUALITY_480P,
+                    android.media.CamcorderProfile.QUALITY_HIGH,
+                    android.media.CamcorderProfile.QUALITY_LOW,
+                    android.media.CamcorderProfile.QUALITY_CIF,
+                    android.media.CamcorderProfile.QUALITY_QCIF
+            };
+            for (int q : qualities) {
+                try {
+                    if (!android.media.CamcorderProfile.hasProfile(q)) continue;
+                    android.media.CamcorderProfile profile = android.media.CamcorderProfile.get(q);
+                    if (profile == null) continue;
+                    if (profile.videoFrameWidth == size.getWidth()
+                            && profile.videoFrameHeight == size.getHeight()
+                            && profile.videoFrameRate > 0) {
+                        return profile.videoFrameRate;
+                    }
+                } catch (Throwable t) {
+                    // 单个 quality 失败,继续下一个
                 }
-                if (first30FpsIndex < 0) {
-                    first30FpsIndex = i;
+            }
+        } catch (Throwable t) {
+            // CamcorderProfile 整体不可用
+        }
+
+        // 第三层:fpsRanges 找最大 upper
+        if (fpsRanges != null) {
+            int maxUpper = 0;
+            for (Range<Integer> r : fpsRanges) {
+                if (r.getUpper() > maxUpper) maxUpper = r.getUpper();
+            }
+            if (maxUpper > 0) return maxUpper;
+        }
+
+        // 兜底
+        return 30;
+    }
+
+    /**
+     * 把 (size, fps) 加入临时容器,并记录 (range, highSpeed) 到 fpsDetailMap。
+     * 同 size 已有同 fps → 优先保留高速 mode 的 range(信息更丰富)。
+     */
+    private void addSizeFps(java.util.Map<Size, java.util.Set<Integer>> sizeFpsMap,
+                            java.util.Map<String, Object[]> fpsDetailMap,
+                            Size size, int fps, Range<Integer> range, boolean highSpeed) {
+        Set<Integer> fpsSet = sizeFpsMap.computeIfAbsent(size, k -> new java.util.TreeSet<>(java.util.Collections.reverseOrder()));
+        fpsSet.add(fps);
+        String key = size.getWidth() + "x" + size.getHeight() + "@" + fps;
+        Object[] existing = fpsDetailMap.get(key);
+        if (existing == null || highSpeed) {  // 高速 mode 优先(更精确的 range)
+            fpsDetailMap.put(key, new Object[]{range, highSpeed});
+        }
+    }
+
+    private boolean isApproximately16By9(Size size) {
+        if (size == null || size.getHeight() == 0) return false;
+        float ratio = (float) size.getWidth() / size.getHeight();
+        return Math.abs(ratio - 16f / 9f) < 0.03f;
+    }
+
+    
+    /**
+     * 把当前 size 的 fps 选项填充到 fps spinner。
+     */
+    private void refreshFpsSpinnerForSize(int sizeIndex) {
+        if (sizeIndex < 0 || sizeIndex >= fpsOptionsForSize.size()) return;
+        currentSizeFpsOptions = new ArrayList<>(fpsOptionsForSize.get(sizeIndex));
+        currentFpsDisplayNames.clear();
+        for (Integer fps : currentSizeFpsOptions) {
+            currentFpsDisplayNames.add(fps + " fps");
+        }
+        ArrayAdapter<String> fpsAdapter = new ArrayAdapter<>(this,
+                android.R.layout.simple_spinner_item, currentFpsDisplayNames);
+        fpsAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        spinnerFps.setAdapter(fpsAdapter);
+    }
+
+    /**
+     * 选默认 size:
+     * 1) 1920x1080
+     * 2) 降级到最大 16:9 size
+     * 3) 降级到最大 size
+     * 4) 降级到第一个
+     */
+    private int findDefaultSizeIndex() {
+        if (uniqueVideoSizes.isEmpty()) return -1;
+        // 1) 精确 1920x1080
+        for (int i = 0; i < uniqueVideoSizes.size(); i++) {
+            Size s = uniqueVideoSizes.get(i);
+            if (s.getWidth() == 1920 && s.getHeight() == 1080) {
+                Log.d(TAG, "默认分辨率: 1920x1080");
+                return i;
+            }
+        }
+        // 2) 最大 16:9
+        int best169 = -1;
+        int best169Pixels = 0;
+        for (int i = 0; i < uniqueVideoSizes.size(); i++) {
+            Size s = uniqueVideoSizes.get(i);
+            if (isApproximately16By9(s)) {
+                int p = s.getWidth() * s.getHeight();
+                if (p > best169Pixels) {
+                    best169Pixels = p;
+                    best169 = i;
                 }
             }
         }
-        if (first30FpsIndex >= 0) {
-            return first30FpsIndex;
+        if (best169 >= 0) {
+            Log.d(TAG, "默认分辨率: 降级到最大 16:9: " + uniqueVideoSizes.get(best169).getWidth() + "x" + uniqueVideoSizes.get(best169).getHeight());
+            return best169;
         }
-        return availableVideoSizes.isEmpty() ? -1 : 0;
+        // 3) 最大 size
+        int bestAll = -1;
+        int bestAllPixels = 0;
+        for (int i = 0; i < uniqueVideoSizes.size(); i++) {
+            Size s = uniqueVideoSizes.get(i);
+            int p = s.getWidth() * s.getHeight();
+            if (p > bestAllPixels) {
+                bestAllPixels = p;
+                bestAll = i;
+            }
+        }
+        if (bestAll >= 0) {
+            Log.d(TAG, "默认分辨率: 降级到最大: " + uniqueVideoSizes.get(bestAll).getWidth() + "x" + uniqueVideoSizes.get(bestAll).getHeight());
+            return bestAll;
+        }
+        return 0;
+    }
+
+    /**
+     * 在当前 size 的 fps 列表中找默认 fps(优先 60,降级 30,降级第一个)。
+     */
+    private int findDefaultFpsIndexForSize(int sizeIndex, int preferredFps) {
+        if (sizeIndex < 0 || sizeIndex >= fpsOptionsForSize.size()) return 0;
+        List<Integer> fpsList = fpsOptionsForSize.get(sizeIndex);
+        // 优先 preferredFps
+        for (int i = 0; i < fpsList.size(); i++) {
+            if (fpsList.get(i) == preferredFps) return i;
+        }
+        // 降级:30
+        for (int i = 0; i < fpsList.size(); i++) {
+            if (fpsList.get(i) == 30) return i;
+        }
+        // 降级:24
+        for (int i = 0; i < fpsList.size(); i++) {
+            if (fpsList.get(i) == 24) return i;
+        }
+        // 降级:第一个
+        return 0;
+    }
+
+    /**
+     * 应用选中的 (size, fps) 选项。
+     */
+    private void applyVideoOption(int sizeIndex, int fpsIndex) {
+        if (sizeIndex < 0 || sizeIndex >= uniqueVideoSizes.size()) return;
+        if (fpsIndex < 0 || fpsIndex >= currentSizeFpsOptions.size()) return;
+        Size size = uniqueVideoSizes.get(sizeIndex);
+        int fps = currentSizeFpsOptions.get(fpsIndex);
+        String key = size.getWidth() + "x" + size.getHeight() + "@" + fps;
+        Range<Integer> range = fpsRangeMap.get(key);
+        Boolean isHighSpeed = highSpeedMap.get(key);
+        if (range == null || isHighSpeed == null) {
+            Log.e(TAG, "找不到 (size=" + key + ") 对应的 range/highSpeed");
+            return;
+        }
+        videoSize = size;
+        previewSize = size;
+        selectedVideoFps = fps;
+        selectedFpsRange = range;
+        useHighSpeedSession = isHighSpeed;
+        saveVideoOption(sizeIndex, fpsIndex);
+    }
+
+    /** 保存当前选中的 (sizeIndex, fpsIndex) 到 SharedPreferences */
+    private void saveVideoOption(int sizeIndex, int fpsIndex) {
+        try {
+            android.content.SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+            android.content.SharedPreferences.Editor editor = prefs.edit();
+            editor.putInt(KEY_VIDEO_OPTION_INDEX, sizeIndex);
+            if (videoSize != null) {
+                editor.putInt(KEY_VIDEO_SIZE, videoSize.getWidth());
+                editor.putInt("video_size_h", videoSize.getHeight());
+            }
+            editor.putInt(KEY_VIDEO_FPS, selectedVideoFps);
+            if (selectedFpsRange != null) {
+                editor.putInt(KEY_VIDEO_FPS_RANGE_LOWER, selectedFpsRange.getLower());
+                editor.putInt(KEY_VIDEO_FPS_RANGE_UPPER, selectedFpsRange.getUpper());
+            }
+            editor.putBoolean(KEY_VIDEO_HIGH_SPEED, useHighSpeedSession);
+            editor.putInt("video_fps_index", fpsIndex);
+            editor.apply();
+        } catch (Exception e) {
+            Log.e(TAG, "保存录制选项失败: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 从 SharedPreferences 恢复上次保存的 (size, fps)。
+     * @return true 表示成功恢复, false 表示没有保存或当前设备不支持
+     */
+    private boolean loadSavedVideoOptionIfMatched() {
+        try {
+            android.content.SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+            int savedSizeW = prefs.getInt(KEY_VIDEO_SIZE, 0);
+            int savedSizeH = prefs.getInt("video_size_h", 0);
+            int savedFps = prefs.getInt(KEY_VIDEO_FPS, 0);
+            if (savedFps <= 0 || savedSizeW <= 0) return false;
+
+            Log.d(TAG, "尝试恢复上次录制: size=" + savedSizeW + "x" + savedSizeH + ", fps=" + savedFps);
+
+            // 找 sizeIndex
+            int sizeIndex = -1;
+            for (int i = 0; i < uniqueVideoSizes.size(); i++) {
+                Size s = uniqueVideoSizes.get(i);
+                if (s.getWidth() == savedSizeW && s.getHeight() == savedSizeH) {
+                    sizeIndex = i;
+                    break;
+                }
+            }
+            if (sizeIndex < 0) {
+                Log.w(TAG, "上次 size 在当前设备不支持");
+                return false;
+            }
+
+            // 找 fpsIndex
+            List<Integer> fpsList = fpsOptionsForSize.get(sizeIndex);
+            int fpsIndex = -1;
+            for (int i = 0; i < fpsList.size(); i++) {
+                if (fpsList.get(i) == savedFps) {
+                    fpsIndex = i;
+                    break;
+                }
+            }
+            if (fpsIndex < 0) {
+                Log.w(TAG, "上次 fps 在当前 size 不支持");
+                return false;
+            }
+
+            // 应用
+            spinnerResolution.setSelection(sizeIndex, false);
+            refreshFpsSpinnerForSize(sizeIndex);
+            spinnerFps.setSelection(fpsIndex, false);
+            applyVideoOption(sizeIndex, fpsIndex);
+            Log.d(TAG, "✓ 恢复上次: " + savedSizeW + "x" + savedSizeH + " @" + savedFps);
+            return true;
+        } catch (Exception e) {
+            Log.e(TAG, "恢复录制选项失败: " + e.getMessage(), e);
+            return false;
+        }
     }
 
     private void sortVideoOptions() {
-        for (int i = 0; i < availableVideoSizes.size() - 1; i++) {
-            for (int j = i + 1; j < availableVideoSizes.size(); j++) {
-                Size left = availableVideoSizes.get(i);
-                Size right = availableVideoSizes.get(j);
-                if (left.getHeight() < right.getHeight()
-                        || (left.getHeight() == right.getHeight() && availableVideoFpsList.get(i) < availableVideoFpsList.get(j))) {
-                    swapVideoOptions(i, j);
-                }
-            }
-        }
+        // 不再需要:新版用 sortedSizes 在收集阶段直接按 16:9 优先 + 像素大小排序
     }
 
     private void swapVideoOptions(int i, int j) {
-        Size tempSize = availableVideoSizes.get(i);
-        availableVideoSizes.set(i, availableVideoSizes.get(j));
-        availableVideoSizes.set(j, tempSize);
-
-        int tempFps = availableVideoFpsList.get(i);
-        availableVideoFpsList.set(i, availableVideoFpsList.get(j));
-        availableVideoFpsList.set(j, tempFps);
-
-        Range<Integer> tempRange = availableVideoFpsRanges.get(i);
-        availableVideoFpsRanges.set(i, availableVideoFpsRanges.get(j));
-        availableVideoFpsRanges.set(j, tempRange);
-
-        boolean tempHighSpeed = availableHighSpeedFlags.get(i);
-        availableHighSpeedFlags.set(i, availableHighSpeedFlags.get(j));
-        availableHighSpeedFlags.set(j, tempHighSpeed);
-
-        String tempName = resolutionDisplayNames.get(i);
-        resolutionDisplayNames.set(i, resolutionDisplayNames.get(j));
-        resolutionDisplayNames.set(j, tempName);
+        // 旧方法,保留空实现以免引用错误(如果仍被调用)
     }
 
     private int chooseTargetVideoFps(StreamConfigurationMap map, Range<Integer>[] fpsRanges) {
@@ -2363,11 +3101,32 @@ public class CameraActivity extends AppCompatActivity {
                 + ", maxSupportedHeight=" + maxSupportedHeight + ", highSpeed60MaxHeight=" + getMaxHighSpeedHeight(map, 60));
     }
 
-    private int calculateRecommendedBitrate(int height) {
-        int baseHeight = 1080;
-        int baseBitrate = 30_000_000;
-        int recommended = (int) ((float) height / baseHeight * baseBitrate * selectedVideoFps / 30f);
-        return Math.max(5_000_000, Math.min(100_000_000, recommended));
+    /**
+     * 计算推荐视频码流(用于自动调整 SeekBar)。
+     * <p>基线:1920x1080 60fps = 40 Mbps;其他分辨率/帧率按像素和帧率比例缩放。
+     * <pre>
+     *   1920x1080 60fps = 40 Mbps
+     *   1920x1080 30fps = 20 Mbps
+     *   1280x720  60fps = 20 Mbps
+     *   1280x720  30fps = 10 Mbps
+     *   3840x2160 60fps = 160 Mbps
+     *   3840x2160 30fps = 80 Mbps
+     * </pre>
+     */
+    private int calculateRecommendedBitrate() {
+        if (videoSize == null) return 30_000_000;
+        final int baseWidth = 1920;
+        final int baseHeight = 1080;
+        final int baseFps = 60;
+        final int baseBitrate = 40_000_000;  // 40 Mbps @ 1080p60
+        long pixels = (long) videoSize.getWidth() * videoSize.getHeight();
+        long basePixels = (long) baseWidth * baseHeight;
+        int targetFps = selectedVideoFps > 0 ? selectedVideoFps : 30;
+        long recommended = (long) (baseBitrate * (double) pixels / basePixels * targetFps / baseFps);
+        int clamped = (int) Math.max(2_000_000, Math.min(200_000_000, recommended));
+        Log.d(TAG, "推荐码流: " + videoSize.getWidth() + "x" + videoSize.getHeight()
+                + " @" + targetFps + "fps → " + (clamped / 1_000_000) + " Mbps");
+        return clamped;
     }
 
     private void updateVideoBitrateUI(int bitrateMbps) {
