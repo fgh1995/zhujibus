@@ -1031,6 +1031,13 @@ public class CameraActivity extends AppCompatActivity {
         CameraManager manager = (CameraManager) getSystemService(CAMERA_SERVICE);
         if (manager == null || cameraId == null || cameraDevice != null) return;
 
+        // ★ 显式检查相机权限(让 lint 满意 + 双重保险,即使 PermissionUtils 内部逻辑改变也能拦截)
+        if (androidx.core.content.ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
+                != PackageManager.PERMISSION_GRANTED) {
+            Log.e(TAG, "openCamera: CAMERA 权限未授予,无法打开相机");
+            if (!PermissionUtils.checkCameraWithToast(this)) return;
+        }
+
         try {
             if (!PermissionUtils.checkCameraWithToast(this)) return;
             manager.openCamera(cameraId, new CameraDevice.StateCallback() {
@@ -1914,6 +1921,12 @@ public class CameraActivity extends AppCompatActivity {
             stopAudioRecordingThread();
         }
 
+        // ★ 显式检查录音权限(让 lint 满意 + 双重保险)
+        if (androidx.core.content.ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+                != PackageManager.PERMISSION_GRANTED) {
+            Log.e(TAG, "startAudioRecordingThread: RECORD_AUDIO 权限未授予");
+            if (!PermissionUtils.checkRecordAudioWithToast(this)) return;
+        }
         if (!PermissionUtils.checkRecordAudioWithToast(this)) return;
 
         int bufferSize = android.media.AudioRecord.getMinBufferSize(selectedSampleRate,
@@ -2599,17 +2612,6 @@ public class CameraActivity extends AppCompatActivity {
     }
 
     // ===== 工具方法 =====
-
-    /**
-     * 获取指定 size 在该相机上的真实最大录制帧率(多层 fallback 兼容 Android 9)。
-     * 优先级:
-     *   1. {@link CameraCharacteristics.ScalerStreamConfigurationMap#getOutputMinFrameDuration(MediaRecorder.class, Size)}
-     *      Android 10+ 一般能正确返回
-     *   2. {@link android.media.CamcorderProfile} 遍历 QUALITY_* 找匹配 size 的 profile
-     *      Android 9 设备 fallback 路径
-     *   3. {@link CameraCharacteristics#CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES} 中所有 range 的 upper 最大值
-     *   4. 兜底 30
-     */
     private int getMaxFpsForSize(StreamConfigurationMap map, Size size, Range<Integer>[] fpsRanges) {
         // 第一层:minFrameDuration(Android 10+)
         try {
