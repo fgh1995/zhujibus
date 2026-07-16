@@ -25,9 +25,11 @@ import android.text.Spanned;
 import android.text.SpannableStringBuilder;
 import android.text.style.ForegroundColorSpan;
 import android.text.style.StyleSpan;
+import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
 import android.widget.ImageView;
@@ -1356,12 +1358,48 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         return null;
     }
 
+    /**
+     * 车机布局:把 activity_navigation 的 <include> 高度强制为宽度(任意分辨率下保持方形布局)。
+     * <p>父布局(ScrollView 等)给的是 wrap_content/0dp 时,高度=宽度保证图片中三列布局比例不被破坏。
+     */
+    /**
+     * 车机布局:把 activity_navigation 的 <include> 高度设置为宽度的指定比例
+     * @param ratio 比例值，如 0.5f 表示高度=宽度×0.5
+     */
+    private void applySquareNavigationLayout(float ratio) {
+        final View navigationSection = findViewById(R.id.navigation_section);
+        if (navigationSection == null) return;
+
+        navigationSection.post(new Runnable() {
+            @Override
+            public void run() {
+                int width = navigationSection.getWidth();
+                if (width <= 0) {
+                    navigationSection.postDelayed(this, 50L);
+                    return;
+                }
+
+                // 高度 = 宽度 × 比例
+                int height = (int) (width * ratio);
+
+                ViewGroup.LayoutParams params = navigationSection.getLayoutParams();
+                if (params.height != height) {
+                    params.height = height;
+                    navigationSection.setLayoutParams(params);
+                    Log.d(TAG, "车机布局:宽度=" + width + "px, 高度=宽度×" + ratio + "=" + height + "px");
+                }
+            }
+        });
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         // ⭐ 保存当前实例的静态引用（用于POV模式）
         currentInstance = this;
         setContentView(R.layout.activity_bus_line_details);
+        // ★ 车机布局:让 activity_navigation(<include>)的高度 = 宽度(任何分辨率/屏幕保持方形布局)
+        applySquareNavigationLayout(0.7f);
         Intent intent = getIntent();
         if (intent != null) {
             lineID = intent.getStringExtra("line_id");
@@ -1556,11 +1594,11 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         }
 
         // 7. 绑定左侧"更多应用"图标点击
-                View navIconMoreView = findViewById(R.id.nav_icon_more);
-                if (navIconMoreView != null) {
-                    navIconMoreImg = navIconMoreView.findViewById(R.id.nav_icon_more_img);
-                    navIconMoreView.setOnClickListener(v -> toggleMorePage());
-                }
+        View navIconMoreView = findViewById(R.id.nav_icon_more);
+        if (navIconMoreView != null) {
+            navIconMoreImg = navIconMoreView.findViewById(R.id.nav_icon_more_img);
+            navIconMoreView.setOnClickListener(v -> toggleMorePage());
+        }
     }
 
     /**

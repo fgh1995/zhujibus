@@ -1,22 +1,20 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!--
+<?xml version="1.0" encoding="utf-8"?><!--
   主页 fragment：地图显示区 + 下方线路信息面板 + 右侧信息栏
   由 BusLineDetailActivity 通过 FragmentContainerView 承载
+  优化：右侧外层改为ConstraintLayout，实现时间卡片、速度卡片取最大宽度自适应
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    app:layout_constraintDimensionRatio="1:1"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
-    xmlns:tools="http://schemas.android.com/tools"
     android:orientation="horizontal">
-
-    <!-- ========== 中间地图区 + 线路信息 ========== -->
+    <!-- ========== 中间地图区 + 线路信息（占剩余全部宽度） ========== -->
     <LinearLayout
         android:layout_width="0dp"
         android:layout_height="match_parent"
         android:layout_weight="1"
         android:orientation="vertical">
-
         <!-- 地图显示区 -->
         <LinearLayout
             android:layout_width="match_parent"
@@ -32,60 +30,63 @@
                 android:background="@drawable/nav_map_inside_bg"
                 android:clipToOutline="true" />
         </LinearLayout>
-
         <!-- 下方线路信息面板 -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
+            android:layout_marginTop="6dp"
             android:background="@drawable/nav_panel_bg"
-            android:padding="5dp"
-            android:layout_marginTop="6dp">
+            android:orientation="vertical"
+            android:padding="5dp">
+
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="5dp"
                 android:gravity="center_vertical">
+
                 <org.zjfgh.zhujibus.HorizontalScrollTextView
                     android:id="@+id/nav_direction"
                     android:layout_width="0dp"
-                    android:layout_weight="1"
                     android:layout_height="wrap_content"
                     android:layout_marginEnd="5dp"
-                    app:hsText="加载中..."
+                    android:layout_weight="1"
                     app:hsAnimationMode="bounce_with_pause"
-                    app:hsTurnPauseDuration="1500"
-                    app:hsScrollSpeed="60"
-                    app:hsTextSize="14sp"
                     app:hsCharPerSecond="1.5"
+                    app:hsGravity="left"
+                    app:hsScrollSpeed="60"
+                    app:hsText="加载中..."
                     app:hsTextColor="#FFFFFF"
-                    app:hsGravity="left" />
+                    app:hsTextSize="14sp"
+                    app:hsTurnPauseDuration="1500" />
+
                 <TextView
                     android:id="@+id/nav_swap_orientation"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
+                    android:background="@drawable/nav_tab_active_bg"
+                    android:paddingStart="5dp"
+                    android:paddingEnd="5dp"
                     android:text="换向"
                     android:textColor="#FFFFFF"
                     android:textSize="14sp"
-                    android:textStyle="bold"
-                    android:paddingStart="5dp"
-                    android:paddingEnd="5dp"
-                    android:background="@drawable/nav_tab_active_bg" />
+                    android:textStyle="bold" />
             </LinearLayout>
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:layout_marginBottom="5dp">
+                android:layout_marginBottom="5dp"
+                android:orientation="horizontal">
+
                 <TextView
                     android:id="@+id/first_bus_time"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
+                    android:layout_marginEnd="5dp"
                     android:text="首：--:--"
                     android:textColor="#FFFFFF"
-                    android:textSize="10sp"
-                    android:layout_marginEnd="5dp"/>
+                    android:textSize="10sp" />
 
                 <TextView
                     android:id="@+id/last_bus_time"
@@ -95,13 +96,14 @@
                     android:text="末：--:--"
                     android:textColor="#FFFFFF"
                     android:textSize="10sp" />
+
                 <TextView
                     android:id="@+id/ticket"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:textAlignment="textEnd"
                     android:text="票价：--.--"
+                    android:textAlignment="textEnd"
                     android:textColor="#FFFFFF"
                     android:textSize="10sp" />
             </LinearLayout>
@@ -110,6 +112,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="70dp"
                 android:orientation="horizontal">
+
                 <org.zjfgh.zhujibus.IBusCloudLineView
                     android:id="@+id/i_bus_cloud_line_view"
                     android:layout_width="match_parent"
@@ -118,49 +121,52 @@
         </LinearLayout>
     </LinearLayout>
 
-    <!-- ========== 右侧信息栏 ========== -->
-    <LinearLayout
-        android:layout_width="100dp"
+    <!-- ========== 右侧信息栏：外层约束布局，时间卡片、速度卡片同层级可互相引用id ========== -->
+    <androidx.constraintlayout.widget.ConstraintLayout
+        android:layout_width="wrap_content"
         android:layout_height="match_parent"
-        android:orientation="vertical"
         android:layout_marginStart="6dp">
 
         <!-- 时间 + 日期面板 -->
         <LinearLayout
-            android:layout_width="match_parent"
+            android:id="@+id/layout_time_card"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
+            android:background="@drawable/nav_panel_bg"
             android:gravity="center"
+            android:orientation="vertical"
             android:padding="5dp"
-            android:background="@drawable/nav_panel_bg">
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent">
 
             <LinearLayout
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="bottom">
+                android:gravity="bottom"
+                android:orientation="horizontal">
 
                 <TextView
                     android:id="@+id/nav_time_hm"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
+                    android:layout_marginEnd="2dp"
+                    android:includeFontPadding="false"
                     android:text="09:19"
                     android:textColor="#FFFFFF"
                     android:textSize="28sp"
-                    android:textStyle="bold"
-                    android:layout_marginEnd="2dp"
-                    android:includeFontPadding="false" />
+                    android:textStyle="bold" />
 
                 <TextView
                     android:id="@+id/nav_time_second"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:gravity="bottom"
+                    android:includeFontPadding="false"
                     android:text="23"
                     android:textColor="#FFFFFF"
                     android:textSize="11sp"
-                    android:textStyle="bold"
-                    android:includeFontPadding="false" />
+                    android:textStyle="bold" />
             </LinearLayout>
 
             <TextView
@@ -173,38 +179,46 @@
                 android:textSize="12sp" />
         </LinearLayout>
 
-        <!-- 线路信息 + 限速速度（同一卡片，中间分割线） -->
-        <LinearLayout
-            android:layout_width="match_parent"
+        <!-- 线路信息 + 限速速度卡片（内部约束布局，最小宽度等于上方时间卡片） -->
+        <androidx.constraintlayout.widget.ConstraintLayout
+            android:id="@+id/layout_speed_card"
+            android:layout_width="wrap_content"
             android:layout_height="0dp"
-            android:layout_weight="1"
-            android:orientation="vertical"
-            android:gravity="center_horizontal"
+            android:layout_marginTop="6dp"
             android:background="@drawable/nav_panel_bg"
             android:paddingTop="6dp"
             android:paddingBottom="6dp"
-            android:layout_marginTop="6dp">
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/layout_time_card"
+            app:layout_constraintWidth_min="@id/layout_time_card">
 
             <!-- 上部：线路信息 -->
             <LinearLayout
-                android:layout_width="match_parent"
+                android:id="@+id/layout_route_info"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
+                android:gravity="center_horizontal"
                 android:orientation="vertical"
                 android:padding="5dp"
-                android:gravity="center_horizontal">
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toTopOf="parent">
 
                 <org.zjfgh.zhujibus.HorizontalScrollTextView
                     android:id="@+id/nav_route_no"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    app:hsText="---"
-                    app:hsTextSize="15sp"
                     app:hsAnimationMode="bounce_with_pause"
-                    app:hsTurnPauseDuration="1500"
-                    app:hsScrollSpeed="60"
                     app:hsCharPerSecond="1.5"
+                    app:hsGravity="center"
+                    app:hsScrollSpeed="60"
+                    app:hsText="---"
                     app:hsTextColor="#FFFFFF"
-                    app:hsGravity="center"/>
+                    app:hsTextSize="15sp"
+                    app:hsTurnPauseDuration="1500" />
+
                 <TextView
                     android:id="@+id/route_summary"
                     android:layout_width="wrap_content"
@@ -212,94 +226,120 @@
                     android:text="总里程：--公里"
                     android:textColor="#FFFFFF"
                     android:textSize="10sp" />
+
                 <LinearLayout
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical">
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
                     <org.zjfgh.zhujibus.HorizontalScrollTextView
                         android:id="@+id/nav_next_station"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        app:hsTextSize="9sp"
-                        app:hsText="--------"
                         app:hsAnimationMode="bounce_with_pause"
-                        app:hsTurnPauseDuration="1500"
-                        app:hsScrollSpeed="60"
                         app:hsCharPerSecond="1.5"
+                        app:hsGravity="center"
+                        app:hsScrollSpeed="60"
+                        app:hsText="--------"
                         app:hsTextColor="#FFFFFF"
-                        app:hsGravity="center"/>
+                        app:hsTextSize="9sp"
+                        app:hsTurnPauseDuration="1500" />
                 </LinearLayout>
-
             </LinearLayout>
 
             <!-- 中间分割线 -->
             <View
-                android:layout_width="match_parent"
+                android:id="@+id/view_divider"
+                android:layout_width="0dp"
                 android:layout_height="1dp"
                 android:layout_marginStart="2dp"
-                android:layout_marginEnd="2dp"
                 android:layout_marginTop="6dp"
+                android:layout_marginEnd="2dp"
                 android:layout_marginBottom="6dp"
-                android:background="#252A45" />
+                android:background="#252A45"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toBottomOf="@id/layout_route_info" />
 
             <!-- 下部：限速圆标 + 实时速度 -->
             <LinearLayout
-                android:layout_width="match_parent"
+                android:id="@+id/layout_speed_area"
+                android:layout_width="wrap_content"
                 android:layout_height="0dp"
                 android:layout_weight="1"
+                android:gravity="bottom"
                 android:orientation="vertical"
-                android:gravity="bottom">
+                app:layout_constraintBottom_toBottomOf="parent"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toBottomOf="@id/view_divider">
 
-                <!-- 限速圆标 -->
-                <FrameLayout
-                    android:layout_width="55dp"
-                    android:layout_height="55dp"
+                <androidx.constraintlayout.widget.ConstraintLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
                     android:layout_gravity="center_horizontal">
-                    <ImageView
-                        android:layout_width="match_parent"
-                        android:layout_height="match_parent"
-                        android:src="@drawable/speed_limit_bg" />
+
+                    <FrameLayout
+                        android:id="@+id/speedCircle"
+                        android:layout_width="0dp"
+                        android:layout_height="0dp"
+                        android:background="@drawable/speed_limit_bg"
+                        app:layout_constraintBottom_toBottomOf="parent"
+                        app:layout_constraintDimensionRatio="1:1"
+                        app:layout_constraintEnd_toEndOf="parent"
+                        app:layout_constraintStart_toStartOf="parent"
+                        app:layout_constraintTop_toTopOf="parent" />
+
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_gravity="center"
+                        android:padding="10dp"
                         android:text="55"
                         android:textColor="#000000"
                         android:textSize="35sp"
-                        android:textStyle="bold" />
-                </FrameLayout>
+                        android:textStyle="bold"
+                        app:layout_constraintBottom_toBottomOf="@id/speedCircle"
+                        app:layout_constraintEnd_toEndOf="@id/speedCircle"
+                        app:layout_constraintStart_toStartOf="@id/speedCircle"
+                        app:layout_constraintTop_toTopOf="@id/speedCircle" />
+
+                </androidx.constraintlayout.widget.ConstraintLayout>
+                <!-- 实时速度（大号数字区域） -->
                 <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content">
-                    <!-- 实时速度（大号数字） -->
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center">
                     <ImageView
                         android:id="@+id/icon_gps_signal"
                         android:layout_width="15dp"
                         android:layout_height="15dp"
+                        android:layout_gravity="bottom|start"
                         android:paddingStart="5dp"
-                        android:src="@drawable/icon_gps_not_signal"
-                        android:layout_gravity="bottom|start"/>
+                        android:src="@drawable/icon_gps_not_signal" />
+
                     <TextView
                         android:id="@+id/gps_speed_text"
-                        android:layout_width="70dp"
+                        android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="0"
+                        android:layout_marginStart="15dp"
+                        android:layout_marginEnd="15dp"
+                        android:includeFontPadding="false"
+                        android:text="00"
                         android:textAlignment="center"
                         android:textColor="#37D4F4"
                         android:textSize="50sp"
-                        android:textStyle="bold"
-                        android:includeFontPadding="false" />
+                        android:textStyle="bold" />
+
                     <ImageView
                         android:id="@+id/icon_network_signal"
                         android:layout_width="15dp"
                         android:layout_height="15dp"
+                        android:layout_gravity="bottom"
                         android:paddingEnd="5dp"
-                        android:src="@drawable/icon_network_0"
-                        android:layout_gravity="bottom"/>
+                        android:src="@drawable/icon_network_0" />
                 </LinearLayout>
-
             </LinearLayout>
-        </LinearLayout>
-    </LinearLayout>
+        </androidx.constraintlayout.widget.ConstraintLayout>
+    </androidx.constraintlayout.widget.ConstraintLayout>
 </LinearLayout>

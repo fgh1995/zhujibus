@@ -5,10 +5,6 @@
     <solid android:color="#FFFFFF" />
     <!-- 红色环形边框 -->
     <stroke
-        android:width="4dp"
+        android:width="5dp"
         android:color="#FF0000" />
-    <!-- 确保是标准圆形，需在布局中设置宽高相等 -->
-    <size
-        android:width="55dp"
-        android:height="55dp" />
 </shape>
