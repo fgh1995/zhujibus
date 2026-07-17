@@ -179,8 +179,8 @@
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:paddingTop="@dimen/_2sdp"
-                android:paddingBottom="@dimen/_2sdp"
+                android:paddingTop="@dimen/_4sdp"
+                android:paddingBottom="@dimen/_4sdp"
                 android:paddingStart="@dimen/_3sdp"
                 android:paddingEnd="@dimen/_3sdp"
                 android:background="@drawable/bg_yellow_dash_8radius"
@@ -239,7 +239,7 @@
 
                 <LinearLayout
                     android:id="@+id/pov_door_container"
-                    android:layout_width="@dimen/_60sdp"
+                    android:layout_width="@dimen/_80sdp"
                     android:layout_height="wrap_content"
                     android:gravity="center">
 
