@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="#000000">
@@ -7,9 +8,12 @@
     <!-- 预览容器 -->
     <FrameLayout
         android:id="@+id/preview_container"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:layout_gravity="center">
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent">
 
         <TextureView
             android:id="@+id/texture_camera_preview"
@@ -30,11 +34,11 @@
         <!-- 右下角小地图 -->
         <FrameLayout
             android:id="@+id/map_container"
-            android:layout_width="80dp"
-            android:layout_height="80dp"
+            android:layout_width="@dimen/_80sdp"
+            android:layout_height="@dimen/_80sdp"
             android:layout_gravity="bottom|end"
-            android:layout_marginBottom="8dp"
-            android:layout_marginEnd="8dp"
+            android:layout_marginBottom="@dimen/_8sdp"
+            android:layout_marginEnd="@dimen/_8sdp"
             android:background="@drawable/rounded_map_bg"
             android:clipToOutline="true">
 
@@ -48,119 +52,143 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_gravity="bottom|center_horizontal"
-                android:layout_marginBottom="4dp"
+                android:layout_marginBottom="@dimen/_4sdp"
+                android:background="#66000000"
+                android:padding="@dimen/_2sdp"
                 android:text="定位中..."
                 android:textColor="#FFFFFF"
-                android:textSize="10sp"
-                android:background="#66000000"
-                android:padding="2dp" />
+                android:textSize="@dimen/_10ssp" />
         </FrameLayout>
 
         <!-- 顶部控制栏 -->
-        <LinearLayout
+        <androidx.constraintlayout.widget.ConstraintLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_gravity="top"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:paddingStart="8dp"
-            android:paddingTop="4dp"
-            android:paddingEnd="8dp"
-            android:paddingBottom="4dp">
+            android:paddingStart="@dimen/_8sdp"
+            android:paddingTop="@dimen/_4sdp"
+            android:paddingEnd="@dimen/_8sdp"
+            android:paddingBottom="@dimen/_4sdp">
 
+            <!-- 左侧关闭 + 标题 -->
             <LinearLayout
+                android:id="@+id/left_toolbar_group"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:background="@drawable/bg_rounded_4dp_semi">
+                android:background="@drawable/bg_rounded_4dp_semi"
+                android:gravity="center_vertical"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toTopOf="parent"
+                app:layout_constraintBottom_toBottomOf="parent">
+
                 <TextView
                     android:id="@+id/btn_close_camera"
-                    android:layout_width="40dp"
-                    android:layout_height="40dp"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
                     android:background="?attr/selectableItemBackground"
                     android:clickable="true"
                     android:focusable="true"
                     android:gravity="center"
                     android:text="✕"
                     android:textColor="#FFFFFF"
-                    android:textSize="22sp" />
+                    android:textSize="@dimen/_22ssp" />
 
                 <TextView
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="8dp"
-                    android:layout_marginEnd="8dp"
+                    android:layout_marginStart="@dimen/_8sdp"
+                    android:layout_marginEnd="@dimen/_8sdp"
                     android:layout_weight="1"
                     android:gravity="center_vertical|start"
                     android:text="POV拍摄"
                     android:textColor="#FFFFFF"
-                    android:textSize="18sp" />
+                    android:textSize="@dimen/_18ssp" />
             </LinearLayout>
 
+            <!-- 右侧控制按钮组 -->
             <LinearLayout
-                android:layout_width="match_parent"
+                android:id="@+id/right_toolbar_group"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:gravity="center_vertical|end"
-                android:orientation="horizontal">
+                android:background="@drawable/bg_rounded_4dp_semi"
+                android:gravity="center_vertical"
+                android:padding="@dimen/_4sdp"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintTop_toTopOf="parent"
+                app:layout_constraintBottom_toBottomOf="parent">
 
-                <LinearLayout
+                <TextView
+                    android:id="@+id/tv_record_duration"
                     android:layout_width="wrap_content"
-                    android:layout_height="match_parent"
-                    android:padding="4dp"
+                    android:layout_height="wrap_content"
                     android:background="@drawable/bg_rounded_4dp_semi"
-                    android:gravity="center_vertical">
-                    <TextView
-                        android:id="@+id/tv_record_duration"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:paddingStart="@dimen/_8sdp"
+                    android:paddingEnd="@dimen/_8sdp"
+                    android:paddingTop="@dimen/_2sdp"
+                    android:paddingBottom="@dimen/_2sdp"
+                    android:text="● 00:00:00"
+                    android:textColor="#FF1744"
+                    android:textSize="@dimen/_14ssp"
+                    android:textStyle="bold"
+                    android:visibility="gone" />
 
-                        android:paddingStart="8dp"
-                        android:paddingEnd="8dp"
-                        android:paddingTop="2dp"
-                        android:paddingBottom="2dp"
-                        android:background="@drawable/bg_rounded_4dp_semi"
-                        android:gravity="center_vertical"
-                        android:text="● 00:00:00"
-                        android:textColor="#FF1744"
-                        android:textSize="14sp"
-                        android:textStyle="bold"
-                        android:visibility="gone" />
+                <!-- 录制按钮 - 使用 ConstraintLayout 包裹保持背景比例 -->
+                <androidx.constraintlayout.widget.ConstraintLayout
+                    android:id="@+id/record_btn_wrapper"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="@dimen/_8sdp"
+                    android:minWidth="@dimen/_48sdp"
+                    android:minHeight="@dimen/_48sdp">
+
                     <TextView
                         android:id="@+id/btn_record_camera"
-                        android:layout_marginStart="8dp"
-                        android:layout_width="50dp"
-                        android:layout_height="50dp"
+                        android:layout_width="0dp"
+                        android:layout_height="0dp"
                         android:background="@drawable/record_button_bg"
                         android:clickable="true"
                         android:focusable="true"
                         android:gravity="center"
                         android:text="录制"
                         android:textColor="#FFFFFF"
-                        android:textSize="14sp"
-                        android:textStyle="bold" />
+                        android:textSize="@dimen/_14ssp"
+                        android:textStyle="bold"
+                        app:layout_constraintBottom_toBottomOf="parent"
+                        app:layout_constraintDimensionRatio="1:1"
+                        app:layout_constraintEnd_toEndOf="parent"
+                        app:layout_constraintStart_toStartOf="parent"
+                        app:layout_constraintTop_toTopOf="parent"
+                        app:layout_constraintWidth_max="@dimen/_56sdp"
+                        app:layout_constraintHeight_max="@dimen/_56sdp" />
+                </androidx.constraintlayout.widget.ConstraintLayout>
 
-                    <TextView
-                        android:id="@+id/btn_settings_camera"
-                        android:layout_width="48dp"
-                        android:layout_height="48dp"
-                        android:layout_marginStart="8dp"
-                        android:clickable="true"
-                        android:focusable="true"
-                        android:gravity="center"
-                        android:text="☰"
-                        android:textColor="#FFFFFF"
-                        android:textSize="24sp" />
-                </LinearLayout>
+                <TextView
+                    android:id="@+id/btn_settings_camera"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="@dimen/_8sdp"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center"
+                    android:text="☰"
+                    android:textColor="#FFFFFF"
+                    android:textSize="@dimen/_24ssp" />
             </LinearLayout>
-        </LinearLayout>
+        </androidx.constraintlayout.widget.ConstraintLayout>
     </FrameLayout>
 
     <!-- 底部设置面板 -->
     <FrameLayout
         android:id="@+id/settings_panel_container"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:background="#55000000"
         android:visibility="gone"
-        android:background="#55000000">
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent">
 
         <ScrollView
             android:layout_width="match_parent"
@@ -172,48 +200,48 @@
                 android:id="@+id/settings_panel"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="vertical"
                 android:background="#FFFFFF"
-                android:padding="16dp">
+                android:orientation="vertical"
+                android:padding="@dimen/_16sdp">
 
                 <!-- 标题栏 -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical">
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
                     <TextView
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
                         android:text="录制参数"
                         android:textColor="#333333"
-                        android:textSize="18sp"
+                        android:textSize="@dimen/_18ssp"
                         android:textStyle="bold" />
                     <TextView
                         android:id="@+id/btn_close_settings"
-                        android:layout_width="48dp"
-                        android:layout_height="48dp"
+                        android:layout_width="@dimen/_48sdp"
+                        android:layout_height="@dimen/_48sdp"
+                        android:background="?attr/selectableItemBackground"
+                        android:clickable="true"
+                        android:focusable="true"
                         android:gravity="center"
                         android:text="×"
                         android:textColor="#333333"
-                        android:textSize="24sp"
-                        android:background="?attr/selectableItemBackground"
-                        android:clickable="true"
-                        android:focusable="true" />
+                        android:textSize="@dimen/_24ssp" />
                 </LinearLayout>
 
                 <View
                     android:layout_width="match_parent"
-                    android:layout_height="1dp"
-                    android:layout_marginTop="8dp"
+                    android:layout_height="@dimen/_1sdp"
+                    android:layout_marginTop="@dimen/_8sdp"
                     android:background="#CCCCCC" />
 
                 <!-- 分辨率 -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="16dp"
+                    android:layout_marginTop="@dimen/_16sdp"
                     android:orientation="vertical">
                     <LinearLayout
                         android:layout_width="match_parent"
@@ -230,41 +258,41 @@
                                 android:layout_height="wrap_content"
                                 android:text="分辨率"
                                 android:textColor="#666666"
-                                android:textSize="14sp" />
+                                android:textSize="@dimen/_14ssp" />
                             <Spinner
                                 android:id="@+id/spinner_resolution"
                                 android:layout_width="match_parent"
-                                android:layout_height="48dp"
-                                android:layout_marginTop="8dp"
+                                android:layout_height="@dimen/_48sdp"
+                                android:layout_marginTop="@dimen/_8sdp"
                                 android:background="#F0F0F0" />
                         </LinearLayout>
                         <LinearLayout
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
+                            android:layout_marginStart="@dimen/_8sdp"
                             android:layout_weight="1"
-                            android:layout_marginStart="8dp"
                             android:orientation="vertical">
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="帧率"
                                 android:textColor="#666666"
-                                android:textSize="14sp" />
+                                android:textSize="@dimen/_14ssp" />
                             <Spinner
                                 android:id="@+id/spinner_fps"
                                 android:layout_width="match_parent"
-                                android:layout_height="48dp"
-                                android:layout_marginTop="8dp"
+                                android:layout_height="@dimen/_48sdp"
+                                android:layout_marginTop="@dimen/_8sdp"
                                 android:background="#F0F0F0" />
                         </LinearLayout>
                     </LinearLayout>
-                </LinearLayout> <!-- 分辨率闭合 -->
+                </LinearLayout>
 
                 <!-- 视频码流 -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="16dp"
+                    android:layout_marginTop="@dimen/_16sdp"
                     android:orientation="vertical">
                     <LinearLayout
                         android:layout_width="match_parent"
@@ -275,7 +303,7 @@
                             android:layout_height="wrap_content"
                             android:text="视频码流"
                             android:textColor="#666666"
-                            android:textSize="14sp" />
+                            android:textSize="@dimen/_14ssp" />
                         <TextView
                             android:id="@+id/tv_video_bitrate_value"
                             android:layout_width="0dp"
@@ -284,13 +312,13 @@
                             android:gravity="end"
                             android:text="30 Mbps"
                             android:textColor="#0d8dfb"
-                            android:textSize="14sp" />
+                            android:textSize="@dimen/_14ssp" />
                     </LinearLayout>
                     <SeekBar
                         android:id="@+id/seekbar_video_bitrate"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
+                        android:layout_marginTop="@dimen/_8sdp"
                         android:max="100"
                         android:progress="30" />
                 </LinearLayout>
@@ -299,19 +327,19 @@
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="16dp"
+                    android:layout_marginTop="@dimen/_16sdp"
                     android:orientation="vertical">
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="音频码流"
                         android:textColor="#666666"
-                        android:textSize="14sp" />
+                        android:textSize="@dimen/_14ssp" />
                     <Spinner
                         android:id="@+id/spinner_audio_bitrate"
                         android:layout_width="match_parent"
-                        android:layout_height="48dp"
-                        android:layout_marginTop="8dp"
+                        android:layout_height="@dimen/_48sdp"
+                        android:layout_marginTop="@dimen/_8sdp"
                         android:background="#F0F0F0" />
                 </LinearLayout>
 
@@ -319,19 +347,19 @@
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="16dp"
+                    android:layout_marginTop="@dimen/_16sdp"
                     android:orientation="vertical">
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="采样率"
                         android:textColor="#666666"
-                        android:textSize="14sp" />
+                        android:textSize="@dimen/_14ssp" />
                     <Spinner
                         android:id="@+id/spinner_sample_rate"
                         android:layout_width="match_parent"
-                        android:layout_height="48dp"
-                        android:layout_marginTop="8dp"
+                        android:layout_height="@dimen/_48sdp"
+                        android:layout_marginTop="@dimen/_8sdp"
                         android:background="#F0F0F0" />
                 </LinearLayout>
 
@@ -339,19 +367,19 @@
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="16dp"
+                    android:layout_marginTop="@dimen/_16sdp"
                     android:orientation="vertical">
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="声道"
                         android:textColor="#666666"
-                        android:textSize="14sp" />
+                        android:textSize="@dimen/_14ssp" />
                     <Spinner
                         android:id="@+id/spinner_audio_channels"
                         android:layout_width="match_parent"
-                        android:layout_height="48dp"
-                        android:layout_marginTop="8dp"
+                        android:layout_height="@dimen/_48sdp"
+                        android:layout_marginTop="@dimen/_8sdp"
                         android:background="#F0F0F0" />
                 </LinearLayout>
 
@@ -359,20 +387,20 @@
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="16dp"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical">
+                    android:layout_marginTop="@dimen/_16sdp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="显示地图"
                         android:textColor="#666666"
-                        android:textSize="14sp" />
+                        android:textSize="@dimen/_14ssp" />
                     <CheckBox
                         android:id="@+id/checkbox_show_map"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginStart="16dp"
+                        android:layout_marginStart="@dimen/_16sdp"
                         android:checked="false" />
                 </LinearLayout>
 
@@ -380,20 +408,20 @@
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical">
+                    android:layout_marginTop="@dimen/_8sdp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="显示线路信息"
                         android:textColor="#666666"
-                        android:textSize="14sp" />
+                        android:textSize="@dimen/_14ssp" />
                     <CheckBox
                         android:id="@+id/checkbox_show_info_panel"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginStart="16dp"
+                        android:layout_marginStart="@dimen/_16sdp"
                         android:checked="false" />
                 </LinearLayout>
 
@@ -401,38 +429,38 @@
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical">
+                    android:layout_marginTop="@dimen/_8sdp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="显示坐标信息"
                         android:textColor="#666666"
-                        android:textSize="14sp" />
+                        android:textSize="@dimen/_14ssp" />
                     <CheckBox
                         android:id="@+id/checkbox_show_coordinate"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginStart="16dp"
+                        android:layout_marginStart="@dimen/_16sdp"
                         android:checked="true" />
                 </LinearLayout>
 
                 <TextView
                     android:id="@+id/btn_apply_settings"
                     android:layout_width="match_parent"
-                    android:layout_height="48dp"
-                    android:layout_marginTop="24dp"
-                    android:layout_marginBottom="16dp"
+                    android:layout_height="@dimen/_48sdp"
+                    android:layout_marginTop="@dimen/_24sdp"
+                    android:layout_marginBottom="@dimen/_16sdp"
+                    android:background="#0d8dfb"
+                    android:clickable="true"
+                    android:focusable="true"
                     android:gravity="center"
                     android:text="应用"
                     android:textColor="#FFFFFF"
-                    android:textSize="16sp"
-                    android:textStyle="bold"
-                    android:background="#0d8dfb"
-                    android:clickable="true"
-                    android:focusable="true" />
+                    android:textSize="@dimen/_16ssp"
+                    android:textStyle="bold" />
             </LinearLayout>
         </ScrollView>
     </FrameLayout>
-</FrameLayout>
+</androidx.constraintlayout.widget.ConstraintLayout>

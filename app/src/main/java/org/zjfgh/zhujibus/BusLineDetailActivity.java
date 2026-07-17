@@ -1399,7 +1399,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         currentInstance = this;
         setContentView(R.layout.activity_bus_line_details);
         // ★ 车机布局:让 activity_navigation(<include>)的高度 = 宽度(任何分辨率/屏幕保持方形布局)
-        applySquareNavigationLayout(0.7f);
+        applySquareNavigationLayout(0.8f);
         Intent intent = getIntent();
         if (intent != null) {
             lineID = intent.getStringExtra("line_id");
@@ -1580,6 +1580,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         }
 
         // 6. 绑定左侧"拍POV"图标点击
+        // 在 setupNavigationContent() 中
         View navIconPov = findViewById(R.id.nav_icon_pov);
         if (navIconPov != null) {
             navIconPov.setOnClickListener(v -> {
@@ -1588,6 +1589,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 intent.putExtra("line_name", lineName);
                 intent.putExtra("start_station", startStation);
                 intent.putExtra("end_station", endStation);
+                // ⭐ 关键：传入当前方向
                 intent.putExtra("direction", currentDirection);
                 startActivity(intent);
             });

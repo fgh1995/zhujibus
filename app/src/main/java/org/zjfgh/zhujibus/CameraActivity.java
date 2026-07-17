@@ -483,38 +483,87 @@ public class CameraActivity extends AppCompatActivity {
     }
 
     private void selectCurrentDirection() {
-        if (lineDetailResponse == null || lineDetailResponse.data == null) return;
+        if (lineDetailResponse == null || lineDetailResponse.data == null) {
+            Log.w(TAG, "selectCurrentDirection: lineDetailResponse或data为null");
+            return;
+        }
+
         BusApiClient.BusLineDirection selected = null;
-        if (lineId != null) {
+
+        // ⭐ 优先使用 Intent 传入的 direction
+        if (direction == 1 && lineDetailResponse.data.up != null) {
+            selected = lineDetailResponse.data.up;
+            Log.d(TAG, "selectCurrentDirection: 使用Intent方向=上行");
+        } else if (direction == 2 && lineDetailResponse.data.down != null) {
+            selected = lineDetailResponse.data.down;
+            Log.d(TAG, "selectCurrentDirection: 使用Intent方向=下行");
+        }
+
+        // ⭐ 如果 direction 指定的方向不存在，再尝试用 lineId 匹配
+        if (selected == null && lineId != null) {
             if (lineDetailResponse.data.up != null && lineId.equals(lineDetailResponse.data.up.id)) {
                 selected = lineDetailResponse.data.up;
                 direction = 1;
+                Log.d(TAG, "selectCurrentDirection: 通过lineId匹配到上行");
             } else if (lineDetailResponse.data.down != null && lineId.equals(lineDetailResponse.data.down.id)) {
                 selected = lineDetailResponse.data.down;
                 direction = 2;
+                Log.d(TAG, "selectCurrentDirection: 通过lineId匹配到下行");
             }
         }
+
+        // ⭐ 如果还没有匹配到，用起终点匹配
         if (selected == null && startStationName != null && endStationName != null) {
             if (lineDetailResponse.data.up != null
                     && startStationName.equals(lineDetailResponse.data.up.startStation)
                     && endStationName.equals(lineDetailResponse.data.up.endStation)) {
                 selected = lineDetailResponse.data.up;
                 direction = 1;
+                Log.d(TAG, "selectCurrentDirection: 通过起终点匹配到上行");
             } else if (lineDetailResponse.data.down != null
                     && startStationName.equals(lineDetailResponse.data.down.startStation)
                     && endStationName.equals(lineDetailResponse.data.down.endStation)) {
                 selected = lineDetailResponse.data.down;
                 direction = 2;
+                Log.d(TAG, "selectCurrentDirection: 通过起终点匹配到下行");
             }
         }
+
+        // ⭐ 最终兜底：用 direction 选择
         if (selected == null) {
-            selected = direction == 2 ? lineDetailResponse.data.down : lineDetailResponse.data.up;
+            if (direction == 2 && lineDetailResponse.data.down != null) {
+                selected = lineDetailResponse.data.down;
+                Log.d(TAG, "selectCurrentDirection: 兜底选择下行");
+            } else if (lineDetailResponse.data.up != null) {
+                selected = lineDetailResponse.data.up;
+                direction = 1;
+                Log.d(TAG, "selectCurrentDirection: 兜底选择上行");
+            } else {
+                selected = lineDetailResponse.data.down;
+                direction = 2;
+                Log.d(TAG, "selectCurrentDirection: 兜底选择下行(上行不存在)");
+            }
         }
+
+        // ⭐ 如果最终还是 null，取第一个有数据的
         if (selected == null) {
-            selected = lineDetailResponse.data.up != null ? lineDetailResponse.data.up : lineDetailResponse.data.down;
+            if (lineDetailResponse.data.up != null) {
+                selected = lineDetailResponse.data.up;
+                direction = 1;
+            } else if (lineDetailResponse.data.down != null) {
+                selected = lineDetailResponse.data.down;
+                direction = 2;
+            }
+            Log.d(TAG, "selectCurrentDirection: 最终兜底选择 direction=" + direction);
         }
+
         currentLineDirection = selected;
-        if (selected == null) return;
+        if (selected == null) {
+            Log.e(TAG, "selectCurrentDirection: 无法选择任何方向");
+            return;
+        }
+
+        // 更新线路数据
         lineId = selected.id;
         startStationName = selected.startStation;
         endStationName = selected.endStation;
@@ -529,6 +578,12 @@ public class CameraActivity extends AppCompatActivity {
                 routePoints.addAll(parsed);
             }
         }
+
+        Log.d(TAG, "selectCurrentDirection: 最终选择 direction=" + direction
+                + ", lineId=" + lineId
+                + ", startStation=" + startStationName
+                + ", endStation=" + endStationName
+                + ", stationCount=" + stationList.size());
     }
 
     private void updateDetectorRouteData() {

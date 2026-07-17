@@ -10,11 +10,11 @@ android {
         applicationId "org.zjfgh.zhujibus"
         minSdk 24
         targetSdk 35
-        versionCode 102040
-        versionName "1.2.40"
+        versionCode 102041
+        versionName "1.2.41"
         //wsServerAddress = `http://zhujibus.360967.xyz/ws`
         //githubAddSpeed=`https://gh-proxy.org`
-        //remote={"has_notice":true,"notice":"自版本V1.2.40(102040) 开始支持POV拍摄录制功能，并叠加显示公交车辆信息面板（仅支持诸暨公交）节省视频剪辑时间。操作教程请在B站搜索 \"oho19950813\" ，选择线路后，点击\"拍POV\" 按钮即可进入相关界面；本软件仅支持浙江省诸暨市公交查询，查询时需要联网，网络模式下选择站点后，即可开始播报最近车辆，GPS导航模式下，需要前往当地乘坐对应公交，或者使用第三方定位模拟器方可体验。感谢您的使用，接口版权归诸暨市交通部。","has_update":true,"update_log":"1.[新增]POV拍摄录制功能，并叠加显示公交车辆信息面板，节省视频剪辑时间，操作教程请在B站搜索 oho19950813（仅支持诸暨公交线路）。\n2.[优化]优化多项细节体验。"}
+        //remote={"has_notice":true,"notice":"V1.2.41(102041) 修复了线路换向后，进入POV拍摄页面，线路没有换向的问题。如何拍摄POV录像，请在B站搜索 \"oho19950813\" 教程；简单说明：选择线路后，点击\"拍POV\" 按钮即可进入相关界面；本软件仅支持浙江省诸暨市公交查询，查询时需要联网，网络模式下选择站点后，即可开始播报最近车辆，GPS导航模式下，需要前往当地乘坐对应公交，或者使用第三方定位模拟器方可体验。感谢您的使用，线路接口版权归诸暨市交通运输局。。","has_update":true,"update_log":"1.优化不同分辨率下UI的显示。\n2.修复切换线路上下行方向后，进入POV模式无法切换正确方向的问题。\n3.统一POV拍摄叠加的UI大小，尝试解决在不同分辨率下UI长宽不一致的问题。"}
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -76,4 +76,6 @@ dependencies {
     implementation libs.amapNavi3dmap
     implementation libs.glide
     implementation libs.gridlayout
+    implementation libs.sdp.android
+    implementation libs.ssp.android
 }

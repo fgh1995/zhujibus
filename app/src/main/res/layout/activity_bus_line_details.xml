@@ -189,7 +189,8 @@
                             android:padding="2dp"
                             android:textColor="#FF0000"
                             android:textSize="14sp"
-                            android:text="网络"/>
+                            android:text="网络"
+                            android:typeface="monospace"/>
                     </LinearLayout>
                 </org.zjfgh.zhujibus.view.DotMatrixLinearLayout>
             </LinearLayout>

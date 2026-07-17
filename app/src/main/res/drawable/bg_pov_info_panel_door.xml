@@ -11,8 +11,8 @@
     <corners android:radius="4dp" />
     <!-- 内边距，留出顶部白色区域空间 -->
     <padding
-        android:top="5dp"
-        android:left="4dp"
-        android:right="4dp"
-        android:bottom="2dp" />
+        android:top="@dimen/_5sdp"
+        android:left="@dimen/_4sdp"
+        android:right="@dimen/_4sdp"
+        android:bottom="@dimen/_5sdp" />
 </shape>

@@ -1,25 +1,27 @@
-<?xml version="1.0" encoding="utf-8"?><!--
+<?xml version="1.0" encoding="utf-8"?>
+<!--
   主页 fragment：地图显示区 + 下方线路信息面板 + 右侧信息栏
   由 BusLineDetailActivity 通过 FragmentContainerView 承载
-  优化：右侧外层改为ConstraintLayout，实现时间卡片、速度卡片取最大宽度自适应
+  优化：地图与线路信息面板按比例分配，线路图高度自适应填充
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
-    app:layout_constraintDimensionRatio="1:1"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="horizontal">
+
     <!-- ========== 中间地图区 + 线路信息（占剩余全部宽度） ========== -->
     <LinearLayout
         android:layout_width="0dp"
         android:layout_height="match_parent"
         android:layout_weight="1"
         android:orientation="vertical">
-        <!-- 地图显示区 -->
+
+        <!-- 地图显示区：占据约 60% 的高度 -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="0dp"
-            android:layout_weight="1"
+            android:layout_weight="55"
             android:background="@drawable/nav_map_panel_bg"
             android:padding="1dp">
 
@@ -30,10 +32,12 @@
                 android:background="@drawable/nav_map_inside_bg"
                 android:clipToOutline="true" />
         </LinearLayout>
-        <!-- 下方线路信息面板 -->
+
+        <!-- 下方线路信息面板：占据约 40% 的高度 -->
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
+            android:layout_height="0dp"
+            android:layout_weight="45"
             android:layout_marginTop="6dp"
             android:background="@drawable/nav_panel_bg"
             android:orientation="vertical"
@@ -107,10 +111,12 @@
                     android:textColor="#FFFFFF"
                     android:textSize="10sp" />
             </LinearLayout>
-            <!-- 线路图 -->
+
+            <!-- 线路图：高度自动填充剩余空间 -->
             <LinearLayout
                 android:layout_width="match_parent"
-                android:layout_height="70dp"
+                android:layout_height="0dp"
+                android:layout_weight="1"
                 android:orientation="horizontal">
 
                 <org.zjfgh.zhujibus.IBusCloudLineView
@@ -161,7 +167,7 @@
                     android:id="@+id/nav_time_second"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:gravity="bottom"
+                    android:minEms="1"
                     android:includeFontPadding="false"
                     android:text="23"
                     android:textColor="#FFFFFF"
@@ -294,10 +300,10 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:padding="10dp"
+                        android:padding="5dp"
                         android:text="55"
                         android:textColor="#000000"
-                        android:textSize="35sp"
+                        android:textSize="45sp"
                         android:textStyle="bold"
                         app:layout_constraintBottom_toBottomOf="@id/speedCircle"
                         app:layout_constraintEnd_toEndOf="@id/speedCircle"
@@ -305,6 +311,7 @@
                         app:layout_constraintTop_toTopOf="@id/speedCircle" />
 
                 </androidx.constraintlayout.widget.ConstraintLayout>
+
                 <!-- 实时速度（大号数字区域） -->
                 <LinearLayout
                     android:layout_width="wrap_content"
@@ -315,17 +322,19 @@
                         android:layout_width="15dp"
                         android:layout_height="15dp"
                         android:layout_gravity="bottom|start"
-                        android:paddingStart="5dp"
+                        android:layout_marginStart="5dp"
                         android:src="@drawable/icon_gps_not_signal" />
 
                     <TextView
                         android:id="@+id/gps_speed_text"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginStart="15dp"
-                        android:layout_marginEnd="15dp"
+                        android:layout_marginStart="5dp"
+                        android:layout_marginEnd="5dp"
+                        android:minEms="1"
+                        android:gravity="center"
                         android:includeFontPadding="false"
-                        android:text="00"
+                        android:text="--"
                         android:textAlignment="center"
                         android:textColor="#37D4F4"
                         android:textSize="50sp"
@@ -336,7 +345,7 @@
                         android:layout_width="15dp"
                         android:layout_height="15dp"
                         android:layout_gravity="bottom"
-                        android:paddingEnd="5dp"
+                        android:layout_marginEnd="5dp"
                         android:src="@drawable/icon_network_0" />
                 </LinearLayout>
             </LinearLayout>

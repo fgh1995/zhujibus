@@ -16,6 +16,8 @@ pinyin4j = "2.5.1"
 amapNavi3dMap = "latest.integration"
 glide = "5.0.7"
 gridlayout = "1.0.0"
+sdpAndroid = "1.1.1"
+sspAndroid = "1.1.1"
 
 [libraries]
 jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "jacksonDatabind" }
@@ -34,6 +36,8 @@ pinyin4j = { module = "com.belerweb:pinyin4j", version.ref = "pinyin4j" }
 amapNavi3dmap = { group = "com.amap.api", name = "navi-3dmap", version.ref = "amapNavi3dMap" }
 glide = { module = "com.github.bumptech.glide:glide", version.ref = "glide" }
 gridlayout = { group = "androidx.gridlayout", name = "gridlayout", version.ref = "gridlayout" }
+sdp-android = { module = "com.intuit.sdp:sdp-android", version.ref = "sdpAndroid" }
+ssp-android = { module = "com.intuit.ssp:ssp-android", version.ref = "sspAndroid" }
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 
