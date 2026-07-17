@@ -37,7 +37,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textSize="@dimen/_7ssp"
+                android:textSize="@dimen/_8ssp"
                 android:layout_marginEnd="@dimen/_7sdp"
                 android:text="诸暨公交\nZhuji Bus"
                 android:textAlignment="center"
@@ -81,7 +81,7 @@
                         android:layout_height="wrap_content"
                         android:text="起点站"
                         android:textColor="#DCA800"
-                        android:textSize="@dimen/_8ssp" />
+                        android:textSize="@dimen/_10ssp" />
                 </LinearLayout>
 
                 <LinearLayout
@@ -120,7 +120,7 @@
                         android:layout_height="wrap_content"
                         android:text="终点站"
                         android:textColor="#DCA800"
-                        android:textSize="@dimen/_8ssp" />
+                        android:textSize="@dimen/_10ssp" />
                 </LinearLayout>
 
                 <LinearLayout
