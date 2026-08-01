@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp"
+    android:background="#FFFFFF">
+
+    <!-- 标题部分 -->
+    <TextView
+        android:id="@+id/tvRouteNumber"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="18路"
+        android:textSize="24sp"
+        android:textColor="#000000"
+        android:textStyle="bold"
+        android:layout_marginBottom="16dp" />
+
+    <!-- 起始站信息 -->
+    <TextView
+        android:id="@+id/tvStartStation"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="技师学院南门"
+        android:textSize="20sp"
+        android:textColor="#000000"
+        android:textStyle="bold"
+        android:layout_marginBottom="8dp" />
+
+    <!-- 宋家时间信息 -->
+    <LinearLayout
+        android:id="@+id/llSongjiaInfo"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:layout_marginBottom="16dp">
+
+        <TextView
+            android:id="@+id/tvSongjiaTitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="1. 宋家"
+            android:textSize="16sp"
+            android:textColor="#000000" />
+
+        <LinearLayout
+            android:id="@+id/llSongjiaTime"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="4dp">
+
+            <TextView
+                android:id="@+id/tvFirstBusTime"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="06:00"
+                android:textSize="14sp"
+                android:textColor="#666666"
+                android:layout_marginRight="16dp" />
+
+            <TextView
+                android:id="@+id/tvLastBusTime"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="21:40"
+                android:textSize="14sp"
+                android:textColor="#666666" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- 分隔线 -->
+    <View
+        android:id="@+id/divider1"
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="#E0E0E0"
+        android:layout_marginVertical="8dp" />
+
+    <!-- 时间表信息 -->
+    <LinearLayout
+        android:id="@+id/llScheduleInfo"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:layout_marginBottom="16dp">
+
+        <TextView
+            android:id="@+id/tvScheduleTitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="2. 时间表"
+            android:textSize="16sp"
+            android:textColor="#000000" />
+
+        <LinearLayout
+            android:id="@+id/llScheduleDetails"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="4dp">
+
+            <TextView
+                android:id="@+id/tvTotalDistance"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="总里程：16公里"
+                android:textSize="14sp"
+                android:textColor="#666666"
+                android:layout_marginRight="16dp" />
+
+            <TextView
+                android:id="@+id/tvTicketPrice"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="票价：1.0元"
+                android:textSize="14sp"
+                android:textColor="#666666" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- 分隔线 -->
+    <View
+        android:id="@+id/divider2"
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="#E0E0E0"
+        android:layout_marginVertical="8dp" />
+
+    <!-- 站点列表标题 -->
+    <TextView
+        android:id="@+id/tvStationListTitle"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="3. 技师学院南门"
+        android:textSize="16sp"
+        android:textColor="#000000"
+        android:layout_marginBottom="8dp" />
+
+    <!-- RecyclerView 用于显示站点列表 -->
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/rvStationList"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp" />
+
+</LinearLayout>

@@ -1,0 +1,79 @@
+plugins {
+    alias(libs.plugins.android.application)
+}
+
+android {
+    namespace 'org.zjfgh.zhujibus'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "org.zjfgh.zhujibus"
+        minSdk 24
+        targetSdk 35
+        versionCode 102040
+        versionName "1.2.40-beta1"
+        //wsServerAddress = `http://zhujibus.360967.xyz/ws`
+        //githubAddSpeed=`https://gh-proxy.org`
+        //remote={"has_notice":true,"notice":"因兼容性问题暂停POV功能开发，请勿使用POV功能，可能导致拍摄中断或软件卡死。本软件仅支持浙江省诸暨市公交查询，查询时需要联网，网络模式下选择站点后，即可开始播报最近车辆，GPS导航模式下，需要前往当地乘坐对应公交，或者使用第三方定位模拟器方可体验。感谢您的使用，接口版权归诸暨市交通部。","has_update":true,"update_log":"1.[新增]POV拍摄录制功能，并叠加显示公交车辆信息面板，节省视频剪辑时间，操作教程请在B站搜索 oho19950813（仅支持诸暨公交线路）。\n2.[优化]优化多项细节体验。"}
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    signingConfigs {
+        release {
+            storeFile file(project.findProperty('KEY_STORE_FILE'))
+            storePassword project.findProperty('KEY_STORE_PASSWORD')
+            keyAlias project.findProperty('KEY_ALIAS')
+            keyPassword project.findProperty('KEY_PASSWORD')
+            v1SigningEnabled true
+            v2SigningEnabled true
+        }
+    }
+
+    buildTypes {
+        release {
+            signingConfig signingConfigs.release
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+    buildFeatures {
+        viewBinding true
+    }
+}
+
+androidComponents {
+    onVariants(selector().all()) { variant ->
+        def versionName = variant.outputs[0].versionName.get()
+        def versionCode = variant.outputs[0].versionCode.get()
+        variant.outputs.each { output ->
+            def buildType = variant.buildType
+            def suffix = buildType == "release" ? "release" : "debug"
+            output.outputFileName.set("zhujibus-${versionCode}-${suffix}.apk")
+        }
+    }
+}
+
+dependencies {
+
+    implementation libs.appcompat
+    implementation libs.material
+    implementation libs.activity
+    implementation libs.constraintlayout
+    implementation libs.navigation.fragment
+    implementation libs.navigation.ui
+    testImplementation libs.junit
+    androidTestImplementation libs.ext.junit
+    androidTestImplementation libs.espresso.core
+    // 网络请求和 JSON 处理依赖
+    implementation libs.okhttp       // OkHttp
+    implementation libs.jackson.databind // Jackson
+    implementation libs.kotlinx.coroutines.android
+    // 高德导航 SDK（包含地图+导航功能）
+    implementation libs.amapNavi3dmap
+    implementation libs.glide
+    implementation libs.gridlayout
+}

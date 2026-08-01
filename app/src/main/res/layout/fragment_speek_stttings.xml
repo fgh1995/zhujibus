@@ -1,0 +1,212 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <!-- 滚动内容区域 -->
+    <androidx.core.widget.NestedScrollView
+        android:id="@+id/offline_root_scroll"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@drawable/nav_panel_bg"
+        android:fillViewport="true"
+        android:scrollbars="vertical"
+        android:overScrollMode="ifContentScrolls">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="12dp">
+
+            <!-- 标题 -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="报站设置"
+                android:textColor="#FFFFFF"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+
+            <!-- 副标题：报站设置-->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="报站判定设置"
+                android:textColor="#9AA0BC"
+                android:textSize="11sp" />
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginTop="10dp"
+                android:background="#252A45" />
+
+            <!-- GPS 信息区域 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:gravity="center_vertical"
+                android:layout_marginStart="2dp"
+                android:layout_marginTop="8dp">
+
+                <LinearLayout
+                    android:id="@+id/gps_label"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:layout_gravity="start">
+
+                    <TextView
+                        android:id="@+id/gps_location_info"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="5dp"
+                        android:textSize="15sp"
+                        android:text="坐标:29.361333,120.334511"
+                        android:textColor="#FFFFFF" />
+
+                    <LinearLayout
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical">
+
+                        <TextView
+                            android:id="@+id/gps_nearest_station_info"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textSize="15sp"
+                            android:text="站点：白门下村  1071m"
+                            android:textColor="#FFFFFF"
+                            android:layout_marginEnd="10dp" />
+                    </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/gps_eat_info"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textSize="15sp"
+                        android:text="预计：下一站 --，终点 --"
+                        android:textColor="#FFFFFF"
+                        android:layout_marginTop="2dp" />
+                    <org.zjfgh.zhujibus.BorderLabel
+                        android:id="@+id/distance_mode_info"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="5dp"
+                        app:labelTextSize="15sp"
+                        app:labelLitColor="#00FFFF"
+                        app:labelDimColor="#00FFFF"
+                        app:labelText="报站判定: 直线距离"
+                        android:text="" />
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical">
+
+                            <!-- 进站判定进度条 -->
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:orientation="horizontal"
+                                android:gravity="center_vertical"
+                                android:layout_marginTop="10dp"
+                                android:layout_marginBottom="10dp">
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginEnd="10dp"
+                                    android:gravity="center_vertical"
+                                    android:text="进站判定范围"
+                                    android:textColor="#FFFFFF"
+                                    android:textSize="15sp" />
+
+                                <SeekBar
+                                    android:id="@+id/enter_radius_seekbar"
+                                    android:layout_width="0dp"
+                                    android:layout_weight="1"
+                                    android:layout_height="30dp"
+                                    android:layout_marginEnd="5dp"
+                                    android:progressDrawable="@drawable/custom_progress_drawable"
+                                    android:thumb="@null"
+                                    android:max="500"
+                                    android:progress="40"
+                                    android:paddingStart="0dp"
+                                    android:paddingEnd="0dp"
+                                    android:splitTrack="false" />
+
+                                <TextView
+                                    android:id="@+id/enter_progress_text"
+                                    android:layout_width="30dp"
+                                    android:layout_height="wrap_content"
+                                    android:textAlignment="center"
+                                    android:text="0"
+                                    android:textSize="15sp"
+                                    android:textColor="#FFFFFF" />
+                            </LinearLayout>
+
+                            <!-- 出站判定进度条 -->
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:orientation="horizontal"
+                                android:gravity="center_vertical">
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginEnd="10dp"
+                                    android:text="出站判定范围"
+                                    android:textSize="15sp"
+                                    android:textColor="#FFFFFF" />
+
+                                <SeekBar
+                                    android:id="@+id/exit_radius_seekbar"
+                                    android:layout_width="0dp"
+                                    android:layout_weight="1"
+                                    android:layout_height="30dp"
+                                    android:layout_marginEnd="5dp"
+                                    android:progressDrawable="@drawable/custom_progress_drawable"
+                                    android:thumb="@null"
+                                    android:max="500"
+                                    android:progress="80"
+                                    android:paddingStart="0dp"
+                                    android:paddingEnd="0dp"
+                                    android:splitTrack="false" />
+
+                                <TextView
+                                    android:id="@+id/exit_progress_text"
+                                    android:layout_width="30dp"
+                                    android:layout_height="wrap_content"
+                                    android:textAlignment="center"
+                                    android:text="0"
+                                    android:textSize="15sp"
+                                    android:textColor="#FFFFFF" />
+                            </LinearLayout>
+                        </LinearLayout>
+                    </LinearLayout>
+                </LinearLayout>
+            </LinearLayout>
+        </LinearLayout>
+
+    </androidx.core.widget.NestedScrollView>
+
+    <!-- 动态弹窗容器 - 与滚动区域平级，覆盖整个屏幕 -->
+    <FrameLayout
+        android:id="@+id/dialog_container"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone"
+        android:clickable="true"
+        android:focusable="true" />
+
+</FrameLayout>

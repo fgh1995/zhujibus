@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 省份分组标题行：省份名 + 已下载/总数 + 折叠箭头 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/offline_province_row"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:paddingTop="12dp"
+    android:paddingBottom="8dp"
+    android:paddingStart="6dp"
+    android:paddingEnd="6dp"
+    android:background="?android:attr/selectableItemBackground"
+    android:clickable="true"
+    android:focusable="true">
+
+    <TextView
+        android:id="@+id/offline_province_name"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:text="省份"
+        android:textColor="#FFFFFF"
+        android:textSize="14sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/offline_province_count"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginEnd="6dp"
+        android:text="0/0"
+        android:textColor="#6A6F90"
+        android:textSize="11sp" />
+
+    <ImageView
+        android:id="@+id/offline_province_arrow"
+        android:layout_width="14dp"
+        android:layout_height="14dp"
+        android:src="@drawable/nav_arrow_down"
+        android:contentDescription="@null" />
+</LinearLayout>

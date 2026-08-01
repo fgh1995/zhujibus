@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 底部弹出的删除确认弹窗：深色 + 圆角顶部，符合中控 UI -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@drawable/bg_sheet_dark"
+    android:paddingTop="16dp"
+    android:paddingBottom="20dp"
+    android:gravity="top">
+
+    <!-- 标题 -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:text="删除离线地图"
+        android:textColor="#FFFFFF"
+        android:textSize="15sp"
+        android:textStyle="bold" />
+
+    <!-- 副标题：城市名 + 大小 -->
+    <TextView
+        android:id="@+id/dialog_delete_message"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:layout_marginStart="24dp"
+        android:layout_marginEnd="24dp"
+        android:gravity="center"
+        android:lineSpacingExtra="4dp"
+        android:text="确定要删除「xxx」的离线地图包吗？"
+        android:textColor="#9AA0BC"
+        android:textSize="13sp" />
+
+    <!-- 提示文字（警告） -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="14dp"
+        android:layout_marginStart="24dp"
+        android:layout_marginEnd="24dp"
+        android:gravity="center"
+        android:text="删除后需要重新下载才能离线使用"
+        android:textColor="#FFC858"
+        android:textSize="11sp" />
+
+    <!-- 按钮区 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="22dp"
+        android:layout_marginStart="20dp"
+        android:layout_marginEnd="20dp"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/dialog_delete_cancel"
+            android:layout_width="0dp"
+            android:layout_height="40dp"
+            android:layout_weight="1"
+            android:background="@drawable/nav_btn_gray_bg"
+            android:text="取消"
+            android:textColor="#FFFFFF"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:minWidth="0dp"
+            android:minHeight="0dp"
+            android:paddingStart="0dp"
+            android:paddingEnd="0dp" />
+
+        <Button
+            android:id="@+id/dialog_delete_confirm"
+            android:layout_width="0dp"
+            android:layout_height="40dp"
+            android:layout_weight="1"
+            android:layout_marginStart="10dp"
+            android:background="@drawable/nav_btn_red_bg"
+            android:text="删除"
+            android:textColor="#FFFFFF"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:minWidth="0dp"
+            android:minHeight="0dp"
+            android:paddingStart="0dp"
+            android:paddingEnd="0dp" />
+    </LinearLayout>
+</LinearLayout>

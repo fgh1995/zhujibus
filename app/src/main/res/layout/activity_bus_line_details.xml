@@ -1,0 +1,287 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/main_container"
+    android:orientation="vertical"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <!-- 通知栏 -->
+    <LinearLayout
+        android:id="@+id/notice_bar"
+        android:layout_marginTop="10dp"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:background="#FAD8D9"
+        android:padding="4dp">
+
+        <ImageView
+            android:id="@+id/notice_icon"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:contentDescription="@string/todo"
+            android:src="@drawable/notice_icon" />
+
+        <TextView
+            android:id="@+id/notice_text"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:textColor="#FF0000"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:text="@string/app_name" />
+    </LinearLayout>
+
+    <!-- 线路信息 -->
+    <LinearLayout
+        android:id="@+id/route_info"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="10dp">
+        <LinearLayout
+            android:id="@+id/route_info_bg"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/led_dark_bg_rounded"
+            android:gravity="center_vertical"
+            android:padding="10dp"
+            android:orientation="vertical"
+            android:layout_marginBottom="10dp">
+            <org.zjfgh.zhujibus.view.DotMatrixLinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                app:dmlDotColor="#3D1515"
+                app:dmlBgColor="#090303"
+                android:padding="4dp">
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical">
+                    <org.zjfgh.zhujibus.DotMatrixView
+                        android:id="@+id/accessibility_icon"
+                        android:layout_width="42dp"
+                        android:layout_height="42dp"
+                        app:dotMatrixPattern="accessibility"
+                        app:dotMatrixColor="#FFFFFF"
+                        android:layout_marginRight="10dp"/>
+                    <org.zjfgh.zhujibus.HorizontalScrollTextView
+                        android:id="@+id/route_number"
+                        android:layout_width="120dp"
+                        android:layout_height="wrap_content"
+                        android:gravity="center"
+                        android:text="00"
+                        android:textSize="30sp"
+                        android:textColor="#00FF00"
+                        android:textStyle="bold"
+                        app:hsTextGap="20dp"
+                        android:layout_marginRight="10dp"/>
+                    <org.zjfgh.zhujibus.DotMatrixView
+                        android:layout_width="42dp"
+                        android:layout_height="42dp"
+                        app:dotMatrixPattern="right_arrow"
+                        app:dotMatrixColor="#FF0000"/>
+                    <org.zjfgh.zhujibus.HorizontalScrollTextView
+                        android:id="@+id/end_station_name"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:textColor="#FF0000"
+                        android:textSize="30sp"
+                        app:hsTextGap="20dp"
+                        android:text="终点站名" />
+                </LinearLayout>
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="5dp"
+                    android:gravity="center_horizontal">
+                    <org.zjfgh.zhujibus.HorizontalScrollTextView
+                        android:id="@+id/tips"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textSize="30sp"
+                        android:textColor="#FFFF00"
+                        android:text="文明排队   上下有序"/>
+                </LinearLayout>
+            </org.zjfgh.zhujibus.view.DotMatrixLinearLayout>
+
+        </LinearLayout>
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+            <LinearLayout
+                android:id="@+id/next_station_info_bg"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:background="@drawable/led_dark_bg_rounded"
+                android:gravity="center_vertical"
+                android:orientation="vertical"
+                android:padding="10dp">
+                <org.zjfgh.zhujibus.view.DotMatrixLinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    app:dmlDotColor="#3D1515"
+                    app:dmlBgColor="#090303">
+                    <org.zjfgh.zhujibus.HorizontalScrollTextView
+                        android:id="@+id/next_station_info"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        app:hsGravity="center"
+                        app:hsTextColor="#FF0000"
+                        app:hsTextGap="90dp"
+                        app:hsTextSize="30sp" />
+                </org.zjfgh.zhujibus.view.DotMatrixLinearLayout>
+
+            </LinearLayout>
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:padding="10dp"
+                android:gravity="center_vertical"
+                android:background="@drawable/led_dark_bg_rounded">
+                <org.zjfgh.zhujibus.view.DotMatrixLinearLayout
+                    android:id="@+id/mode_switch"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="2dp"
+                    app:dmlDotColor="#3D1515"
+                    app:dmlBgColor="#090303">
+                    <TextView
+                        android:id="@+id/mode_tips"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="切换模式"
+                        android:layout_gravity="center_horizontal"
+                        android:textColor="#00FF00"/>
+                    <LinearLayout
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical">
+                        <TextView
+                            android:id="@+id/network_status_indicator"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="●"
+                            android:textColor="#00FF00"
+                            android:textSize="10sp" />
+                        <TextView
+                            android:id="@+id/mode_text"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="4dp"
+                            android:padding="2dp"
+                            android:textColor="#FF0000"
+                            android:textSize="14sp"
+                            android:text="网络"/>
+                    </LinearLayout>
+                </org.zjfgh.zhujibus.view.DotMatrixLinearLayout>
+            </LinearLayout>
+        </LinearLayout>
+        <!-- 时刻信息 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:layout_gravity="center_vertical"
+            android:layout_marginTop="8dp">
+
+        </LinearLayout>
+        <!-- 导航模块 -->
+        <include
+            android:id="@+id/navigation_section"
+            layout="@layout/activity_navigation"
+            android:layout_marginTop="2dp"
+            android:layout_width="match_parent"
+            android:layout_height="280dp" />
+
+        <!-- 标签容器 -->
+        <LinearLayout
+            android:id="@+id/tags_container"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="end|center_vertical"
+                android:layout_gravity="center_vertical"
+                android:layout_marginTop="2dp"
+                android:orientation="vertical">
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="end|center_vertical"
+                    android:orientation="horizontal">
+                    <TextView
+                        android:id="@+id/error_indicator"
+                        android:layout_width="18dp"
+                        android:layout_height="18dp"
+                        android:layout_marginEnd="4dp"
+                        android:background="@drawable/red_circle"
+                        android:gravity="center"
+                        android:text="!"
+                        android:textColor="@color/white"
+                        android:textSize="14sp"
+                        android:textStyle="bold"
+                        android:visibility="gone" />
+                </LinearLayout>
+                <LinearLayout
+                    android:id="@+id/gps_debug_info"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="end"
+                    android:orientation="vertical"
+                    android:visibility="visible">
+
+
+                </LinearLayout>
+            </LinearLayout>
+        </LinearLayout>
+
+        <View
+            android:id="@+id/view_"
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_margin="8dp"
+            android:background="#B8B8B8" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center">
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/rv_live_vehicles"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:clipToPadding="false" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- 站点列表 -->
+    <ScrollView
+        android:id="@+id/station_scroll_view"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_marginStart="5dp"
+        android:layout_marginEnd="5dp">
+
+        <org.zjfgh.zhujibus.BusLineView
+            android:id="@+id/bus_line_view"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="#FFFFFF" />
+    </ScrollView>
+</LinearLayout>

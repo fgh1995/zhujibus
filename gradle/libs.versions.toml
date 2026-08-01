@@ -1,0 +1,39 @@
+[versions]
+agp = "8.8.0"
+jacksonDatabind = "2.12.3"
+junit = "4.13.2"
+junitVersion = "1.1.5"
+espressoCore = "3.5.1"
+appcompat = "1.6.1"
+kotlinxCoroutinesAndroid = "1.6.4"
+material = "1.10.0"
+activity = "1.8.0"
+constraintlayout = "2.1.4"
+okhttp = "4.9.1"
+navigationFragment = "2.6.0"
+navigationUi = "2.6.0"
+pinyin4j = "2.5.1"
+amapNavi3dMap = "latest.integration"
+glide = "5.0.7"
+gridlayout = "1.0.0"
+
+[libraries]
+jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "jacksonDatabind" }
+junit = { group = "junit", name = "junit", version.ref = "junit" }
+ext-junit = { group = "androidx.test.ext", name = "junit", version.ref = "junitVersion" }
+espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espressoCore" }
+appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
+kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "kotlinxCoroutinesAndroid" }
+material = { group = "com.google.android.material", name = "material", version.ref = "material" }
+activity = { group = "androidx.activity", name = "activity", version.ref = "activity" }
+constraintlayout = { group = "androidx.constraintlayout", name = "constraintlayout", version.ref = "constraintlayout" }
+okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
+navigation-fragment = { group = "androidx.navigation", name = "navigation-fragment", version.ref = "navigationFragment" }
+navigation-ui = { group = "androidx.navigation", name = "navigation-ui", version.ref = "navigationUi" }
+pinyin4j = { module = "com.belerweb:pinyin4j", version.ref = "pinyin4j" }
+amapNavi3dmap = { group = "com.amap.api", name = "navi-3dmap", version.ref = "amapNavi3dMap" }
+glide = { module = "com.github.bumptech.glide:glide", version.ref = "glide" }
+gridlayout = { group = "androidx.gridlayout", name = "gridlayout", version.ref = "gridlayout" }
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+

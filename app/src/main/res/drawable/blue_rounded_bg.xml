@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle"> <!-- 矩形 -->
+
+    <!-- 蓝色背景 -->
+    <solid android:color="#2196F3" /> <!-- 标准蓝色，可自定义 -->
+
+    <!-- 圆角半径 -->
+    <corners android:radius="3dp" /> <!-- 圆角大小，数值越大越圆 -->
+</shape>

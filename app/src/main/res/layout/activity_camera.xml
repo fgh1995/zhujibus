@@ -1,0 +1,415 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#000000">
+
+    <!-- 预览容器 -->
+    <FrameLayout
+        android:id="@+id/preview_container"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_gravity="center">
+
+        <TextureView
+            android:id="@+id/texture_camera_preview"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:layout_gravity="center" />
+        <!-- 底部线路信息面板（叠加在预览区域内，可录制进视频） -->
+        <FrameLayout
+            android:id="@+id/pov_info_panel_container"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom"
+            android:visibility="gone">
+
+            <include layout="@layout/pov_vehicle_info_panel" />
+        </FrameLayout>
+
+        <!-- 右上角小地图容器（位置由代码动态计算，叠加在预览区域内） -->
+        <FrameLayout
+            android:id="@+id/map_container"
+            android:layout_width="80dp"
+            android:layout_height="80dp"
+            android:layout_gravity="top|end"
+            android:layout_marginTop="8dp"
+            android:layout_marginEnd="8dp"
+            android:background="@drawable/rounded_map_bg"
+            android:clipToOutline="true">
+
+            <com.amap.api.maps.TextureMapView
+                android:id="@+id/map_view_camera"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent" />
+
+            <!-- 地图状态提示 -->
+            <TextView
+                android:id="@+id/tv_map_status"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="bottom|center_horizontal"
+                android:layout_marginBottom="4dp"
+                android:text="定位中..."
+                android:textColor="#FFFFFF"
+                android:textSize="10sp"
+                android:background="#66000000"
+                android:padding="2dp" />
+        </FrameLayout>
+    </FrameLayout>
+
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:background="#70000000"
+        android:gravity="center"
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp"
+        android:orientation="horizontal">
+
+        <!-- 关闭按钮 -->
+        <TextView
+            android:id="@+id/btn_close_camera"
+            android:paddingStart="10dp"
+            android:paddingEnd="10dp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="?attr/selectableItemBackground"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:text="X"
+            android:textColor="#FFFFFF"
+            android:textSize="25sp"
+            android:padding="0dp"
+            android:lineSpacingExtra="0dp" />
+
+        <!-- 标题 -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:background="?attr/selectableItemBackground"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:text="POV拍摄"
+            android:textColor="#FFFFFF"
+            android:textSize="20sp" />
+
+    </LinearLayout>
+
+
+    <!-- 右侧控制区域 -->
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center_vertical|end"
+        android:layout_marginEnd="24dp"
+        android:orientation="vertical"
+        android:gravity="center">
+        <!-- 录制/停止按钮 -->
+        <TextView
+            android:id="@+id/btn_record_camera"
+            android:layout_width="80dp"
+            android:layout_height="80dp"
+            android:gravity="center"
+            android:text="录制"
+            android:textColor="#FFFFFF"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:background="@drawable/record_button_bg"
+            android:clickable="true"
+            android:focusable="true" />
+
+        <!-- 设置按钮 -->
+        <TextView
+            android:id="@+id/btn_settings_camera"
+            android:layout_width="60dp"
+            android:layout_height="60dp"
+            android:layout_marginTop="16dp"
+            android:gravity="center"
+            android:text="☰"
+            android:textColor="#FFFFFF"
+            android:textSize="28sp"
+            android:background="#44000000"
+            android:clickable="true"
+            android:focusable="true" />
+    </LinearLayout>
+
+    <!-- 底部菜单容器 -->
+    <FrameLayout
+        android:id="@+id/settings_panel_container"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone"
+        android:background="#55000000">
+
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom"
+            android:fillViewport="true">
+
+            <LinearLayout
+                android:id="@+id/settings_panel"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:background="#FFFFFF"
+                android:padding="16dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="录制参数"
+                        android:textColor="#333333"
+                        android:textSize="18sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/btn_close_settings"
+                        android:layout_width="48dp"
+                        android:layout_height="48dp"
+                        android:gravity="center"
+                        android:text="×"
+                        android:textColor="#333333"
+                        android:textSize="24sp"
+                        android:background="?attr/selectableItemBackground"
+                        android:clickable="true"
+                        android:focusable="true" />
+                </LinearLayout>
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginTop="8dp"
+                    android:background="#CCCCCC" />
+
+                <!-- 分辨率 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="分辨率"
+                        android:textColor="#666666"
+                        android:textSize="14sp" />
+
+                    <Spinner
+                        android:id="@+id/spinner_resolution"
+                        android:layout_width="match_parent"
+                        android:layout_height="48dp"
+                        android:layout_marginTop="8dp"
+                        android:background="#F0F0F0"
+                        android:popupBackground="#FFFFFF" />
+                </LinearLayout>
+
+                <!-- 视频码流 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:orientation="vertical">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="视频码流"
+                            android:textColor="#666666"
+                            android:textSize="14sp" />
+
+                        <TextView
+                            android:id="@+id/tv_video_bitrate_value"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:gravity="end"
+                            android:text="30 Mbps"
+                            android:textColor="#0d8dfb"
+                            android:textSize="14sp" />
+                    </LinearLayout>
+
+                    <SeekBar
+                        android:id="@+id/seekbar_video_bitrate"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:max="100"
+                        android:progress="30"
+                        android:progressDrawable="@drawable/seekbar_progress"
+                        android:thumb="@drawable/seekbar_thumb" />
+                </LinearLayout>
+
+                <!-- 音频码流 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="音频码流"
+                        android:textColor="#666666"
+                        android:textSize="14sp" />
+
+                    <Spinner
+                        android:id="@+id/spinner_audio_bitrate"
+                        android:layout_width="match_parent"
+                        android:layout_height="48dp"
+                        android:layout_marginTop="8dp"
+                        android:background="#F0F0F0"
+                        android:popupBackground="#FFFFFF" />
+                </LinearLayout>
+
+                <!-- 采样率 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="采样率"
+                        android:textColor="#666666"
+                        android:textSize="14sp" />
+
+                    <Spinner
+                        android:id="@+id/spinner_sample_rate"
+                        android:layout_width="match_parent"
+                        android:layout_height="48dp"
+                        android:layout_marginTop="8dp"
+                        android:background="#F0F0F0"
+                        android:popupBackground="#FFFFFF" />
+                </LinearLayout>
+
+                <!-- 声道 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="声道"
+                        android:textColor="#666666"
+                        android:textSize="14sp" />
+
+                    <Spinner
+                        android:id="@+id/spinner_audio_channels"
+                        android:layout_width="match_parent"
+                        android:layout_height="48dp"
+                        android:layout_marginTop="8dp"
+                        android:background="#F0F0F0"
+                        android:popupBackground="#FFFFFF" />
+                </LinearLayout>
+
+                <!-- 显示地图选项 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="显示地图"
+                        android:textColor="#666666"
+                        android:textSize="14sp" />
+
+                    <CheckBox
+                        android:id="@+id/checkbox_show_map"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="16dp"
+                        android:checked="false" />
+                </LinearLayout>
+
+                <!-- 显示线路信息面板选项 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="显示线路信息"
+                        android:textColor="#666666"
+                        android:textSize="14sp" />
+
+                    <CheckBox
+                        android:id="@+id/checkbox_show_info_panel"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="16dp"
+                        android:checked="false" />
+                </LinearLayout>
+
+                <!-- 显示坐标信息选项 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="显示坐标信息"
+                        android:textColor="#666666"
+                        android:textSize="14sp" />
+
+                    <CheckBox
+                        android:id="@+id/checkbox_show_coordinate"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="16dp"
+                        android:checked="true" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/btn_apply_settings"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:layout_marginTop="24dp"
+                    android:layout_marginBottom="16dp"
+                    android:gravity="center"
+                    android:text="应用"
+                    android:textColor="#FFFFFF"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    android:background="#0d8dfb"
+                    android:clickable="true"
+                    android:focusable="true" />
+            </LinearLayout>
+        </ScrollView>
+    </FrameLayout>
+</FrameLayout>

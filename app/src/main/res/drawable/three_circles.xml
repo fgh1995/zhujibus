@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- 第一个圆形（黑色，顶部） -->
+    <item
+        android:width="5dp"
+        android:height="5dp"
+        android:gravity="center_horizontal">
+        <shape android:shape="oval">
+            <solid android:color="#000000" />
+        </shape>
+    </item>
+
+    <!-- 第二个圆形（灰色，居中） -->
+    <item
+        android:width="5dp"
+        android:height="5dp"
+        android:gravity="center_horizontal"
+        android:top="6dp">
+        <shape android:shape="oval">
+            <solid android:color="#808080" />
+        </shape>
+    </item>
+
+    <!-- 第三个圆形（浅灰色，底部） -->
+    <item
+        android:width="5dp"
+        android:height="5dp"
+        android:gravity="center_horizontal"
+        android:top="12dp">
+        <shape android:shape="oval">
+            <solid android:color="#BFBFBF" />
+        </shape>
+    </item>
+</layer-list>
