@@ -134,9 +134,6 @@ public class CameraActivity extends AppCompatActivity {
     private String startStationName;
     private String endStationName;
     private int direction = 1;
-    private BusApiClient busApiClient;
-    private BusApiClient.BusLineDetailResponse lineDetailResponse;
-    private BusApiClient.BusLineDirection currentLineDirection;
     private List<BusApiClient.BusLineStation> stationList = new ArrayList<>();
     private List<Coordinate> routePoints = new ArrayList<>();
 
@@ -207,7 +204,6 @@ public class CameraActivity extends AppCompatActivity {
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN);
         setContentView(R.layout.activity_camera);
         readRouteParams();
-        busApiClient = new BusApiClient();
 
         textureView = findViewById(R.id.texture_camera_preview);
         textureView.post(this::updatePreviewViewSize);
@@ -221,7 +217,7 @@ public class CameraActivity extends AppCompatActivity {
         startDoorAnimation();
         initMapView(savedInstanceState);
         initPovDetector();
-        loadRouteInfo();
+        loadRouteInfoFromDetail();
 
         List<String> permissions = new ArrayList<>();
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
@@ -352,9 +348,6 @@ public class CameraActivity extends AppCompatActivity {
             povDetector.destroy();
             povDetector = null;
         }
-        if (busApiClient != null) {
-            busApiClient.cancelAllRequests();
-        }
         super.onDestroy();
     }
 
@@ -370,77 +363,31 @@ public class CameraActivity extends AppCompatActivity {
         direction = intent.getIntExtra("direction", 1);
     }
 
-    private void loadRouteInfo() {
-        if (lineName == null || lineName.isEmpty() || busApiClient == null) {
-            Log.w(TAG, "缺少线路名称，POV路线信息不加载");
+    private void loadRouteInfoFromDetail() {
+        // 直接复用详情页当前方向的数据，不再通过 lineId 重新请求接口
+        BusApiClient.BusLineDirection dir = BusLineDetailActivity.getCurrentLineDirection();
+        if (dir == null) {
+            Log.w(TAG, "详情页方向数据为空，POV线路信息加载失败");
             return;
         }
-        busApiClient.queryBusLineDetail(lineName, 1, new BusApiClient.ApiCallback<>() {
-            @Override
-            public void onSuccess(BusApiClient.BusLineDetailResponse response) {
-                lineDetailResponse = response;
-                selectCurrentDirection();
-                runOnUiThread(() -> {
-                    updateInfoPanelData();
-                    drawBusLineRoute();
-                    updateDetectorRouteData();
-                });
-            }
-
-            @Override
-            public void onError(BusApiClient.BusApiException e) {
-                Log.e(TAG, "POV线路信息加载失败", e);
-            }
-        });
-    }
-
-    private void selectCurrentDirection() {
-        if (lineDetailResponse == null || lineDetailResponse.data == null) return;
-        BusApiClient.BusLineDirection selected = null;
-        if (lineId != null) {
-            if (lineDetailResponse.data.up != null && lineId.equals(lineDetailResponse.data.up.id)) {
-                selected = lineDetailResponse.data.up;
-                direction = 1;
-            } else if (lineDetailResponse.data.down != null && lineId.equals(lineDetailResponse.data.down.id)) {
-                selected = lineDetailResponse.data.down;
-                direction = 2;
-            }
-        }
-        if (selected == null && startStationName != null && endStationName != null) {
-            if (lineDetailResponse.data.up != null
-                    && startStationName.equals(lineDetailResponse.data.up.startStation)
-                    && endStationName.equals(lineDetailResponse.data.up.endStation)) {
-                selected = lineDetailResponse.data.up;
-                direction = 1;
-            } else if (lineDetailResponse.data.down != null
-                    && startStationName.equals(lineDetailResponse.data.down.startStation)
-                    && endStationName.equals(lineDetailResponse.data.down.endStation)) {
-                selected = lineDetailResponse.data.down;
-                direction = 2;
-            }
-        }
-        if (selected == null) {
-            selected = direction == 2 ? lineDetailResponse.data.down : lineDetailResponse.data.up;
-        }
-        if (selected == null) {
-            selected = lineDetailResponse.data.up != null ? lineDetailResponse.data.up : lineDetailResponse.data.down;
-        }
-        currentLineDirection = selected;
-        if (selected == null) return;
-        lineId = selected.id;
-        startStationName = selected.startStation;
-        endStationName = selected.endStation;
+        lineName = BusLineDetailActivity.getCurrentLineName();
+        lineId = dir.id;
+        startStationName = dir.startStation;
+        endStationName = dir.endStation;
         stationList.clear();
-        if (selected.stationList != null) {
-            stationList.addAll(selected.stationList);
+        if (dir.stationList != null) {
+            stationList.addAll(dir.stationList);
         }
         routePoints.clear();
-        if (selected.geometry != null && !selected.geometry.isEmpty()) {
-            List<Coordinate> parsed = RouteGeometryUtils.parseGeometry(selected.geometry);
+        if (dir.geometry != null && !dir.geometry.isEmpty()) {
+            List<Coordinate> parsed = RouteGeometryUtils.parseGeometry(dir.geometry);
             if (parsed != null) {
                 routePoints.addAll(parsed);
             }
         }
+        updateInfoPanelData();
+        drawBusLineRoute();
+        updateDetectorRouteData();
     }
 
     private void updateDetectorRouteData() {
@@ -1646,7 +1593,8 @@ public class CameraActivity extends AppCompatActivity {
                             }
 
                             Log.d(TAG, "AmapNavigationView初始化完成（GPS模式）");
-                            drawBusLineRoute();
+                            // ⭐ 地图加载完成后再绘制路线，避免在 onMapLoaded 前 addPolyline 不生效导致路线迟迟不显示
+                            navigationView.setOnMapReadyCallback(CameraActivity.this::drawBusLineRoute);
                         } catch (Throwable t) {
                             Log.e(TAG, "AmapNavigationView初始化失败: " + t.getMessage(), t);
                         }

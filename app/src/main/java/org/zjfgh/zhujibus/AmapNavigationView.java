@@ -225,6 +225,10 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
     // ---- 路线点（用于车辆 marker 的 snap-to-road 平滑动画） ----
     private List<LatLng> routePoints = new ArrayList<>();
 
+    // ⭐ 地图加载完成标志与就绪回调（避免在 onMapLoaded 前 addPolyline 不生效，导致路线绘制延迟）
+    private boolean isMapLoaded = false;
+    private Runnable onMapReadyCallback;
+
     /**
      * 罗盘模式下的目标相机参数（完全俯视 + 适中缩放）
      * 使用 static final 防止在 onLocationChanged 中被重置
@@ -282,6 +286,18 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
     }
 
     /**
+     * ⭐ 设置地图加载完成回调（供外部在地图真正就绪后绘制路线）
+     * 若地图已加载完成，回调立即执行；否则在 onMapLoaded 时执行。
+     * 避免在 onMapLoaded 前调用 aMap.addPolyline 不生效，导致路线绘制延迟。
+     */
+    public void setOnMapReadyCallback(Runnable r) {
+        this.onMapReadyCallback = r;
+        if (isMapLoaded && r != null) {
+            r.run();
+        }
+    }
+
+    /**
      * 高德地图隐私协议初始化（必须在任何地图/定位/导航 API 之前调用）
      */
     private void initPrivacy() {
@@ -335,7 +351,11 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
             try {
                 aMap.setOnMapLoadedListener(() -> {
                     Log.d(TAG, "[MAP] onMapLoaded —— 地图瓦片加载成功，开始应用导航视角");
+                    isMapLoaded = true;
                     applyNavigationCameraPerspective();
+                    if (onMapReadyCallback != null) {
+                        onMapReadyCallback.run();
+                    }
                 });
                 aMap.setOnMapClickListener(latLng -> Log.v(TAG, "[MAP] click at " + latLng));
 

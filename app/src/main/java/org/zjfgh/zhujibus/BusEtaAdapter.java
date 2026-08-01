@@ -38,7 +38,6 @@ public class BusEtaAdapter extends RecyclerView.Adapter<BusEtaAdapter.BusEtaView
     public void onBindViewHolder(@NonNull BusEtaViewHolder holder, int position) {
         BusEtaItem item = etaItems.get(position);
         holder.bind(item);
-        holder.view_.setVisibility(View.GONE);
         holder.itemView.setOnClickListener(v -> {
             if (listener != null) {
                 listener.onItemClick(item);
@@ -58,7 +57,6 @@ public class BusEtaAdapter extends RecyclerView.Adapter<BusEtaAdapter.BusEtaView
         private final TextView tvEtaTime;
         private final TextView tvDistance;
         private final TextView tvIsArrive;
-        private final View view_;
         private final TextView tvPlateNumber;
 
         public BusEtaViewHolder(@NonNull View itemView) {
@@ -69,7 +67,6 @@ public class BusEtaAdapter extends RecyclerView.Adapter<BusEtaAdapter.BusEtaView
             ll_bus_info = itemView.findViewById(R.id.ll_bus_info);
             tvIsArrive = itemView.findViewById(R.id.tv_is_arrive);
             tvIsArrive.setVisibility(View.GONE);
-            view_ = itemView.findViewById(R.id.view_);
             tvPlateNumber = itemView.findViewById(R.id.tv_plateNumber);
         }
 
@@ -82,15 +79,18 @@ public class BusEtaAdapter extends RecyclerView.Adapter<BusEtaAdapter.BusEtaView
                     tvIsArrive.setVisibility(View.VISIBLE);
                     tvIsArrive.setText("已过站");
                 }
-
+                tvStopCount.setVisibility(View.GONE);
                 ll_bus_info.setVisibility(View.GONE);
                 return;
-            } else if (item.getStopCount() == 1) {
-                tvStopCount.setText("即将到站");
             } else {
-                tvStopCount.setText(item.getStopCount() + "站后");
+                tvIsArrive.setVisibility(View.GONE);
+                tvStopCount.setVisibility(View.VISIBLE);
+                if (item.getStopCount() == 1) {
+                    tvStopCount.setText("即将到站");
+                } else {
+                    tvStopCount.setText(item.getStopCount() + "站后");
+                }
             }
-            tvIsArrive.setVisibility(View.GONE);
             ll_bus_info.setVisibility(View.VISIBLE);
             tvEtaTime.setText("预计" + item.getEtaMinutes() + "分钟");
             String distanceDisplay;

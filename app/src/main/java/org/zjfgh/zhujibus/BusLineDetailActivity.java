@@ -258,6 +258,17 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     }
 
     /**
+     * ⭐ 获取当前方向的线路数据（供CameraActivity的POV页面直接复用，避免重新请求接口）
+     * 返回 currentDirection 对应的 BusLineDirection（含 stationList、geometry、起终点等），
+     * 数据来源与 showDirection() 完全一致，不存在换向后时序不一致问题。
+     */
+    public static BusApiClient.BusLineDirection getCurrentLineDirection() {
+        BusLineDetailActivity instance = currentInstance;
+        if (instance == null) return null;
+        return instance.getCurrentDirectionData();
+    }
+
+    /**
      * ⭐ 获取进站半径（供CameraActivity判断进出站使用）
      */
     public static double getEnterStationRadius() {
@@ -2021,6 +2032,9 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         if (!isTwoWayLine) return;
 
         currentDirection = (currentDirection == 1) ? 2 : 1;
+        // ⭐ 换向后同步更新 lineID，否则启动 CameraActivity 时 putExtra("line_id", lineID)
+        //    传的还是旧方向 id，POV 页面 selectCurrentDirection() 会用 lineId 匹配回旧方向
+        lineID = getCurrentDirectionId();
         trackedVehiclePlate = null;
         // ⭐ 换向后重置 fragment 显示状态
         lastFragmentDisplayStationOrder = -2;

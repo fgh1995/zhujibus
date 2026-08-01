@@ -1,18 +1,30 @@
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  导航主页 Activity: 左侧图标栏 + 右侧 Fragment 内容容器
+  全部用 ConstraintLayout,适配所有屏幕尺寸和 dpi
+-->
+<androidx.constraintlayout.widget.ConstraintLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/navigation_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="horizontal"
     android:background="@drawable/nav_bg"
     android:padding="6dp">
 
-    <!-- ========== 左侧图标栏 ========== -->
     <LinearLayout
-        android:layout_width="50dp"
-        android:layout_height="match_parent"
+        android:id="@+id/nav_icon_bar"
+        android:layout_width="wrap_content"
+        android:layout_height="0dp"
+        android:paddingStart="5dp"
+        android:paddingEnd="5dp"
         android:orientation="vertical"
         android:gravity="center"
         android:background="@drawable/nav_panel_bg"
-        android:paddingTop="2dp">
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent">
+
         <!-- 拍POV -->
         <LinearLayout
             android:id="@+id/nav_icon_pov"
@@ -37,7 +49,7 @@
                 android:textSize="11sp" />
         </LinearLayout>
 
-        <!-- 地图（点击切换到/退出地图设置页） -->
+        <!-- 地图(点击切换到/退出地图设置页) -->
         <LinearLayout
             android:id="@+id/nav_icon_map"
             android:layout_width="match_parent"
@@ -114,7 +126,7 @@
                 android:textSize="11sp" />
         </LinearLayout>
 
-        <!-- 消息（带红点） -->
+        <!-- 消息(带红点) -->
         <FrameLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content">
@@ -173,11 +185,19 @@
         </LinearLayout>
     </LinearLayout>
 
-    <!-- ========== 内容容器（由 Fragment 切换：主页 / 地图设置） ========== -->
+    <!-- ========== 内容容器(由 Fragment 切换:主页 / 地图设置) ========== -->
+    <!--
+      用 match_constraint 充满右侧剩余空间,startToEnd of 左侧栏,
+      endToEnd of parent,top/bottomToTop of parent(0dp + 约束 = 填满)
+    -->
     <FrameLayout
         android:id="@+id/nav_content_container"
         android:layout_width="0dp"
-        android:layout_height="match_parent"
-        android:layout_weight="1"
-        android:layout_marginStart="6dp"/>
-</LinearLayout>
+        android:layout_height="0dp"
+        android:layout_marginStart="6dp"
+        app:layout_constraintStart_toEndOf="@id/nav_icon_bar"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent" />
+
+</androidx.constraintlayout.widget.ConstraintLayout>

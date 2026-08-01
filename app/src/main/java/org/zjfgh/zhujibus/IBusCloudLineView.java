@@ -583,7 +583,7 @@ public class IBusCloudLineView extends View {
         int desiredHeight = 0;
 
         if (stations != null && !stations.isEmpty()) {
-            desiredWidth = (int) (LEFT_PADDING * 2 + (stations.size() - 1) * STATION_SPACING + 100);
+            desiredWidth = (int) (LEFT_PADDING * 2 + (stations.size() - 1) * STATION_SPACING);
             desiredHeight = (int) (TOP_PADDING + 60 + TEXT_Y_OFFSET + TEXT_SIZE * 2 + 50);
         }
 
@@ -593,7 +593,10 @@ public class IBusCloudLineView extends View {
         int heightSize = MeasureSpec.getSize(heightMeasureSpec);
 
         if (widthMode == MeasureSpec.EXACTLY) {
-            desiredWidth = Math.max(desiredWidth, widthSize);
+            // match_parent 时采用父容器宽度，超出部分通过 scrollOffset 滚动查看
+            // 不能用 Math.max(desiredWidth, widthSize)，否则内容更宽时 View 会撑开，
+            // 导致 getMaxScroll() = getContentWidth() - getWidth() = 0，无法滑动
+            desiredWidth = widthSize;
         } else if (widthMode == MeasureSpec.AT_MOST) {
             desiredWidth = Math.min(desiredWidth, widthSize);
         }
@@ -679,7 +682,7 @@ public class IBusCloudLineView extends View {
         if (stations == null || stations.isEmpty()) {
             return 0;
         }
-        return LEFT_PADDING * 2 + (stations.size() - 1) * STATION_SPACING + 100;
+        return LEFT_PADDING * 2 + (stations.size() - 1) * STATION_SPACING;
     }
 
     private void drawStation(Canvas canvas, float x, float y, BusApiClient.BusLineStation station, int index) {
