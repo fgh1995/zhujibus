@@ -14,7 +14,7 @@ android {
         versionName "1.2.42"
         //wsServerAddress = `http://zhujibus.360967.xyz/ws`
         //githubAddSpeed = `https://gh-proxy.org`
-        //remote={"has_notice":true,"notice":"推荐使用1.2.42版本拍摄POV，该版本增强了兼容性，不再支持60帧拍摄，教程请在B站搜索用户：\"oho19950813\"。本软件仅支持浙江省诸暨市公交查询，查询时需要联网，网络模式下选择站点后，即可开始播报最近车辆，GPS导航模式下，需要前往当地乘坐对应公交，或者使用第三方定位模拟方可体验。感谢您的使用，接口版权归诸暨市交通局所有。","has_update":true,"update_log":"1.移除高帧率模式，提升设备兼容性。\n2.尝试修复POV场景卡顿及死机问题。\n3.优化UI适配，支持更多屏幕尺寸。"}
+        //remote={"has_notice":true,"notice":"1.2.42版本拍摄POV小地图好像会卡住，建议不显示小地图。。。这个拍pov功能对AI来说太难了，教程请在B站搜索用户：\"oho19950813\"。本软件仅支持浙江省诸暨市公交查询，查询时需要联网，网络模式下选择站点后，即可开始播报最近车辆，GPS导航模式下，需要前往当地乘坐对应公交，或者使用第三方定位模拟方可体验。感谢您的使用，接口版权归诸暨市交通局所有。","has_update":true,"update_log":"1.移除高帧率模式，提升设备兼容性。\n2.尝试修复POV场景卡顿及死机问题。\n3.优化UI适配，支持更多屏幕尺寸。"}
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 
