@@ -10,8 +10,6 @@ import android.opengl.EGLExt;
 import android.opengl.GLES11Ext;
 import android.opengl.GLES20;
 import android.opengl.GLUtils;
-import android.os.Handler;
-import android.os.Looper;
 import android.util.Log;
 import android.view.Surface;
 
@@ -24,32 +22,36 @@ import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
- * OpenGL ES视频渲染器
- * ⭐ 用于合成摄像头画面和地图画面，输出到编码器Surface和预览Surface
- * ⭐ 使用OES外部纹理（SurfaceTexture）+ Shader渲染
+ * OpenGL ES 视频渲染器（CameraX 架构）
+ * ⭐ 双 EGL surface 输出：previewSurface（TextureView 预览）+ encoderSurface（MediaCodec 录制）
+ * ⭐ 共享同一个 EGL Context，每帧渲染两次（preview 始终，encoder 仅录制时）
+ * ⭐ 性能优化：预分配 FloatBuffer + texSubImage2D 替代每帧 texImage2D
  */
 public class GLESVideoRenderer {
     private static final String TAG = "GLESVideoRenderer";
 
-    // EGL相关
+    // EGL 相关
     private EGLDisplay eglDisplay = EGL14.EGL_NO_DISPLAY;
     private EGLContext eglContext = EGL14.EGL_NO_CONTEXT;
+    private EGLConfig eglConfig = null;
+    private EGLSurface eglPreviewSurface = EGL14.EGL_NO_SURFACE;
     private EGLSurface eglEncoderSurface = EGL14.EGL_NO_SURFACE;
 
     // 纹理相关
     private int cameraTextureId = -1;
-    private int mapTextureId = -1;
+    private int mapTexture2DId = -1;
+    private int overlayTexture2DId = -1;
     private SurfaceTexture cameraSurfaceTexture;
-    private SurfaceTexture mapSurfaceTexture;
     private long lastPresentationTimeNs = 0L;
     private final Object bitmapLock = new Object();
-    
-    // ⭐ 地图纹理（使用GL_TEXTURE_2D，支持Bitmap更新）
-    private int mapTexture2DId = -1;
-    private boolean useMapTexture2D = true;
 
-    // ⭐ 信息面板纹理（第二个2D纹理，用于POV线路信息叠加）
-    private int overlayTexture2DId = -1;
+    // ⭐ 纹理初始化跟踪（首次 texImage2D，后续 texSubImage2D）
+    private boolean mapTextureInitialized = false;
+    private boolean overlayTextureInitialized = false;
+    private int mapTextureWidth = 0;
+    private int mapTextureHeight = 0;
+    private int overlayTextureWidth = 0;
+    private int overlayTextureHeight = 0;
 
     // 渲染线程
     private RenderThread renderThread;
@@ -57,17 +59,18 @@ public class GLESVideoRenderer {
     private final Lock frameLock = new ReentrantLock();
     private final Condition frameAvailable = frameLock.newCondition();
     private boolean framePending = false;
-    
-    // ⭐ 用于等待GL资源初始化完成
+
     private CountDownLatch glInitLatch = new CountDownLatch(1);
     private volatile boolean glResourcesInitialized = false;
-    
-    // ⭐ 主线程Handler，用于在渲染线程创建SurfaceTexture后通知主线程
-    private Handler mainHandler = new Handler(Looper.getMainLooper());
 
     // 画面尺寸
     private int videoWidth = 1920;
     private int videoHeight = 1080;
+    // ⭐ 相机输出分辨率（CameraX 实际请求），用于宽高比校正
+    private int camBufferWidth = 0;
+    private int camBufferHeight = 0;
+    private volatile boolean cameraVerticesDirty = true;
+    private final float[] cameraTexMatrix = new float[16];
     private int mapWidth = 300;
     private int mapHeight = 300;
     private int mapPositionX = 1620;
@@ -80,11 +83,29 @@ public class GLESVideoRenderer {
     private int overlayPositionX = 0;
     private int overlayPositionY = 0;
 
-    // 是否启用叠加
     private boolean isMapEnabled = false;
     private boolean isOverlayEnabled = false;
 
-    // ===== Shader程序 =====
+    // ⭐ 预览 Surface（来自 TextureView）
+    private Surface previewSurface;
+
+    // ⭐ Encoder Surface 动态管理（主线程设置请求，渲染线程处理）
+    private volatile Surface pendingEncoderSurface = null;
+    private volatile boolean encoderSurfaceReleaseRequested = false;
+    private volatile boolean hasEncoderSurface = false;
+
+    // ⭐ 预分配顶点 FloatBuffer（避免每帧分配）
+    private FloatBuffer texCoordBufferCamera;
+    private FloatBuffer texCoordBufferMap;
+    private FloatBuffer mapVertexBuffer;
+    private FloatBuffer overlayVertexBuffer;
+    private FloatBuffer cameraVertexBuffer;  // ⭐ 相机顶点（宽高比校正 center-crop）
+
+    // ⭐ 最新 Bitmap（主线程设置，渲染线程读取）
+    private volatile android.graphics.Bitmap pendingMapBitmap;
+    private volatile android.graphics.Bitmap pendingOverlayBitmap;
+
+    // ===== Shader 程序 =====
     private static final String VERTEX_SHADER =
             "attribute vec4 aPosition;\n" +
             "attribute vec4 aTextureCoord;\n" +
@@ -94,7 +115,18 @@ public class GLESVideoRenderer {
             "    vTextureCoord = aTextureCoord.xy;\n" +
             "}\n";
 
-    // ⭐ OES纹理Shader（用于摄像头SurfaceTexture）
+    // ⭐ OES 专用 vertex shader：应用 SurfaceTexture.getTransformMatrix()，修正相机画面方向/翻转
+    // aTextureCoord 只传 .xy（2 分量），在此补成 vec4(s,t,0,1) 以正确参与 mat4 变换
+    private static final String VERTEX_SHADER_OES =
+            "attribute vec4 aPosition;\n" +
+            "attribute vec4 aTextureCoord;\n" +
+            "uniform mat4 uTexMatrix;\n" +
+            "varying vec2 vTextureCoord;\n" +
+            "void main() {\n" +
+            "    gl_Position = aPosition;\n" +
+            "    vTextureCoord = (uTexMatrix * vec4(aTextureCoord.xy, 0.0, 1.0)).xy;\n" +
+            "}\n";
+
     private static final String FRAGMENT_SHADER_OES =
             "#extension GL_OES_EGL_image_external : require\n" +
             "precision mediump float;\n" +
@@ -104,7 +136,6 @@ public class GLESVideoRenderer {
             "    gl_FragColor = texture2D(uTexture, vTextureCoord);\n" +
             "}\n";
 
-    // ⭐ 2D纹理Shader（用于地图Bitmap）
     private static final String FRAGMENT_SHADER_2D =
             "precision mediump float;\n" +
             "varying vec2 vTextureCoord;\n" +
@@ -132,39 +163,15 @@ public class GLESVideoRenderer {
             "    gl_FragColor = color;\n" +
             "}\n";
 
-    private int shaderProgramOES = -1;  // OES纹理程序
-    private int shaderProgram2D = -1;   // 2D纹理程序
+    private int shaderProgramOES = -1;
+    private int shaderProgram2D = -1;
     private int shaderProgramRounded2D = -1;
-    private int positionHandleOES = -1;
-    private int texCoordHandleOES = -1;
-    private int textureHandleOES = -1;
-    private int positionHandle2D = -1;
-    private int texCoordHandle2D = -1;
-    private int textureHandle2D = -1;
-    private int positionHandleRounded2D = -1;
-    private int texCoordHandleRounded2D = -1;
-    private int textureHandleRounded2D = -1;
-    private int sizeHandleRounded2D = -1;
-    private int radiusHandleRounded2D = -1;
+    private int positionHandleOES, texCoordHandleOES, textureHandleOES, texMatrixHandleOES;
+    private int positionHandle2D, texCoordHandle2D, textureHandle2D;
+    private int positionHandleRounded2D, texCoordHandleRounded2D, textureHandleRounded2D;
+    private int sizeHandleRounded2D, radiusHandleRounded2D;
 
-    // 顶点坐标（全屏）
-    private static final float[] FULL_SCREEN_VERTICES = {
-            -1.0f, -1.0f,
-             1.0f, -1.0f,
-            -1.0f,  1.0f,
-             1.0f,  1.0f
-    };
-
-    // ⭐ 纹理坐标：逆时针旋转90度（270°CW）用于摄像头
-    // 映射：screen bottom-left→tex(1,0), bottom-right→tex(0,0), top-left→tex(1,1), top-right→tex(0,1)
-    private static final float[] TEXTURE_COORDS_CCW_90 = {
-            1.0f, 0.0f,
-            0.0f, 0.0f,
-            1.0f, 1.0f,
-            0.0f, 1.0f
-    };
-
-    // 纹理坐标（标准，无旋转）
+    // 纹理坐标（标准）
     private static final float[] TEXTURE_COORDS_NORMAL = {
             0.0f, 1.0f,
             1.0f, 1.0f,
@@ -172,31 +179,37 @@ public class GLESVideoRenderer {
             1.0f, 0.0f
     };
 
-    // FloatBuffer
-    private FloatBuffer vertexBuffer;
-    private FloatBuffer texCoordBufferCamera;
-    private FloatBuffer texCoordBufferMap;
+    // ⭐ 相机画面方向校正（绕纹理中心，作用于 OES 采样坐标）
+    // 实测 SurfaceTexture.getTransformMatrix() 在本机会引入额外镜像/旋转，故不采用，
+    // 改为按以下常量显式构造纹理矩阵。ROT_DEG 正值=图像视觉 CCW。
+    // 9:16 portrait buffer 用 90（CCW90）转横屏；方向不对改 270，镜像则切对应 flip。
+    private static final int CAMERA_ROT_DEG = 0;       // 0/90/180/270，正值=图像 CCW
+    private static final boolean CAMERA_FLIP_H = false; // 水平镜像
+    private static final boolean CAMERA_FLIP_V = false; // 垂直镜像
 
     /**
-     * 初始化EGL环境
-     * @param encoderSurface 编码器输入Surface
+     * 初始化 EGL 环境
+     * @param previewSurface 预览 Surface（来自 TextureView 的 SurfaceTexture）
      */
-    public boolean initEGL(Surface encoderSurface) {
-        // 1. 获取EGL Display
+    public boolean initEGL(Surface previewSurface) {
+        if (previewSurface == null || !previewSurface.isValid()) {
+            Log.e(TAG, "previewSurface 无效");
+            return false;
+        }
+        this.previewSurface = previewSurface;
+
         eglDisplay = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY);
         if (eglDisplay == EGL14.EGL_NO_DISPLAY) {
-            Log.e(TAG, "获取EGL Display失败");
+            Log.e(TAG, "获取 EGL Display 失败");
             return false;
         }
 
-        // 2. 初始化EGL
         int[] version = new int[2];
         if (!EGL14.eglInitialize(eglDisplay, version, 0, version, 1)) {
-            Log.e(TAG, "初始化EGL失败");
+            Log.e(TAG, "初始化 EGL 失败");
             return false;
         }
 
-        // 3. 配置EGL
         int[] configAttribs = {
                 EGL14.EGL_RENDERABLE_TYPE, EGL14.EGL_OPENGL_ES2_BIT,
                 EGL14.EGL_RED_SIZE, 8,
@@ -210,54 +223,105 @@ public class GLESVideoRenderer {
         EGLConfig[] configs = new EGLConfig[1];
         int[] numConfigs = new int[1];
         if (!EGL14.eglChooseConfig(eglDisplay, configAttribs, 0, configs, 0, 1, numConfigs, 0)) {
-            Log.e(TAG, "选择EGL配置失败");
+            Log.e(TAG, "选择 EGL 配置失败");
             return false;
         }
-        EGLConfig eglConfig = configs[0];
+        eglConfig = configs[0];
 
-        // 4. 创建EGL Context
         int[] contextAttribs = {
                 EGL14.EGL_CONTEXT_CLIENT_VERSION, 2,
                 EGL14.EGL_NONE
         };
         eglContext = EGL14.eglCreateContext(eglDisplay, eglConfig, EGL14.EGL_NO_CONTEXT, contextAttribs, 0);
         if (eglContext == EGL14.EGL_NO_CONTEXT) {
-            Log.e(TAG, "创建EGL Context失败");
+            Log.e(TAG, "创建 EGL Context 失败");
             return false;
         }
 
-        // 5. 创建编码器EGL Surface
+        // 创建预览 EGL Surface
         int[] surfaceAttribs = {EGL14.EGL_NONE};
-        if (encoderSurface != null && encoderSurface.isValid()) {
-            eglEncoderSurface = EGL14.eglCreateWindowSurface(eglDisplay, eglConfig, encoderSurface, surfaceAttribs, 0);
-            if (eglEncoderSurface == EGL14.EGL_NO_SURFACE) {
-                Log.e(TAG, "创建编码器EGL Surface失败");
-                return false;
-            }
-            Log.d(TAG, "编码器EGL Surface创建成功");
+        eglPreviewSurface = EGL14.eglCreateWindowSurface(eglDisplay, eglConfig, previewSurface, surfaceAttribs, 0);
+        if (eglPreviewSurface == EGL14.EGL_NO_SURFACE) {
+            Log.e(TAG, "创建预览 EGL Surface 失败");
+            return false;
         }
 
-        // ⭐ 不再创建预览EGL Surface，预览由Camera2直接输出到TextureView
-        // 这样避免双Surface切换EGL上下文导致的预览卡死问题
-
-        Log.d(TAG, "EGL初始化成功");
+        Log.d(TAG, "EGL 初始化成功（previewSurface）");
         return true;
     }
 
     /**
-     * 初始化OpenGL ES资源（纹理、Shader）
-     * ⭐ 必须在渲染线程中调用，或者先绑定EGL Context
+     * 请求设置 Encoder Surface（录制开始时调用）
+     * 渲染线程会在下一帧创建对应的 EGL Surface
      */
+    public void setEncoderSurface(Surface encoderSurface) {
+        if (encoderSurface == null || !encoderSurface.isValid()) {
+            Log.e(TAG, "encoderSurface 无效");
+            return;
+        }
+        this.pendingEncoderSurface = encoderSurface;
+        this.encoderSurfaceReleaseRequested = false;
+    }
+
+    /**
+     * 请求清除 Encoder Surface（录制结束时调用）
+     */
+    public void clearEncoderSurface() {
+        this.encoderSurfaceReleaseRequested = true;
+        this.pendingEncoderSurface = null;
+    }
+
+    /**
+     * 渲染线程处理 Encoder Surface 请求（每帧调用）
+     */
+    private void handleEncoderSurfaceRequests() {
+        if (pendingEncoderSurface != null) {
+            Surface req = pendingEncoderSurface;
+            pendingEncoderSurface = null;
+            // 销毁旧的 encoder surface
+            if (eglEncoderSurface != EGL14.EGL_NO_SURFACE) {
+                EGL14.eglDestroySurface(eglDisplay, eglEncoderSurface);
+                eglEncoderSurface = EGL14.EGL_NO_SURFACE;
+            }
+            // 创建新的 encoder surface
+            if (req.isValid()) {
+                int[] surfaceAttribs = {EGL14.EGL_NONE};
+                eglEncoderSurface = EGL14.eglCreateWindowSurface(eglDisplay, eglConfig, req, surfaceAttribs, 0);
+                if (eglEncoderSurface != EGL14.EGL_NO_SURFACE) {
+                    hasEncoderSurface = true;
+                    Log.d(TAG, "Encoder EGL Surface 创建成功");
+                } else {
+                    Log.e(TAG, "Encoder EGL Surface 创建失败");
+                    hasEncoderSurface = false;
+                }
+            }
+        }
+        if (encoderSurfaceReleaseRequested) {
+            encoderSurfaceReleaseRequested = false;
+            if (eglEncoderSurface != EGL14.EGL_NO_SURFACE) {
+                // 切换到 preview surface 再销毁 encoder，避免销毁 current surface
+                if (eglPreviewSurface != EGL14.EGL_NO_SURFACE) {
+                    EGL14.eglMakeCurrent(eglDisplay, eglPreviewSurface, eglPreviewSurface, eglContext);
+                }
+                EGL14.eglDestroySurface(eglDisplay, eglEncoderSurface);
+                eglEncoderSurface = EGL14.EGL_NO_SURFACE;
+            }
+            hasEncoderSurface = false;
+            Log.d(TAG, "Encoder EGL Surface 已销毁");
+        }
+    }
+
     public boolean initGLResources() {
-        // 创建FloatBuffer
-        vertexBuffer = createFloatBuffer(FULL_SCREEN_VERTICES);
-        // ⭐ 摄像头纹理坐标：使用标准坐标（不旋转）
-        // 预览由Camera2直接输出到TextureView（已正确旋转）
-        // GLES录制也由Camera2输出，设备可能已自动旋转
         texCoordBufferCamera = createFloatBuffer(TEXTURE_COORDS_NORMAL);
         texCoordBufferMap = createFloatBuffer(TEXTURE_COORDS_NORMAL);
+        // ⭐ 预分配顶点缓冲（避免每帧分配）
+        mapVertexBuffer = createFloatBuffer(new float[8]);
+        overlayVertexBuffer = createFloatBuffer(new float[8]);
+        cameraVertexBuffer = createFloatBuffer(new float[8]);
+        updateCameraVertices(); // 初始化相机顶点（camBuffer 未知时退化为全屏）
+        buildCameraTexMatrix(); // 构造相机方向校正矩阵（旋转+翻转）
 
-        // ⭐ 创建摄像头纹理（OES外部纹理）
+        // 摄像头 OES 纹理
         int[] textures = new int[1];
         GLES20.glGenTextures(1, textures, 0);
         cameraTextureId = textures[0];
@@ -267,7 +331,7 @@ public class GLESVideoRenderer {
         GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE);
         GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE);
 
-        // ⭐ 创建地图2D纹理（用于Bitmap更新）
+        // 地图 2D 纹理
         GLES20.glGenTextures(1, textures, 0);
         mapTexture2DId = textures[0];
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, mapTexture2DId);
@@ -276,7 +340,7 @@ public class GLESVideoRenderer {
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE);
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE);
 
-        // ⭐ 创建信息面板2D纹理（用于POV线路信息叠加）
+        // 信息面板 2D 纹理
         GLES20.glGenTextures(1, textures, 0);
         overlayTexture2DId = textures[0];
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, overlayTexture2DId);
@@ -285,44 +349,32 @@ public class GLESVideoRenderer {
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE);
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE);
 
-        // ⭐ 创建OES纹理Shader程序（用于摄像头）
-        shaderProgramOES = createShaderProgram(VERTEX_SHADER, FRAGMENT_SHADER_OES);
-        if (shaderProgramOES < 0) {
-            Log.e(TAG, "创建OES Shader程序失败");
-            return false;
-        }
+        // Shader 程序
+        shaderProgramOES = createShaderProgram(VERTEX_SHADER_OES, FRAGMENT_SHADER_OES);
+        if (shaderProgramOES < 0) return false;
         positionHandleOES = GLES20.glGetAttribLocation(shaderProgramOES, "aPosition");
         texCoordHandleOES = GLES20.glGetAttribLocation(shaderProgramOES, "aTextureCoord");
         textureHandleOES = GLES20.glGetUniformLocation(shaderProgramOES, "uTexture");
+        texMatrixHandleOES = GLES20.glGetUniformLocation(shaderProgramOES, "uTexMatrix");
 
-        // ⭐ 创建2D纹理Shader程序（用于地图）
         shaderProgram2D = createShaderProgram(VERTEX_SHADER, FRAGMENT_SHADER_2D);
-        if (shaderProgram2D < 0) {
-            Log.e(TAG, "创建2D Shader程序失败");
-            return false;
-        }
+        if (shaderProgram2D < 0) return false;
         positionHandle2D = GLES20.glGetAttribLocation(shaderProgram2D, "aPosition");
         texCoordHandle2D = GLES20.glGetAttribLocation(shaderProgram2D, "aTextureCoord");
         textureHandle2D = GLES20.glGetUniformLocation(shaderProgram2D, "uTexture");
 
         shaderProgramRounded2D = createShaderProgram(VERTEX_SHADER, FRAGMENT_SHADER_2D_ROUNDED);
-        if (shaderProgramRounded2D < 0) {
-            Log.e(TAG, "创建圆角2D Shader程序失败");
-            return false;
-        }
+        if (shaderProgramRounded2D < 0) return false;
         positionHandleRounded2D = GLES20.glGetAttribLocation(shaderProgramRounded2D, "aPosition");
         texCoordHandleRounded2D = GLES20.glGetAttribLocation(shaderProgramRounded2D, "aTextureCoord");
         textureHandleRounded2D = GLES20.glGetUniformLocation(shaderProgramRounded2D, "uTexture");
         sizeHandleRounded2D = GLES20.glGetUniformLocation(shaderProgramRounded2D, "uSize");
         radiusHandleRounded2D = GLES20.glGetUniformLocation(shaderProgramRounded2D, "uRadius");
 
-        Log.d(TAG, "OpenGL ES资源初始化成功: cameraTex=" + cameraTextureId + ", map2DTex=" + mapTexture2DId);
+        Log.d(TAG, "GL 资源初始化成功: cameraTex=" + cameraTextureId + ", map2DTex=" + mapTexture2DId);
         return true;
     }
 
-    /**
-     * 创建Shader程序
-     */
     private int createShaderProgram(String vertexSource, String fragmentSource) {
         int vertexShader = GLES20.glCreateShader(GLES20.GL_VERTEX_SHADER);
         GLES20.glShaderSource(vertexShader, vertexSource);
@@ -331,7 +383,7 @@ public class GLESVideoRenderer {
         int[] compiled = new int[1];
         GLES20.glGetShaderiv(vertexShader, GLES20.GL_COMPILE_STATUS, compiled, 0);
         if (compiled[0] == 0) {
-            Log.e(TAG, "编译顶点Shader失败: " + GLES20.glGetShaderInfoLog(vertexShader));
+            Log.e(TAG, "编译顶点 Shader 失败: " + GLES20.glGetShaderInfoLog(vertexShader));
             GLES20.glDeleteShader(vertexShader);
             return -1;
         }
@@ -342,7 +394,7 @@ public class GLESVideoRenderer {
 
         GLES20.glGetShaderiv(fragmentShader, GLES20.GL_COMPILE_STATUS, compiled, 0);
         if (compiled[0] == 0) {
-            Log.e(TAG, "编译片段Shader失败: " + GLES20.glGetShaderInfoLog(fragmentShader));
+            Log.e(TAG, "编译片段 Shader 失败: " + GLES20.glGetShaderInfoLog(fragmentShader));
             GLES20.glDeleteShader(vertexShader);
             GLES20.glDeleteShader(fragmentShader);
             return -1;
@@ -356,7 +408,7 @@ public class GLESVideoRenderer {
         int[] linked = new int[1];
         GLES20.glGetProgramiv(program, GLES20.GL_LINK_STATUS, linked, 0);
         if (linked[0] == 0) {
-            Log.e(TAG, "链接Shader程序失败: " + GLES20.glGetProgramInfoLog(program));
+            Log.e(TAG, "链接 Shader 程序失败: " + GLES20.glGetProgramInfoLog(program));
             GLES20.glDeleteShader(vertexShader);
             GLES20.glDeleteShader(fragmentShader);
             GLES20.glDeleteProgram(program);
@@ -365,76 +417,41 @@ public class GLESVideoRenderer {
 
         GLES20.glDeleteShader(vertexShader);
         GLES20.glDeleteShader(fragmentShader);
-
         return program;
     }
 
-    /**
-     * 获取摄像头SurfaceTexture
-     * ⭐ 必须在startRendering()之后调用，等待GL资源初始化完成
-     * ⭐ SurfaceTexture已经在渲染线程中创建，这里只是返回引用
-     */
     public SurfaceTexture getCameraSurfaceTexture() {
-        // ⭐ 等待GL资源初始化完成
         try {
             glInitLatch.await();
         } catch (InterruptedException e) {
-            Log.e(TAG, "等待GL初始化被中断");
+            Log.e(TAG, "等待 GL 初始化被中断");
             return null;
         }
-
         if (!glResourcesInitialized) {
-            Log.e(TAG, "GL资源未初始化成功");
+            Log.e(TAG, "GL 资源未初始化");
             return null;
         }
-
         return cameraSurfaceTexture;
     }
 
-    /**
-     * 创建地图SurfaceTexture
-     */
-    public SurfaceTexture createMapSurfaceTexture() {
-        if (!glResourcesInitialized) {
-            Log.e(TAG, "GL资源未初始化");
-            return null;
-        }
-
-        mapSurfaceTexture = new SurfaceTexture(mapTextureId);
-        mapSurfaceTexture.setDefaultBufferSize(mapWidth, mapHeight);
-        Log.d(TAG, "地图SurfaceTexture创建成功: size=" + mapWidth + "x" + mapHeight);
-        return mapSurfaceTexture;
-    }
-
-    /**
-     * 等待GL资源初始化完成
-     */
     public boolean waitForGLInit() {
         try {
             glInitLatch.await();
             return glResourcesInitialized;
         } catch (InterruptedException e) {
-            Log.e(TAG, "等待GL初始化被中断");
+            Log.e(TAG, "等待 GL 初始化被中断");
             return false;
         }
     }
 
-    /**
-     * 启动渲染线程
-     */
     public void startRendering() {
-        if (renderThread != null && isRunning) {
-            return;
-        }
+        if (renderThread != null && isRunning) return;
         isRunning = true;
         renderThread = new RenderThread();
         renderThread.start();
         Log.d(TAG, "渲染线程已启动");
     }
 
-    /**
-     * 停止渲染线程
-     */
     public void stopRendering() {
         isRunning = false;
         if (renderThread != null) {
@@ -448,16 +465,13 @@ public class GLESVideoRenderer {
             try {
                 renderThread.join();
             } catch (InterruptedException e) {
-                Log.e(TAG, "渲染线程join失败", e);
+                Log.e(TAG, "渲染线程 join 失败", e);
             }
             renderThread = null;
         }
         Log.d(TAG, "渲染线程已停止");
     }
 
-    /**
-     * 新帧可用回调（由SurfaceTexture调用）
-     */
     public void onFrameAvailable() {
         frameLock.lock();
         try {
@@ -474,42 +488,31 @@ public class GLESVideoRenderer {
     private class RenderThread extends Thread {
         @Override
         public void run() {
-            // ⭐ 在渲染线程开始时绑定EGL Context
-            if (!EGL14.eglMakeCurrent(eglDisplay, eglEncoderSurface, eglEncoderSurface, eglContext)) {
-                Log.e(TAG, "渲染线程绑定EGL Context失败");
-                glInitLatch.countDown();  // 即使失败也要通知
+            // 绑定 EGL Context 到 preview surface
+            if (!EGL14.eglMakeCurrent(eglDisplay, eglPreviewSurface, eglPreviewSurface, eglContext)) {
+                Log.e(TAG, "渲染线程绑定 EGL Context 到 preview surface 失败");
+                glInitLatch.countDown();
                 return;
             }
 
-            // ⭐ 初始化GL资源（必须在绑定Context后）
             if (!initGLResources()) {
-                Log.e(TAG, "渲染线程GL资源初始化失败");
-                glInitLatch.countDown();  // 即使失败也要通知
+                Log.e(TAG, "渲染线程 GL 资源初始化失败");
+                glInitLatch.countDown();
                 return;
             }
-
-            // ⭐ GL资源初始化完成
             glResourcesInitialized = true;
-            Log.d(TAG, "GL资源初始化完成，纹理已创建: cameraTex=" + cameraTextureId);
+            Log.d(TAG, "GL 资源初始化完成: cameraTex=" + cameraTextureId);
 
-            // ⭐ 在渲染线程中创建SurfaceTexture（必须在EGL Context的线程中）
+            // 创建摄像头 SurfaceTexture（必须在 EGL Context 所在线程）
             cameraSurfaceTexture = new SurfaceTexture(cameraTextureId);
             cameraSurfaceTexture.setDefaultBufferSize(videoWidth, videoHeight);
-            cameraSurfaceTexture.setOnFrameAvailableListener(new SurfaceTexture.OnFrameAvailableListener() {
-                @Override
-                public void onFrameAvailable(SurfaceTexture surfaceTexture) {
-                    GLESVideoRenderer.this.onFrameAvailable();
-                }
-            });
-            Log.d(TAG, "SurfaceTexture在渲染线程创建成功: texId=" + cameraTextureId);
+            cameraSurfaceTexture.setOnFrameAvailableListener(st -> GLESVideoRenderer.this.onFrameAvailable());
+            Log.d(TAG, "camera SurfaceTexture 创建成功: texId=" + cameraTextureId);
 
-            // ⭐ SurfaceTexture创建完成后才通知主线程
             glInitLatch.countDown();
-
             Log.d(TAG, "渲染线程进入渲染循环");
 
             while (isRunning) {
-                // ⭐ 等待新帧可用
                 frameLock.lock();
                 try {
                     while (isRunning && !framePending) {
@@ -524,23 +527,18 @@ public class GLESVideoRenderer {
 
                 if (!isRunning) break;
 
-                // ⭐ 渲染一帧
                 try {
                     renderFrameInternal();
                 } catch (Exception e) {
                     Log.e(TAG, "渲染出错", e);
                 }
             }
-
             Log.d(TAG, "渲染线程退出");
         }
 
-        /**
-         * 内部渲染方法
-         */
         private void renderFrameInternal() {
-            long presentationTimeNs = System.nanoTime();
-            // ⭐ 更新摄像头纹理
+            long frameStartNs = System.nanoTime();
+            long presentationTimeNs = frameStartNs;
             if (cameraSurfaceTexture != null) {
                 cameraSurfaceTexture.updateTexImage();
                 long cameraTimestampNs = cameraSurfaceTexture.getTimestamp();
@@ -553,7 +551,10 @@ public class GLESVideoRenderer {
             }
             lastPresentationTimeNs = presentationTimeNs;
 
-            // ⭐ 在渲染线程中更新地图2D纹理（GL操作必须在拥有EGL Context的线程）
+            // 处理 encoder surface 请求
+            handleEncoderSurfaceRequests();
+
+            // 取出最新的 bitmap
             android.graphics.Bitmap mapBmp = null;
             android.graphics.Bitmap overlayBmp = null;
             synchronized (bitmapLock) {
@@ -562,165 +563,161 @@ public class GLESVideoRenderer {
                 overlayBmp = pendingOverlayBitmap;
                 pendingOverlayBitmap = null;
             }
-            if (isMapEnabled && mapBmp != null) {
+
+            // 更新地图纹理（首次 texImage2D，后续 texSubImage2D）
+            if (isMapEnabled && mapBmp != null && !mapBmp.isRecycled()) {
                 try {
-                    if (!mapBmp.isRecycled()) {
-                        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, mapTexture2DId);
+                    GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, mapTexture2DId);
+                    if (!mapTextureInitialized
+                            || mapTextureWidth != mapBmp.getWidth()
+                            || mapTextureHeight != mapBmp.getHeight()) {
                         GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, mapBmp, 0);
+                        mapTextureInitialized = true;
+                        mapTextureWidth = mapBmp.getWidth();
+                        mapTextureHeight = mapBmp.getHeight();
+                    } else {
+                        GLUtils.texSubImage2D(GLES20.GL_TEXTURE_2D, 0, 0, 0, mapBmp);
                     }
                 } finally {
                     if (!mapBmp.isRecycled()) mapBmp.recycle();
                 }
             }
 
-            // ⭐ 更新信息面板2D纹理
-            if (isOverlayEnabled && overlayBmp != null) {
+            // 更新信息面板纹理
+            if (isOverlayEnabled && overlayBmp != null && !overlayBmp.isRecycled()) {
                 try {
-                    if (!overlayBmp.isRecycled()) {
-                        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, overlayTexture2DId);
+                    GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, overlayTexture2DId);
+                    if (!overlayTextureInitialized
+                            || overlayTextureWidth != overlayBmp.getWidth()
+                            || overlayTextureHeight != overlayBmp.getHeight()) {
                         GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, overlayBmp, 0);
+                        overlayTextureInitialized = true;
+                        overlayTextureWidth = overlayBmp.getWidth();
+                        overlayTextureHeight = overlayBmp.getHeight();
+                    } else {
+                        GLUtils.texSubImage2D(GLES20.GL_TEXTURE_2D, 0, 0, 0, overlayBmp);
                     }
                 } finally {
                     if (!overlayBmp.isRecycled()) overlayBmp.recycle();
                 }
             }
 
-            // ===== 渲染到编码器Surface =====
-            if (eglEncoderSurface != EGL14.EGL_NO_SURFACE) {
+            // ===== 渲染到 preview surface（始终）=====
+            if (eglPreviewSurface != EGL14.EGL_NO_SURFACE) {
+                EGL14.eglMakeCurrent(eglDisplay, eglPreviewSurface, eglPreviewSurface, eglContext);
+                renderScene(videoWidth, videoHeight);
+                EGL14.eglSwapBuffers(eglDisplay, eglPreviewSurface);
+            }
+
+            // ===== 渲染到 encoder surface（仅录制时）=====
+            if (hasEncoderSurface && eglEncoderSurface != EGL14.EGL_NO_SURFACE) {
                 EGL14.eglMakeCurrent(eglDisplay, eglEncoderSurface, eglEncoderSurface, eglContext);
-
-                GLES20.glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-                GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
-                GLES20.glViewport(0, 0, videoWidth, videoHeight);
-
-                // ⭐ 开启Alpha混合（用于叠加半透明纹理）
-                GLES20.glEnable(GLES20.GL_BLEND);
-                GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA);
-
-                // ⭐ 渲染摄像头画面（全屏，使用OES纹理）
-                drawTextureOES(cameraTextureId, vertexBuffer, texCoordBufferCamera);
-
-                // ⭐ 渲染信息面板叠加（顶部，使用2D纹理，在地图下层）
-                if (isOverlayEnabled && overlayTexture2DId >= 0) {
-                    float oLeft = (float) overlayPositionX / videoWidth * 2.0f - 1.0f;
-                    float oRight = (float) (overlayPositionX + overlayWidth) / videoWidth * 2.0f - 1.0f;
-                    float oTop = 1.0f - (float) overlayPositionY / videoHeight * 2.0f;
-                    float oBottom = 1.0f - (float) (overlayPositionY + overlayHeight) / videoHeight * 2.0f;
-
-                    float[] overlayVertices = {
-                            oLeft, oBottom,
-                            oRight, oBottom,
-                            oLeft, oTop,
-                            oRight, oTop
-                    };
-                    FloatBuffer overlayVertexBuffer = createFloatBuffer(overlayVertices);
-                    drawTexture2D(overlayTexture2DId, overlayVertexBuffer, texCoordBufferMap);
-                }
-
-                // ⭐ 渲染地图画面（右上角，使用2D纹理，在信息面板上层）
-                if (isMapEnabled && mapTexture2DId >= 0) {
-                    float mapLeft = (float) mapPositionX / videoWidth * 2.0f - 1.0f;
-                    float mapRight = (float) (mapPositionX + mapWidth) / videoWidth * 2.0f - 1.0f;
-                    float mapTop = 1.0f - (float) mapPositionY / videoHeight * 2.0f;
-                    float mapBottom = 1.0f - (float) (mapPositionY + mapHeight) / videoHeight * 2.0f;
-
-                    float[] mapVertices = {
-                            mapLeft, mapBottom,
-                            mapRight, mapBottom,
-                            mapLeft, mapTop,
-                            mapRight, mapTop
-                    };
-                    FloatBuffer mapVertexBuffer = createFloatBuffer(mapVertices);
-                    drawTextureRounded2D(mapTexture2DId, mapVertexBuffer, texCoordBufferMap, mapWidth, mapHeight, mapCornerRadius);
-                }
-
-                GLES20.glDisable(GLES20.GL_BLEND);
-
+                renderScene(videoWidth, videoHeight);
                 EGLExt.eglPresentationTimeANDROID(eglDisplay, eglEncoderSurface, presentationTimeNs);
                 EGL14.eglSwapBuffers(eglDisplay, eglEncoderSurface);
             }
-
-            // ⭐ 不再渲染到预览Surface（预览由Camera2直接输出到TextureView）
         }
 
         /**
-         * 绘制OES纹理（摄像头）
+         * 渲染完整场景到当前绑定的 EGL surface
          */
+        private void renderScene(int width, int height) {
+            GLES20.glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
+            GLES20.glViewport(0, 0, width, height);
+            GLES20.glEnable(GLES20.GL_BLEND);
+            GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA);
+
+            // 摄像头画面（OES，应用显式旋转/翻转矩阵 + 宽高比校正 center-crop）
+            if (cameraVerticesDirty) {
+                updateCameraVertices();
+                cameraVerticesDirty = false;
+            }
+            drawTextureOES(cameraTextureId, cameraVertexBuffer, texCoordBufferCamera);
+
+            // 信息面板叠加
+            if (isOverlayEnabled && overlayTexture2DId >= 0 && overlayTextureInitialized) {
+                float oLeft = (float) overlayPositionX / width * 2.0f - 1.0f;
+                float oRight = (float) (overlayPositionX + overlayWidth) / width * 2.0f - 1.0f;
+                float oTop = 1.0f - (float) overlayPositionY / height * 2.0f;
+                float oBottom = 1.0f - (float) (overlayPositionY + overlayHeight) / height * 2.0f;
+                float[] overlayVertices = {
+                        oLeft, oBottom,
+                        oRight, oBottom,
+                        oLeft, oTop,
+                        oRight, oTop
+                };
+                updateFloatBuffer(overlayVertexBuffer, overlayVertices);
+                drawTexture2D(overlayTexture2DId, overlayVertexBuffer, texCoordBufferMap);
+            }
+
+            // 地图叠加（圆角）
+            if (isMapEnabled && mapTexture2DId >= 0 && mapTextureInitialized) {
+                float mapLeft = (float) mapPositionX / width * 2.0f - 1.0f;
+                float mapRight = (float) (mapPositionX + mapWidth) / width * 2.0f - 1.0f;
+                float mapTop = 1.0f - (float) mapPositionY / height * 2.0f;
+                float mapBottom = 1.0f - (float) (mapPositionY + mapHeight) / height * 2.0f;
+                float[] mapVertices = {
+                        mapLeft, mapBottom,
+                        mapRight, mapBottom,
+                        mapLeft, mapTop,
+                        mapRight, mapTop
+                };
+                updateFloatBuffer(mapVertexBuffer, mapVertices);
+                drawTextureRounded2D(mapTexture2DId, mapVertexBuffer, texCoordBufferMap,
+                        mapWidth, mapHeight, mapCornerRadius);
+            }
+
+            GLES20.glDisable(GLES20.GL_BLEND);
+        }
+
         private void drawTextureOES(int textureId, FloatBuffer vertices, FloatBuffer texCoords) {
             GLES20.glUseProgram(shaderProgramOES);
-
-            // 绑定OES纹理
             GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
             GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, textureId);
             GLES20.glUniform1i(textureHandleOES, 0);
-
-            // 设置顶点坐标
+            GLES20.glUniformMatrix4fv(texMatrixHandleOES, 1, false, cameraTexMatrix, 0);
             GLES20.glEnableVertexAttribArray(positionHandleOES);
             GLES20.glVertexAttribPointer(positionHandleOES, 2, GLES20.GL_FLOAT, false, 8, vertices);
-
-            // 设置纹理坐标
             GLES20.glEnableVertexAttribArray(texCoordHandleOES);
             GLES20.glVertexAttribPointer(texCoordHandleOES, 2, GLES20.GL_FLOAT, false, 8, texCoords);
-
-            // 绘制
             GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4);
-
-            // 清理
             GLES20.glDisableVertexAttribArray(positionHandleOES);
             GLES20.glDisableVertexAttribArray(texCoordHandleOES);
         }
 
-        /**
-         * 绘制2D纹理（地图）
-         */
         private void drawTexture2D(int textureId, FloatBuffer vertices, FloatBuffer texCoords) {
             GLES20.glUseProgram(shaderProgram2D);
-
-            // 绑定2D纹理
             GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureId);
             GLES20.glUniform1i(textureHandle2D, 0);
-
-            // 设置顶点坐标
             GLES20.glEnableVertexAttribArray(positionHandle2D);
             GLES20.glVertexAttribPointer(positionHandle2D, 2, GLES20.GL_FLOAT, false, 8, vertices);
-
-            // 设置纹理坐标
             GLES20.glEnableVertexAttribArray(texCoordHandle2D);
             GLES20.glVertexAttribPointer(texCoordHandle2D, 2, GLES20.GL_FLOAT, false, 8, texCoords);
-
-            // 绘制
             GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4);
-
-            // 清理
             GLES20.glDisableVertexAttribArray(positionHandle2D);
             GLES20.glDisableVertexAttribArray(texCoordHandle2D);
         }
 
         private void drawTextureRounded2D(int textureId, FloatBuffer vertices, FloatBuffer texCoords,
-                                          float width, float height, float radius) {
+                                          float w, float h, float radius) {
             GLES20.glUseProgram(shaderProgramRounded2D);
             GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureId);
             GLES20.glUniform1i(textureHandleRounded2D, 0);
-            GLES20.glUniform2f(sizeHandleRounded2D, width, height);
+            GLES20.glUniform2f(sizeHandleRounded2D, w, h);
             GLES20.glUniform1f(radiusHandleRounded2D, radius);
-
             GLES20.glEnableVertexAttribArray(positionHandleRounded2D);
             GLES20.glVertexAttribPointer(positionHandleRounded2D, 2, GLES20.GL_FLOAT, false, 8, vertices);
             GLES20.glEnableVertexAttribArray(texCoordHandleRounded2D);
             GLES20.glVertexAttribPointer(texCoordHandleRounded2D, 2, GLES20.GL_FLOAT, false, 8, texCoords);
-
             GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4);
-
             GLES20.glDisableVertexAttribArray(positionHandleRounded2D);
             GLES20.glDisableVertexAttribArray(texCoordHandleRounded2D);
         }
     }
 
-    /**
-     * 创建FloatBuffer
-     */
     private FloatBuffer createFloatBuffer(float[] array) {
         ByteBuffer bb = ByteBuffer.allocateDirect(array.length * 4);
         bb.order(ByteOrder.nativeOrder());
@@ -728,19 +725,66 @@ public class GLESVideoRenderer {
         fb.put(array);
         fb.position(0);
         return fb;
-	}
+    }
 
-	// ⭐ 最新地图Bitmap（由主线程设置，由渲染线程读取）
-		private volatile android.graphics.Bitmap pendingMapBitmap;
+    private void updateFloatBuffer(FloatBuffer buf, float[] values) {
+        buf.position(0);
+        buf.put(values);
+        buf.position(0);
+    }
 
-		// ⭐ 最新信息面板Bitmap（由主线程设置，由渲染线程读取）
-		private volatile android.graphics.Bitmap pendingOverlayBitmap;
+    /**
+     * ⭐ 计算相机画面顶点（center-crop 填满 viewport，无变形）。
+     * viewport aspect Va = videoW/videoH；相机画面 oriented aspect Ca = camBufferW/camBufferH
+     * （横屏锁定 + net 0° 旋转，buffer 不发生宽高互换）。
+     * Ca > Va：宽度溢出、左右裁剪；Ca < Va：高度溢出、上下裁剪；相等则全屏。
+     * camBuffer 未知时退化为全屏（无校正）。
+     */
+    private void updateCameraVertices() {
+        int cw = camBufferWidth, ch = camBufferHeight;
+        int vw = videoWidth, vh = videoHeight;
+        float sx, sy;
+        if (cw <= 0 || ch <= 0 || vw <= 0 || vh <= 0) {
+            sx = 1f; sy = 1f;
+        } else {
+            // 90°/270° 旋转会使画面宽高互换，需用交换后的 oriented aspect 校正
+            boolean swap = (CAMERA_ROT_DEG % 180) != 0;
+            float camAspect = swap ? (float) ch / (float) cw : (float) cw / (float) ch;
+            float viewAspect = (float) vw / (float) vh;
+            sx = Math.max(1f, camAspect / viewAspect);   // 半宽
+            sy = Math.max(1f, viewAspect / camAspect);   // 半高
+        }
+        float[] verts = {
+                -sx, -sy,
+                 sx, -sy,
+                -sx,  sy,
+                 sx,  sy
+        };
+        updateFloatBuffer(cameraVertexBuffer, verts);
+    }
 
-		/**
-	     * ⭐ 更新地图纹理（从Bitmap）
-	     * ⭐ 只保存引用，实际GL纹理更新在渲染线程中执行
-	     */
-	    public void updateMapBitmap(android.graphics.Bitmap bitmap) {
+    /**
+     * ⭐ 构造相机 OES 纹理矩阵：绕中心旋转 CAMERA_ROT_DEG（正值=图像视觉 CCW）+ 可选翻转。
+     * 不使用 SurfaceTexture.getTransformMatrix()（本机会引入额外镜像/旋转）。
+     * 数学等价：s' = rotate(s-0.5, t-0.5) + 0.5；90° → (1-t, s)。
+     */
+    private void buildCameraTexMatrix() {
+        android.opengl.Matrix.setIdentityM(cameraTexMatrix, 0);
+        android.opengl.Matrix.translateM(cameraTexMatrix, 0, 0.5f, 0.5f, 0f);
+        int rot = ((CAMERA_ROT_DEG % 360) + 360) % 360;
+        if (rot != 0) {
+            android.opengl.Matrix.rotateM(cameraTexMatrix, 0, rot, 0f, 0f, 1f);
+        }
+        if (CAMERA_FLIP_H) {
+            android.opengl.Matrix.scaleM(cameraTexMatrix, 0, -1f, 1f, 1f);
+        }
+        if (CAMERA_FLIP_V) {
+            android.opengl.Matrix.scaleM(cameraTexMatrix, 0, 1f, -1f, 1f);
+        }
+        android.opengl.Matrix.translateM(cameraTexMatrix, 0, -0.5f, -0.5f, 0f);
+    }
+
+    public void updateMapBitmap(android.graphics.Bitmap bitmap) {
         if (bitmap == null || bitmap.isRecycled()) return;
         android.graphics.Bitmap oldBitmap;
         synchronized (bitmapLock) {
@@ -750,9 +794,6 @@ public class GLESVideoRenderer {
         if (oldBitmap != null && !oldBitmap.isRecycled()) oldBitmap.recycle();
     }
 
-    /**
-     * ⭐ 更新信息面板叠加纹理（从Bitmap）
-     */
     public void updateOverlayBitmap(android.graphics.Bitmap bitmap) {
         if (bitmap == null || bitmap.isRecycled()) return;
         android.graphics.Bitmap oldBitmap;
@@ -763,49 +804,22 @@ public class GLESVideoRenderer {
         if (oldBitmap != null && !oldBitmap.isRecycled()) oldBitmap.recycle();
     }
 
-    // ===== Setter方法 =====
-
-    public void setMapEnabled(boolean enabled) {
-        this.isMapEnabled = enabled;
-    }
-
-    public void setOverlayEnabled(boolean enabled) {
-        this.isOverlayEnabled = enabled;
-    }
-
+    // ===== Setter =====
+    public void setMapEnabled(boolean enabled) { this.isMapEnabled = enabled; }
+    public void setOverlayEnabled(boolean enabled) { this.isOverlayEnabled = enabled; }
     public void setVideoSize(int width, int height) {
-        this.videoWidth = width;
-        this.videoHeight = height;
+        if (this.videoWidth != width || this.videoHeight != height) {
+            this.videoWidth = width;
+            this.videoHeight = height;
+            cameraVerticesDirty = true;
+        }
     }
+    public void setMapSize(int width, int height) { this.mapWidth = width; this.mapHeight = height; }
+    public void setMapPosition(int x, int y) { this.mapPositionX = x; this.mapPositionY = y; }
+    public void setMapCornerRadius(float radius) { this.mapCornerRadius = Math.max(0f, radius); }
+    public void setOverlaySize(int width, int height) { this.overlayWidth = width; this.overlayHeight = height; }
+    public void setOverlayPosition(int x, int y) { this.overlayPositionX = x; this.overlayPositionY = y; }
 
-    public void setMapSize(int width, int height) {
-        this.mapWidth = width;
-        this.mapHeight = height;
-    }
-
-    public void setMapPosition(int x, int y) {
-        this.mapPositionX = x;
-        this.mapPositionY = y;
-    }
-
-    public void setMapCornerRadius(float radius) {
-        this.mapCornerRadius = Math.max(0f, radius);
-    }
-
-    public void setOverlaySize(int width, int height) {
-        this.overlayWidth = width;
-        this.overlayHeight = height;
-    }
-
-    public void setOverlayPosition(int x, int y) {
-        this.overlayPositionX = x;
-        this.overlayPositionY = y;
-    }
-
-    /**
-     * 获取摄像头Surface
-     * ⭐ 用于Camera2输出
-     */
     public Surface getCameraSurface() {
         if (cameraSurfaceTexture != null) {
             return new Surface(cameraSurfaceTexture);
@@ -814,18 +828,34 @@ public class GLESVideoRenderer {
     }
 
     /**
-     * 获取地图Surface
+     * ⭐ 设置相机 SurfaceTexture 的 buffer 大小为 CameraX 实际请求的分辨率（而非录制 videoSize）。
+     * 解耦相机输出分辨率与录制分辨率：相机按自身分辨率产出（无黑边/裁剪），
+     * GLES viewport 仍为 videoSize，OES 全屏绘制自动缩放（16:9 无畸变）。
+     * 必须在 getCameraSurface()/provideSurface 之前调用。
      */
-    public Surface getMapSurface() {
-        if (mapSurfaceTexture != null) {
-            return new Surface(mapSurfaceTexture);
+    public void setCameraBufferSize(int width, int height) {
+        if (width > 0 && height > 0) {
+            if (camBufferWidth != width || camBufferHeight != height) {
+                camBufferWidth = width;
+                camBufferHeight = height;
+                cameraVerticesDirty = true;
+                // ⭐ 诊断日志：相机 buffer 分辨率 vs GLES viewport(videoSize)，用于排查相机输出与容器分辨率不匹配
+                Log.d(TAG, "[诊断] 相机 buffer 分辨率=" + width + "x" + height
+                        + ", GLES viewport(videoSize)=" + videoWidth + "x" + videoHeight
+                        + ", camAspect=" + String.format(java.util.Locale.US, "%.3f", (float) width / height)
+                        + ", viewAspect=" + String.format(java.util.Locale.US, "%.3f", (float) videoWidth / Math.max(1, videoHeight)));
+            }
+            if (cameraSurfaceTexture != null) {
+                cameraSurfaceTexture.setDefaultBufferSize(width, height);
+            }
         }
-        return null;
     }
 
-    /**
-     * 释放所有资源
-     */
+    /** ⭐ 诊断用：获取当前相机 buffer 分辨率（CameraX 实际请求） */
+    public int[] getCameraBufferSize() {
+        return new int[]{camBufferWidth, camBufferHeight};
+    }
+
     public void release() {
         stopRendering();
 
@@ -841,11 +871,6 @@ public class GLESVideoRenderer {
             cameraSurfaceTexture = null;
         }
 
-        if (mapSurfaceTexture != null) {
-            mapSurfaceTexture.release();
-            mapSurfaceTexture = null;
-        }
-
         if (eglDisplay != EGL14.EGL_NO_DISPLAY) {
             EGL14.eglMakeCurrent(eglDisplay, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT);
 
@@ -853,16 +878,19 @@ public class GLESVideoRenderer {
                 EGL14.eglDestroySurface(eglDisplay, eglEncoderSurface);
                 eglEncoderSurface = EGL14.EGL_NO_SURFACE;
             }
-
+            if (eglPreviewSurface != EGL14.EGL_NO_SURFACE) {
+                EGL14.eglDestroySurface(eglDisplay, eglPreviewSurface);
+                eglPreviewSurface = EGL14.EGL_NO_SURFACE;
+            }
             if (eglContext != EGL14.EGL_NO_CONTEXT) {
                 EGL14.eglDestroyContext(eglDisplay, eglContext);
                 eglContext = EGL14.EGL_NO_CONTEXT;
             }
-
             EGL14.eglTerminate(eglDisplay);
             eglDisplay = EGL14.EGL_NO_DISPLAY;
         }
 
-        Log.d(TAG, "OpenGL ES资源已释放");
+        hasEncoderSurface = false;
+        Log.d(TAG, "OpenGL ES 资源已释放");
     }
 }

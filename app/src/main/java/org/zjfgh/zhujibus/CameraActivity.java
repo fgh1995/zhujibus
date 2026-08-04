@@ -8,13 +8,11 @@ import android.graphics.Matrix;
 import android.graphics.RectF;
 import android.graphics.SurfaceTexture;
 import android.hardware.camera2.CameraAccessException;
-import android.location.Location;
-import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.CameraCharacteristics;
-import android.hardware.camera2.CameraDevice;
 import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CaptureRequest;
 import android.hardware.camera2.params.StreamConfigurationMap;
+import android.location.Location;
 import android.location.LocationListener;
 import android.media.MediaRecorder;
 import android.net.Uri;
@@ -22,7 +20,6 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
-import android.os.HandlerThread;
 import android.os.Looper;
 import android.os.ParcelFileDescriptor;
 import android.provider.MediaStore;
@@ -32,6 +29,7 @@ import android.util.Size;
 import android.view.Surface;
 import android.view.TextureView;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
 import android.widget.AdapterView;
@@ -45,12 +43,18 @@ import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.camera.camera2.interop.Camera2Interop;
+import androidx.camera.core.CameraSelector;
+import androidx.camera.core.Preview;
+import androidx.camera.core.SurfaceRequest;
+import androidx.camera.lifecycle.ProcessCameraProvider;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
 import com.amap.api.maps.AMap;
 import com.amap.api.maps.TextureMapView;
 import com.amap.api.maps.model.LatLng;
+import com.google.common.util.concurrent.ListenableFuture;
 
 import java.io.File;
 import java.text.SimpleDateFormat;
@@ -58,6 +62,8 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 
 import io.sgr.geometry.Coordinate;
 import io.sgr.geometry.utils.RouteGeometryUtils;
@@ -67,20 +73,36 @@ public class CameraActivity extends AppCompatActivity {
     private static final int REQUEST_CAMERA_PERMISSION = 200;
 
     private TextureView textureView;
-    private CameraDevice cameraDevice;
-    private CameraCaptureSession captureSession;
-    private Handler backgroundHandler;
-    private HandlerThread backgroundThread;
     private String cameraId;
     private Size previewSize = new Size(1920, 1080);
     private Size videoSize = new Size(1920, 1080);
     private int selectedVideoFps = 30;
     private Range<Integer> selectedFpsRange = new Range<>(30, 30);
     private int sensorOrientation = 90;
+    // ⭐ SurfaceTexture 类支持的输出分辨率集合（启动时从 StreamConfigurationMap 读取，
+    //   用于判断能否强制 camera buffer=videoSize 绕过 CameraX 的 1080p 限制）
+    private final java.util.Set<String> surfaceTextureSupportedSizes = new java.util.HashSet<>();
+    // ⭐ 高帧率模式 fps 范围（constrained high-speed），用于添加 60fps 等选项
+    private Range<Integer>[] highSpeedFpsRanges;
+
+    // ⭐ 录制时长显示
+    private TextView tvRecordDuration;
+    private Handler recordDurationHandler;
+    private Runnable recordDurationRunnable;
+    private long recordStartTimeMs;
+
+    // ⭐ CameraX 相关
+    private ProcessCameraProvider cameraProvider;
+    private Preview preview;
+    private Executor cameraExecutor;
+    private Surface previewSurface;
+    private boolean glesInitialized = false;
 
     // 录制相关
     private TextView btnRecord;
     private boolean isRecording = false;
+    private volatile boolean isStoppingRecording = false;
+    private Thread stopRecordingThread;
     private Uri currentVideoUri;
     private String currentTempFilePath;
     private ParcelFileDescriptor currentOutputPfd;
@@ -124,6 +146,9 @@ public class CameraActivity extends AppCompatActivity {
     private FrameLayout infoPanelContainer;
     private CheckBox checkboxShowInfoPanel;
     private boolean isInfoPanelEnabled = false;
+    // ⭐ Step2: 信息面板按 videoSize 离屏绘制的目标尺寸（setupOverlayPosition 计算，captureViewBitmap 使用）
+    private int overlayVideoW = 0;
+    private int overlayVideoH = 0;
     private CheckBox checkboxShowCoordinate;
     private boolean isCoordinateEnabled = true;
     private View povCoordinateContainer;
@@ -139,11 +164,20 @@ public class CameraActivity extends AppCompatActivity {
 
     // ===== GLES 渲染 =====
     private GLESVideoRenderer glesRenderer;
-    private Surface glCameraSurface;
 
     private Handler mapUpdateHandler = new Handler(Looper.getMainLooper());
     private Runnable mapUpdateRunnable;
-    private static final int MAP_UPDATE_INTERVAL = 40;
+    // ⭐ 截图频率:地图 30fps(33ms)
+    private static final int MAP_UPDATE_INTERVAL = 33;
+    // ⭐ map 截图防堆积 + 看门狗 + 定期保活
+    private volatile boolean mapScreenshotPending = false;
+    private volatile long lastMapScreenshotTime = 0;
+    private volatile long lastMapResumeTime = 0;
+    private static final long MAP_SCREENSHOT_TIMEOUT_MS = 5000;
+    private static final long MAP_RESUME_INTERVAL_MS = 10000; // 每 10s 主动 onResume 保活
+    // ⭐ 信息面板更新频率:30fps(33ms)
+    private static final int OVERLAY_UPDATE_INTERVAL = 33;
+    private long lastOverlayUpdateTime = 0;
     private static final float POV_MAP_ZOOM = 19f;
     private static final float POV_MAP_TILT = 0f;
     private static final float POV_RECORD_MAP_CORNER_RADIUS_DP = 8f;
@@ -211,6 +245,10 @@ public class CameraActivity extends AppCompatActivity {
 
         btnRecord = findViewById(R.id.btn_record_camera);
         btnRecord.setOnClickListener(v -> onRecordButtonClick());
+        tvRecordDuration = findViewById(R.id.tv_record_duration);
+        tvRecordDuration.setVisibility(View.GONE);
+
+        cameraExecutor = Executors.newSingleThreadExecutor();
 
         initSettingsPanel();
         updateInfoPanelData();
@@ -279,7 +317,13 @@ public class CameraActivity extends AppCompatActivity {
 
         // 2. 小地图 —— 右下角，位于信息面板上方（如果面板可见）
         if (mapContainer != null) {
-            int mapSizePx = (int) (100 * density);
+            // ⭐ 修复:与 activity_camera.xml 中 @dimen/_80sdp 保持一致,不同设备按 sdp 缩放
+            //   原硬编码 100*density 会让 sdp 失效,在平板/大屏上小地图偏小,在小屏上偏大
+            //   nonTransitiveRClass 下 R.dimen._80sdp 不可见,改用 getIdentifier 运行时查找 sdp 资源
+            int mapSizeResId = getResources().getIdentifier("_80sdp", "dimen", getPackageName());
+            int mapSizePx = mapSizeResId > 0
+                    ? (int) getResources().getDimension(mapSizeResId)
+                    : (int) (80 * density);
             FrameLayout.LayoutParams mapParams = (FrameLayout.LayoutParams) mapContainer.getLayoutParams();
             mapParams.width = mapSizePx;
             mapParams.height = mapSizePx;
@@ -306,9 +350,8 @@ public class CameraActivity extends AppCompatActivity {
         super.onResume();
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
                 && ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-            startBackgroundThread();
             if (textureView != null && textureView.isAvailable()) {
-                openCamera(false);
+                startGlesAndCameraX(textureView.getSurfaceTexture());
             }
         }
         if (navigationView != null) {
@@ -677,6 +720,19 @@ public class CameraActivity extends AppCompatActivity {
 
                     StreamConfigurationMap map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
                     if (map != null) {
+                        // ⭐ 诊断：对比 SurfaceTexture 类（GLES camera Surface 的实际类型）和 MediaRecorder 类支持的分辨率
+                        //   如果 SurfaceTexture 不含 4K 而 MediaRecorder 含，说明 4K 只能走 MediaRecorder/MediaCodec 流，CameraX Preview 拿不到
+                        Size[] texSizes = map.getOutputSizes(android.graphics.SurfaceTexture.class);
+                        if (texSizes != null) {
+                            surfaceTextureSupportedSizes.clear();
+                            StringBuilder sb = new StringBuilder();
+                            for (int i = 0; i < texSizes.length; i++) {
+                                if (i > 0) sb.append(", ");
+                                sb.append(texSizes[i].getWidth()).append("x").append(texSizes[i].getHeight());
+                                surfaceTextureSupportedSizes.add(texSizes[i].getWidth() + "x" + texSizes[i].getHeight());
+                            }
+                            Log.d(TAG, "[诊断] SurfaceTexture 支持分辨率(" + texSizes.length + "): " + sb);
+                        }
                         Size[] videoSizesArray = map.getOutputSizes(MediaRecorder.class);
                         if (videoSizesArray != null) {
                             availableVideoSizes.clear();
@@ -688,6 +744,31 @@ public class CameraActivity extends AppCompatActivity {
                             Range<Integer> normal30Range = chooseFpsRange(fpsRanges, 30);
                             int normalMaxHeight = getMaxSupportedHeight(map);
                             logCameraVideoCapabilities(characteristics, map, fpsRanges, normalMaxHeight);
+
+                            // ⭐ 诊断：高帧率模式（constrained high-speed）支持的 fps 范围和尺寸
+                            //   60fps+ 通常只在高帧率模式下可用，不在 CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES 里
+                            //   该模式需 createConstrainedHighSpeedCaptureSession，CameraX Preview 不支持
+                            Range<Integer>[] hsFpsRanges = map.getHighSpeedVideoFpsRanges();
+                            Size[] hsSizes = map.getHighSpeedVideoSizes();
+                            highSpeedFpsRanges = hsFpsRanges; // 保存供添加高帧率选项使用
+                            if (hsFpsRanges != null && hsFpsRanges.length > 0) {
+                                StringBuilder sbFps = new StringBuilder();
+                                for (int i = 0; i < hsFpsRanges.length; i++) {
+                                    if (i > 0) sbFps.append(", ");
+                                    sbFps.append("[").append(hsFpsRanges[i].getLower()).append(",").append(hsFpsRanges[i].getUpper()).append("]");
+                                }
+                                Log.d(TAG, "[诊断] 高帧率模式 fps 范围(" + hsFpsRanges.length + "): " + sbFps);
+                            } else {
+                                Log.d(TAG, "[诊断] 高帧率模式: 不支持（getHighSpeedVideoFpsRanges 为空）");
+                            }
+                            if (hsSizes != null && hsSizes.length > 0) {
+                                StringBuilder sbS = new StringBuilder();
+                                for (int i = 0; i < hsSizes.length; i++) {
+                                    if (i > 0) sbS.append(", ");
+                                    sbS.append(hsSizes[i].getWidth()).append("x").append(hsSizes[i].getHeight());
+                                }
+                                Log.d(TAG, "[诊断] 高帧率模式支持尺寸(" + hsSizes.length + "): " + sbS);
+                            }
 
                             for (Size size : videoSizesArray) {
                                 if (isSupportedVideoSize(size, normalMaxHeight) && size.getWidth() * 9 == size.getHeight() * 16) {
@@ -705,11 +786,36 @@ public class CameraActivity extends AppCompatActivity {
                                 }
                             }
 
+                            // ⭐ 添加高帧率 60fps 选项：仅 16:9 的高帧率尺寸，且该尺寸支持含 60 的 fps 范围。
+                            //   注意：高帧率 fps 范围（如 [60,120]）理论上需 constrained high-speed session，
+                            //   但通过 Camera2Interop 在普通模式设置部分设备/驱动会接受，不行再考虑 Camera2。
+                            if (hsSizes != null && hsFpsRanges != null && hsFpsRanges.length > 0) {
+                                Range<Integer> fps60Range = findBestFpsRange(hsFpsRanges, 60);
+                                if (fps60Range != null) {
+                                    for (Size size : hsSizes) {
+                                        if (size.getWidth() * 9 != size.getHeight() * 16) continue; // 仅 16:9
+                                        Range<Integer>[] sizeFpsRanges = map.getHighSpeedVideoFpsRangesFor(size);
+                                        boolean supports60 = false;
+                                        if (sizeFpsRanges != null) {
+                                            for (Range<Integer> r : sizeFpsRanges) {
+                                                if (r.getLower() <= 60 && r.getUpper() >= 60) { supports60 = true; break; }
+                                            }
+                                        }
+                                        if (supports60) {
+                                            addVideoOption(size, 60, fps60Range);
+                                            // 标记暂不可用（需 Camera2 constrained high-speed session 才能获得真 60fps 画质）
+                                            int lastIdx = resolutionDisplayNames.size() - 1;
+                                            resolutionDisplayNames.set(lastIdx, resolutionDisplayNames.get(lastIdx) + " (暂不可用)");
+                                            Log.d(TAG, "添加高帧率选项(已禁用): " + size.getWidth() + "x" + size.getHeight() + " 60fps, range=" + fps60Range);
+                                        }
+                                    }
+                                }
+                            }
+
                             sortVideoOptions();
 
-                            ArrayAdapter<String> resolutionAdapter = new ArrayAdapter<>(this,
-                                    android.R.layout.simple_spinner_item, resolutionDisplayNames);
-                            resolutionAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+                            // ⭐ 自定义 Adapter：60fps 选项显示但不可选（灰色+不可点击）
+                            ArrayAdapter<String> resolutionAdapter = getStringArrayAdapter();
                             spinnerResolution.setAdapter(resolutionAdapter);
 
                             int defaultOptionIndex = findDefaultVideoOptionIndex();
@@ -752,11 +858,10 @@ public class CameraActivity extends AppCompatActivity {
                 @Override public void onNothingSelected(AdapterView<?> parent) {}
             });
 
-            startBackgroundThread();
             textureView.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
                 @Override public void onSurfaceTextureAvailable(@NonNull SurfaceTexture surface, int width, int height) {
                     configureTransform(width, height);
-                    openCamera(false);
+                    startGlesAndCameraX(surface);
                 }
                 @Override public void onSurfaceTextureSizeChanged(@NonNull SurfaceTexture surface, int width, int height) {
                     configureTransform(width, height);
@@ -767,7 +872,7 @@ public class CameraActivity extends AppCompatActivity {
 
             if (textureView.isAvailable()) {
                 configureTransform(textureView.getWidth(), textureView.getHeight());
-                openCamera(false);
+                startGlesAndCameraX(textureView.getSurfaceTexture());
             }
         } catch (CameraAccessException e) {
             Log.e(TAG, "Camera access error", e);
@@ -776,69 +881,190 @@ public class CameraActivity extends AppCompatActivity {
         }
     }
 
-    private void openCamera(boolean forRecording) {
-        CameraManager manager = (CameraManager) getSystemService(CAMERA_SERVICE);
-        if (manager == null || cameraId == null || cameraDevice != null) return;
+    @NonNull
+    private ArrayAdapter<String> getStringArrayAdapter() {
+        ArrayAdapter<String> resolutionAdapter = new ArrayAdapter<>(this,
+                android.R.layout.simple_spinner_item, resolutionDisplayNames) {
+            @Override
+            public boolean isEnabled(int position) {
+                return position >= 0 && position < availableVideoFpsList.size()
+                        && availableVideoFpsList.get(position) != 60;
+            }
+
+            @Override
+            public View getDropDownView(int position, View convertView, ViewGroup parent) {
+                View view = super.getDropDownView(position, convertView, parent);
+                if (view instanceof TextView) {
+                    TextView tv = (TextView) view;
+                    if (position >= 0 && position < availableVideoFpsList.size()
+                            && availableVideoFpsList.get(position) == 60) {
+                        tv.setTextColor(android.graphics.Color.GRAY);
+                    } else {
+                        tv.setTextColor(android.graphics.Color.BLACK);
+                    }
+                }
+                return view;
+            }
+        };
+        resolutionAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        return resolutionAdapter;
+    }
+
+    // ===== CameraX + GLES 启动 =====
+
+    /**
+     * ⭐ 初始化 GLES 渲染器并启动 CameraX Preview
+     * 流程：initEGL(previewSurface) → startRendering → 异步 waitForGLInit → startCameraX
+     */
+    private void startGlesAndCameraX(SurfaceTexture texture) {
+        if (texture == null) return;
+        if (glesRenderer != null && glesInitialized) {
+            Log.d(TAG, "GLES 已初始化，跳过重复启动");
+            return;
+        }
 
         try {
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) return;
-            manager.openCamera(cameraId, new CameraDevice.StateCallback() {
-                @Override public void onOpened(@NonNull CameraDevice camera) {
-                    cameraDevice = camera;
-                    createCameraPreviewSession(forRecording);
+            // 释放旧的资源（如果有）
+            if (glesRenderer != null) {
+                glesRenderer.release();
+                glesRenderer = null;
+            }
+            if (previewSurface != null) {
+                previewSurface.release();
+                previewSurface = null;
+            }
+            glesInitialized = false;
+
+            // 设置 TextureView 的 SurfaceTexture 默认缓冲区大小
+            texture.setDefaultBufferSize(videoSize.getWidth(), videoSize.getHeight());
+            previewSurface = new Surface(texture);
+
+            // 创建 GLES 渲染器
+            glesRenderer = new GLESVideoRenderer();
+            glesRenderer.setVideoSize(videoSize.getWidth(), videoSize.getHeight());
+            glesRenderer.setMapEnabled(false);
+            glesRenderer.setOverlayEnabled(false);
+
+            if (!glesRenderer.initEGL(previewSurface)) {
+                Log.e(TAG, "GLES EGL 初始化失败");
+                glesRenderer = null;
+                previewSurface.release();
+                previewSurface = null;
+                return;
+            }
+
+            Log.d(TAG, "EGL 初始化成功，启动渲染线程...");
+            glesRenderer.startRendering();
+
+            // 异步等待 GL 资源初始化完成，然后启动 CameraX
+            cameraExecutor.execute(() -> {
+                if (glesRenderer.waitForGLInit()) {
+                    glesInitialized = true;
+                    Log.d(TAG, "GL 资源初始化完成，启动 CameraX");
+                    runOnUiThread(this::startCameraX);
+                } else {
+                    Log.e(TAG, "GL 资源初始化失败");
+                    runOnUiThread(() -> Toast.makeText(CameraActivity.this, "GLES 初始化失败", Toast.LENGTH_SHORT).show());
                 }
-                @Override public void onDisconnected(@NonNull CameraDevice camera) {
-                    camera.close();
-                    cameraDevice = null;
-                }
-                @Override public void onError(@NonNull CameraDevice camera, int error) {
-                    camera.close();
-                    cameraDevice = null;
-                    finish();
-                }
-            }, backgroundHandler);
-        } catch (CameraAccessException e) {
-            Log.e(TAG, "Open camera error", e);
+            });
+        } catch (Exception e) {
+            Log.e(TAG, "GLES + CameraX 启动失败", e);
         }
     }
 
-    private void createCameraPreviewSession(boolean forRecording) {
-        try {
-            SurfaceTexture texture = textureView.getSurfaceTexture();
-            if (texture == null) return;
-            texture.setDefaultBufferSize(previewSize.getWidth(), previewSize.getHeight());
-
-            List<Surface> surfaces = new ArrayList<>();
-            Surface previewSurface = new Surface(texture);
-            surfaces.add(previewSurface);
-
-            CaptureRequest.Builder builder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_RECORD);
-            builder.addTarget(previewSurface);
-
-            cameraDevice.createCaptureSession(surfaces, new CameraCaptureSession.StateCallback() {
-                @Override public void onConfigured(@NonNull CameraCaptureSession session) {
-                    if (cameraDevice == null) return;
-                    captureSession = session;
-                    try {
-                        builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO);
-                        builder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, selectedFpsRange);
-                        captureSession.setRepeatingRequest(builder.build(), null, backgroundHandler);
-                    } catch (CameraAccessException e) {
-                        Log.e(TAG, "Capture request error", e);
-                    }
-                }
-                @Override public void onConfigureFailed(@NonNull CameraCaptureSession session) {
-                    Toast.makeText(CameraActivity.this, "摄像头配置失败", Toast.LENGTH_SHORT).show();
-                }
-            }, backgroundHandler);
-        } catch (CameraAccessException e) {
-            Log.e(TAG, "Session creation error", e);
+    /**
+     * ⭐ 启动 CameraX Preview，绑定到生命周期
+     * 使用 Camera2Interop 设置 CONTROL_AE_TARGET_FPS_RANGE 和 CONTROL_AF_MODE
+     * SurfaceProvider 提供 glesRenderer.getCameraSurface() 作为 Camera 输出目标
+     */
+    @SuppressLint("UnsafeOptInUsageError")
+    private void startCameraX() {
+        if (glesRenderer == null || !glesInitialized) {
+            Log.e(TAG, "GLES 未初始化，无法启动 CameraX");
+            return;
         }
+
+        ListenableFuture<ProcessCameraProvider> cameraProviderFuture = ProcessCameraProvider.getInstance(this);
+        cameraProviderFuture.addListener(() -> {
+            try {
+                cameraProvider = cameraProviderFuture.get();
+                if (cameraProvider == null) return;
+
+                // 解绑旧的用例（如果有）
+                cameraProvider.unbindAll();
+
+                // ⭐ Camera2Interop：必须作用于 Preview.Builder（build 之前）
+                Preview.Builder previewBuilder = new Preview.Builder();
+                // 横屏锁定应用：targetRotation 设为显示器实际旋转，使 sensorOrientation 与 displayRotation 抵消（净旋转 0°），
+                // CameraX 产生与 SurfaceTexture(1920x1080) 匹配的横屏 buffer，避免竖屏 buffer 塞进横屏 Surface 导致压扁
+                previewBuilder.setTargetRotation(getWindowManager().getDefaultDisplay().getRotation());
+                // ⭐ 让 CameraX 按用户选择的 videoSize 请求分辨率。之前未设置时 CameraX 默认给 1600×1200(4:3)，
+                //   与 16:9 videoSize 不匹配 → 画面被裁剪/错位。CameraX 会选最接近的支持分辨率，
+                //   剩余宽高比差异仍由 GLES updateCameraVertices 的 center-crop 兜底。
+                previewBuilder.setTargetResolution(new android.util.Size(videoSize.getWidth(), videoSize.getHeight()));
+                Camera2Interop.Extender<Preview> extender = new Camera2Interop.Extender<>(previewBuilder);
+                extender.setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, selectedFpsRange);
+                extender.setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO);
+
+                // 创建 Preview 用例
+                preview = previewBuilder.build();
+
+                // 设置 SurfaceProvider，提供 GLES 的 camera Surface
+                preview.setSurfaceProvider(cameraExecutor, request -> {
+                    android.util.Size camRes = request.getResolution();
+                    // ⭐ 诊断日志：CameraX 实际请求分辨率 vs 用户选择 videoSize
+                    Log.d(TAG, "[诊断] CameraX 请求分辨率 camRes=" + camRes.getWidth() + "x" + camRes.getHeight()
+                            + ", videoSize=" + videoSize.getWidth() + "x" + videoSize.getHeight()
+                            + ", camAspect=" + String.format(java.util.Locale.US, "%.3f", (float) camRes.getWidth() / Math.max(1, camRes.getHeight()))
+                            + ", videoAspect=" + String.format(java.util.Locale.US, "%.3f", (float) videoSize.getWidth() / Math.max(1, videoSize.getHeight())));
+                    // ⭐ CameraX Preview 内部把分辨率限在 1080p，但设备 SurfaceTexture 可能支持更高（如 4K）。
+                    //   相机帧大小由 SurfaceTexture 的 setDefaultBufferSize 决定，故尝试强制设为 videoSize 绕过 CameraX 限制。
+                    //   兜底：若 videoSize 不在 SurfaceTexture 支持列表（该设备/该分辨率不支持），回退到 CameraX 请求的 camRes，
+                    //   剩余宽高比差异由 GLES updateCameraVertices 的 center-crop 兜底。
+                    String videoSizeKey = videoSize.getWidth() + "x" + videoSize.getHeight();
+                    int bufW, bufH;
+                    if (surfaceTextureSupportedSizes.contains(videoSizeKey)) {
+                        bufW = videoSize.getWidth();
+                        bufH = videoSize.getHeight();
+                        Log.d(TAG, "强制相机 buffer=" + bufW + "x" + bufH + "（videoSize 在 SurfaceTexture 支持列表）");
+                    } else {
+                        bufW = camRes.getWidth();
+                        bufH = camRes.getHeight();
+                        Log.w(TAG, "videoSize " + videoSizeKey + " 不在 SurfaceTexture 支持列表，回退到 CameraX 请求的 " + bufW + "x" + bufH);
+                    }
+                    glesRenderer.setCameraBufferSize(bufW, bufH);
+                    Surface cameraSurface = glesRenderer.getCameraSurface();
+                    if (cameraSurface != null && cameraSurface.isValid()) {
+                        request.provideSurface(cameraSurface, cameraExecutor, result -> {
+                            Log.d(TAG, "Camera Surface 结果: " + result.getResultCode());
+                        });
+                    } else {
+                        Log.e(TAG, "cameraSurface 无效，无法提供给 CameraX");
+                        request.willNotProvideSurface();
+                    }
+                });
+
+                // 选择后置摄像头
+                CameraSelector cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA;
+
+                // 绑定到生命周期
+                cameraProvider.bindToLifecycle(this, cameraSelector, preview);
+
+                Log.d(TAG, "CameraX Preview 已绑定: fpsRange=" + selectedFpsRange);
+            } catch (Exception e) {
+                Log.e(TAG, "CameraX 启动失败", e);
+                runOnUiThread(() -> Toast.makeText(CameraActivity.this, "摄像头启动失败", Toast.LENGTH_SHORT).show());
+            }
+        }, ContextCompat.getMainExecutor(this));
     }
 
     // ===== 录制 =====
 
     private void onRecordButtonClick() {
+        if (isStoppingRecording) {
+            Toast.makeText(this, "正在停止录制，请稍候", Toast.LENGTH_SHORT).show();
+            return;
+        }
         if (!isRecording) {
             startRecording();
         } else {
@@ -847,7 +1073,10 @@ public class CameraActivity extends AppCompatActivity {
     }
 
     private void startRecording() {
-        if (cameraDevice == null) return;
+        if (glesRenderer == null || !glesInitialized) {
+            Toast.makeText(this, "摄像头未就绪", Toast.LENGTH_SHORT).show();
+            return;
+        }
 
         try {
             if (videoEncoder != null || mediaMuxer != null || encoderSurface != null) {
@@ -906,80 +1135,74 @@ public class CameraActivity extends AppCompatActivity {
             audioFrameCount = 0;
             firstFrameTimeUs = 0;
 
-            try {
-                glesRenderer = new GLESVideoRenderer();
-                glesRenderer.setVideoSize(videoSize.getWidth(), videoSize.getHeight());
-                glesRenderer.setMapEnabled(isMapEnabled);
+            // ⭐ 新架构：glesRenderer 已在摄像头启动时创建，这里只需添加 encoder Surface
+            // 兜底同步 GLES viewport = 当前 videoSize（applyVideoOption 已同步，这里防其他路径改了 videoSize）
+            glesRenderer.setVideoSize(videoSize.getWidth(), videoSize.getHeight());
+            // 设置地图位置和大小
+            glesRenderer.setMapEnabled(isMapEnabled);
+            // ⭐ 诊断日志：录制开始时各尺寸对比（排查相机输出与 videoSize 不匹配）
+            {
+                int[] camBuf = glesRenderer.getCameraBufferSize();
+                String texSize = (textureView != null) ? textureView.getWidth() + "x" + textureView.getHeight() : "null";
+                Log.d(TAG, "[诊断] 录制开始: videoSize=" + videoSize.getWidth() + "x" + videoSize.getHeight()
+                        + ", camBuffer=" + camBuf[0] + "x" + camBuf[1]
+                        + ", textureView=" + texSize);
+            }
+            if (mapContainer != null && mapContainer.getVisibility() == View.VISIBLE) {
+                int[] mapPos = new int[2];
+                mapContainer.getLocationOnScreen(mapPos);
+                int[] texturePos = new int[2];
+                textureView.getLocationOnScreen(texturePos);
+                int textureW = textureView.getWidth();
+                int textureH = textureView.getHeight();
 
-                if (mapContainer != null && mapContainer.getVisibility() == View.VISIBLE) {
-                    int[] mapPos = new int[2];
-                    mapContainer.getLocationOnScreen(mapPos);
-                    int[] texturePos = new int[2];
-                    textureView.getLocationOnScreen(texturePos);
-                    int textureW = textureView.getWidth();
-                    int textureH = textureView.getHeight();
+                int relX = mapPos[0] - texturePos[0];
+                int relY = mapPos[1] - texturePos[1];
+                int mapW = mapContainer.getWidth();
+                int mapH = mapContainer.getHeight();
 
-                    int relX = mapPos[0] - texturePos[0];
-                    int relY = mapPos[1] - texturePos[1];
-                    int mapW = mapContainer.getWidth();
-                    int mapH = mapContainer.getHeight();
+                int videoMapX = (int) ((float) relX / textureW * videoSize.getWidth());
+                int videoMapY = (int) ((float) relY / textureH * videoSize.getHeight());
+                int videoMapW = (int) ((float) mapW / textureW * videoSize.getWidth());
+                int videoMapH = (int) ((float) mapH / textureH * videoSize.getHeight());
 
-                    int videoMapX = (int) ((float) relX / textureW * videoSize.getWidth());
-                    int videoMapY = (int) ((float) relY / textureH * videoSize.getHeight());
-                    int videoMapW = (int) ((float) mapW / textureW * videoSize.getWidth());
-                    int videoMapH = (int) ((float) mapH / textureH * videoSize.getHeight());
+                glesRenderer.setMapSize(videoMapW, videoMapH);
+                glesRenderer.setMapPosition(videoMapX, videoMapY);
+                float mapCornerRadius = POV_RECORD_MAP_CORNER_RADIUS_DP * getResources().getDisplayMetrics().density
+                        * ((float) videoSize.getWidth() / textureW);
+                glesRenderer.setMapCornerRadius(mapCornerRadius);
+                Log.d(TAG, "地图录制参数: pos=(" + videoMapX + "," + videoMapY + ") size=" + videoMapW + "x" + videoMapH
+                        + ", radius=" + mapCornerRadius);
+            } else {
+                glesRenderer.setMapSize(300, 300);
+                glesRenderer.setMapCornerRadius(POV_RECORD_MAP_CORNER_RADIUS_DP * getResources().getDisplayMetrics().density);
+            }
 
-                    glesRenderer.setMapSize(videoMapW, videoMapH);
-                    glesRenderer.setMapPosition(videoMapX, videoMapY);
-                    float mapCornerRadius = POV_RECORD_MAP_CORNER_RADIUS_DP * getResources().getDisplayMetrics().density
-                            * ((float) videoSize.getWidth() / textureW);
-                    glesRenderer.setMapCornerRadius(mapCornerRadius);
-                    Log.d(TAG, "地图录制参数: pos=(" + videoMapX + "," + videoMapY + ") size=" + videoMapW + "x" + videoMapH
-                            + ", radius=" + mapCornerRadius);
-                } else {
-                    glesRenderer.setMapSize(300, 300);
-                    glesRenderer.setMapCornerRadius(POV_RECORD_MAP_CORNER_RADIUS_DP * getResources().getDisplayMetrics().density);
-                }
+            // 设置信息面板位置
+            if (isInfoPanelEnabled && infoPanelContainer != null) {
+                setupOverlayPosition();
+                glesRenderer.setOverlayEnabled(true);
+            }
 
-                if (!glesRenderer.initEGL(encoderSurface)) {
-                    Log.e(TAG, "GLES EGL初始化失败，回退到纯摄像头模式");
-                    glesRenderer = null;
-                } else {
-                    Log.d(TAG, "EGL初始化成功，启动渲染线程...");
-                    glesRenderer.startRendering();
+            // ⭐ Step2: 录制时把屏幕上的 map/infoPanel 平移到屏外，消除"双显"。
+            //   保持 VISIBLE 不变：AMap 的 GLSurfaceView 由独立渲染线程驱动，view.draw 也与位置无关，
+            //   因此 getMapScreenShot 与 captureViewBitmap 仍正常工作。GLES 已把 map+info 合成进预览 Surface，
+            //   故预览即最终录制画面。stopRecording 中恢复 translationX=0。
+            //   注意：必须在 setupOverlayPosition 之后平移——后者要用 getLocationOnScreen 读未偏移的位置。
+            if (mapContainer != null) {
+                mapContainer.setTranslationX(10000f);
+            }
+            if (infoPanelContainer != null) {
+                infoPanelContainer.setTranslationX(10000f);
+            }
 
-                    if (!glesRenderer.waitForGLInit()) {
-                        Log.e(TAG, "GL资源初始化超时，回退到纯摄像头模式");
-                        glesRenderer.stopRendering();
-                        glesRenderer.release();
-                        glesRenderer = null;
-                    } else {
-                        android.graphics.SurfaceTexture cameraSurfaceTexture = glesRenderer.getCameraSurfaceTexture();
-                        if (cameraSurfaceTexture != null) {
-                            glCameraSurface = new Surface(cameraSurfaceTexture);
-                            Log.d(TAG, "GLES渲染器初始化成功，使用合成模式");
+            // ⭐ 动态添加 encoder Surface 到 GLES 渲染器（渲染线程会在下一帧创建 EGL Surface）
+            glesRenderer.setEncoderSurface(encoderSurface);
+            Log.d(TAG, "Encoder Surface 已添加到 GLES 渲染器");
 
-                            if ((isMapEnabled && mapView != null) || isInfoPanelEnabled) {
-                                startMapBitmapUpdate();
-                            }
-
-                            if (isInfoPanelEnabled && infoPanelContainer != null) {
-                                setupOverlayPosition();
-                                glesRenderer.setOverlayEnabled(true);
-                            }
-                        } else {
-                            Log.e(TAG, "获取摄像头SurfaceTexture失败，回退到纯摄像头模式");
-                            glesRenderer.stopRendering();
-                            glesRenderer.release();
-                            glesRenderer = null;
-                            glCameraSurface = null;
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                Log.e(TAG, "GLES渲染器初始化失败，回退到纯摄像头模式", e);
-                glesRenderer = null;
-                glCameraSurface = null;
+            // 启动地图/信息面板 Bitmap 更新
+            if ((isMapEnabled && mapView != null) || isInfoPanelEnabled) {
+                startMapBitmapUpdate();
             }
 
             try {
@@ -1003,24 +1226,33 @@ public class CameraActivity extends AppCompatActivity {
                 startAudioRecordingThread();
             }
 
-            if (captureSession != null) {
-                try {
-                    captureSession.stopRepeating();
-                    captureSession.abortCaptures();
-                } catch (CameraAccessException e) {
-                    Log.w(TAG, "停止预览Session失败", e);
-                }
-                captureSession.close();
-                captureSession = null;
-            }
-            createCameraPreviewSessionForRecording();
-
             btnRecord.setText("停止");
             btnRecord.setBackgroundResource(R.drawable.record_button_bg_recording);
             Toast.makeText(this, "开始录制", Toast.LENGTH_SHORT).show();
 
             Log.d(TAG, "录制启动成功: video=" + videoSize.getWidth() + "x" + videoSize.getHeight()
                     + ", fps=" + selectedVideoFps + ", bitrate=" + selectedVideoBitrate);
+
+            // ⭐ 启动录制时长显示
+            recordStartTimeMs = System.currentTimeMillis();
+            if (recordDurationHandler == null) recordDurationHandler = new Handler(Looper.getMainLooper());
+            if (recordDurationRunnable == null) {
+                recordDurationRunnable = new Runnable() {
+                    @Override
+                    public void run() {
+                        if (!isRecording) return;
+                        long elapsed = System.currentTimeMillis() - recordStartTimeMs;
+                        int totalSec = (int) (elapsed / 1000);
+                        int h = totalSec / 3600;
+                        int m = (totalSec % 3600) / 60;
+                        int s = totalSec % 60;
+                        tvRecordDuration.setText(String.format("● %02d:%02d:%02d", h, m, s));
+                        recordDurationHandler.postDelayed(this, 500);
+                    }
+                };
+            }
+            tvRecordDuration.setVisibility(View.VISIBLE);
+            recordDurationHandler.post(recordDurationRunnable);
 
         } catch (Exception e) {
             Log.e(TAG, "Start recording error", e);
@@ -1056,81 +1288,15 @@ public class CameraActivity extends AppCompatActivity {
         int overlayW = (int) ((float) panelW / previewW * vidW);
         int overlayH = (int) ((float) panelH / previewH * vidH);
 
+        // ⭐ Step2: 保存为字段，供 startMapBitmapUpdate 调用 captureViewBitmap 按 videoSize 离屏绘制
+        overlayVideoW = overlayW;
+        overlayVideoH = overlayH;
+
         glesRenderer.setOverlaySize(overlayW, overlayH);
         glesRenderer.setOverlayPosition(overlayX, overlayY);
 
         Log.d(TAG, "信息面板叠加位置: pos=(" + overlayX + "," + overlayY + "), size=" + overlayW + "x" + overlayH
                 + " (预览: pos=(" + relX + "," + relY + "), size=" + panelW + "x" + panelH + ")");
-    }
-
-    private void createCameraPreviewSessionForRecording() {
-        try {
-            List<Surface> surfaces = new ArrayList<>();
-            CaptureRequest.Builder builder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_RECORD);
-
-            if (glesRenderer != null && glCameraSurface != null && glCameraSurface.isValid()) {
-                surfaces.add(glCameraSurface);
-                builder.addTarget(glCameraSurface);
-
-                android.graphics.SurfaceTexture texture = textureView.getSurfaceTexture();
-                if (texture != null) {
-                    texture.setDefaultBufferSize(videoSize.getWidth(), videoSize.getHeight());
-                    Surface previewSurface = new Surface(texture);
-                    surfaces.add(previewSurface);
-                    builder.addTarget(previewSurface);
-                }
-                Log.d(TAG, "使用GLES合成模式: Camera2 → GLES(录制+地图) + TextureView(预览)");
-            } else {
-                android.graphics.SurfaceTexture texture = textureView.getSurfaceTexture();
-                if (texture == null) {
-                    Log.e(TAG, "SurfaceTexture为null");
-                    return;
-                }
-                texture.setDefaultBufferSize(videoSize.getWidth(), videoSize.getHeight());
-
-                Surface previewSurface = new Surface(texture);
-                surfaces.add(previewSurface);
-                builder.addTarget(previewSurface);
-
-                if (encoderSurface != null && encoderSurface.isValid()) {
-                    surfaces.add(encoderSurface);
-                    builder.addTarget(encoderSurface);
-                }
-                Log.d(TAG, "使用纯摄像头模式: Camera2 → 编码器+预览");
-            }
-
-            Log.d(TAG, "正在创建录制CaptureSession");
-
-            CameraCaptureSession.StateCallback stateCallback = new CameraCaptureSession.StateCallback() {
-                @Override public void onConfigured(@NonNull CameraCaptureSession session) {
-                    if (cameraDevice == null) return;
-                    captureSession = session;
-                    try {
-                        builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO);
-                        builder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, selectedFpsRange);
-                        captureSession.setRepeatingRequest(builder.build(), null, backgroundHandler);
-                        Log.d(TAG, "录制CaptureSession配置成功: fpsRange=" + selectedFpsRange);
-                    } catch (CameraAccessException e) {
-                        Log.e(TAG, "Capture request error", e);
-                    }
-                }
-                @Override public void onConfigureFailed(@NonNull CameraCaptureSession session) {
-                    Log.e(TAG, "录制CaptureSession配置失败: surfaces=" + surfaces.size());
-                    runOnUiThread(() -> {
-                        Toast.makeText(CameraActivity.this, "摄像头配置失败，请重试", Toast.LENGTH_SHORT).show();
-                        if (isRecording) stopRecording();
-                    });
-                }
-            };
-
-            cameraDevice.createCaptureSession(surfaces, stateCallback, backgroundHandler);
-        } catch (CameraAccessException e) {
-            Log.e(TAG, "Session creation error", e);
-            runOnUiThread(() -> {
-                Toast.makeText(CameraActivity.this, "录制配置失败，请重试", Toast.LENGTH_SHORT).show();
-                if (isRecording) stopRecording();
-            });
-        }
     }
 
     private void startEncoderOutputThread() {
@@ -1139,7 +1305,8 @@ public class CameraActivity extends AppCompatActivity {
 
             while (isRecording && videoEncoder != null) {
                 try {
-                    int outputBufferIndex = videoEncoder.dequeueOutputBuffer(bufferInfo, 10000);
+                    // ⭐ 超时从 10ms 增到 50ms，减少忙轮询 CPU 开销
+                    int outputBufferIndex = videoEncoder.dequeueOutputBuffer(bufferInfo, 50000);
 
                     if (outputBufferIndex == android.media.MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                         android.media.MediaFormat videoFormat = videoEncoder.getOutputFormat();
@@ -1200,7 +1367,7 @@ public class CameraActivity extends AppCompatActivity {
 
                 while (isRecording && audioEncoder != null) {
                     try {
-                        int outputBufferIndex = audioEncoder.dequeueOutputBuffer(bufferInfo, 10000);
+                        int outputBufferIndex = audioEncoder.dequeueOutputBuffer(bufferInfo, 50000);
 
                         if (outputBufferIndex == android.media.MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                             android.media.MediaFormat audioFormat = audioEncoder.getOutputFormat();
@@ -1379,22 +1546,34 @@ public class CameraActivity extends AppCompatActivity {
         }
     }
 
+    /**
+     * ⭐ 释放编码器资源
+     * 新架构：不释放 glesRenderer（保持预览），仅清除 encoder Surface
+     */
     private void releaseEncoderResources() {
         Log.d(TAG, "开始释放编码器资源...");
+
+        // ⭐ 停止录制时长显示
+        if (recordDurationHandler != null && recordDurationRunnable != null) {
+            recordDurationHandler.removeCallbacks(recordDurationRunnable);
+        }
 
         stopMapBitmapUpdate();
         stopAudioRecordingThread();
 
+        // ⭐ 新架构：仅清除 encoder Surface，不停止/释放 glesRenderer（保持预览继续运行）
         if (glesRenderer != null) {
-            glesRenderer.stopRendering();
-            glesRenderer.release();
-            glesRenderer = null;
-            Log.d(TAG, "GLES渲染器已释放");
+            glesRenderer.clearEncoderSurface();
+            glesRenderer.setMapEnabled(false);
+            glesRenderer.setOverlayEnabled(false);
         }
 
-        if (glCameraSurface != null) {
-            glCameraSurface.release();
-            glCameraSurface = null;
+        // ⭐ Step2: 恢复屏幕 UI 位置（startRecording 中被平移到屏外）
+        if (mapContainer != null) {
+            mapContainer.setTranslationX(0f);
+        }
+        if (infoPanelContainer != null) {
+            infoPanelContainer.setTranslationX(0f);
         }
 
         // 通知编码器结束输入流，让输出线程排空剩余帧
@@ -1410,7 +1589,7 @@ public class CameraActivity extends AppCompatActivity {
             signalAudioEncoderEndOfStream();
         }
 
-        // 等待输出线程排空并退出（替代主线程sleep，避免ANR）
+        // 等待输出线程排空并退出
         joinEncoderThread(videoOutputThread, "视频输出线程", 2000);
         videoOutputThread = null;
         joinEncoderThread(audioOutputThread, "音频输出线程", 1000);
@@ -1496,62 +1675,71 @@ public class CameraActivity extends AppCompatActivity {
         }
     }
 
+    /**
+     * ⭐ 异步停止录制：移到子线程执行 releaseEncoderResources，避免主线程 join 导致 ANR
+     */
     private void stopRecording() {
-        if (!isRecording) return;
+        if (!isRecording || isStoppingRecording) return;
+        isStoppingRecording = true;
 
-        try {
-            // 不在此处设置 isRecording=false，由 releaseEncoderResources 在输出线程排空后设置
-            releaseEncoderResources();
+        // UI 立即响应
+        btnRecord.setText("停止中");
+        btnRecord.setEnabled(false);
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        stopRecordingThread = new Thread(() -> {
+            try {
+                releaseEncoderResources();
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    if (currentVideoUri != null) {
+                        ContentValues updateValues = new ContentValues();
+                        updateValues.put(MediaStore.Video.Media.IS_PENDING, 0);
+                        getContentResolver().update(currentVideoUri, updateValues, null, null);
+                        Log.d(TAG, "视频已直接保存到相册: " + currentVideoUri);
+                    }
+                } else if (currentTempFilePath != null) {
+                    File outputFile = new File(currentTempFilePath);
+                    if (outputFile.exists() && outputFile.length() > 0) {
+                        android.media.MediaScannerConnection.scanFile(this,
+                                new String[]{currentTempFilePath},
+                                new String[]{"video/mp4"},
+                                null);
+                        Log.d(TAG, "视频已直接保存到相册路径: " + currentTempFilePath + ", size=" + outputFile.length());
+                    } else {
+                        Log.e(TAG, "输出文件无效: " + currentTempFilePath);
+                        runOnUiThread(() -> Toast.makeText(CameraActivity.this, "录制失败：文件为空", Toast.LENGTH_SHORT).show());
+                    }
+                }
+
+                runOnUiThread(() -> Toast.makeText(CameraActivity.this, "录制已保存到相册", Toast.LENGTH_SHORT).show());
+                Log.d(TAG, "录制完成: videoFrameCount=" + videoFrameCount + ", audioFrameCount=" + audioFrameCount);
+
+            } catch (Exception e) {
+                Log.e(TAG, "Stop recording error", e);
+                runOnUiThread(() -> Toast.makeText(CameraActivity.this, "录制保存失败: " + e.getMessage(), Toast.LENGTH_SHORT).show());
                 if (currentVideoUri != null) {
-                    ContentValues updateValues = new ContentValues();
-                    updateValues.put(MediaStore.Video.Media.IS_PENDING, 0);
-                    getContentResolver().update(currentVideoUri, updateValues, null, null);
-                    Log.d(TAG, "视频已直接保存到相册: " + currentVideoUri);
+                    getContentResolver().delete(currentVideoUri, null, null);
                 }
-            } else if (currentTempFilePath != null) {
-                File outputFile = new File(currentTempFilePath);
-                if (outputFile.exists() && outputFile.length() > 0) {
-                    android.media.MediaScannerConnection.scanFile(this,
-                            new String[]{currentTempFilePath},
-                            new String[]{"video/mp4"},
-                            null);
-                    Log.d(TAG, "视频已直接保存到相册路径: " + currentTempFilePath + ", size=" + outputFile.length());
-                } else {
-                    Log.e(TAG, "输出文件无效: " + currentTempFilePath);
-                    Toast.makeText(this, "录制失败：文件为空", Toast.LENGTH_SHORT).show();
-                    return;
+            } finally {
+                isRecording = false;
+                isStoppingRecording = false;
+                currentVideoUri = null;
+                currentTempFilePath = null;
+                if (mapUpdateRunnable != null) {
+                    mapUpdateHandler.removeCallbacks(mapUpdateRunnable);
+                    mapUpdateRunnable = null;
                 }
+                videoFrameCount = 0;
+                audioFrameCount = 0;
+                runOnUiThread(() -> {
+                    btnRecord.setText("录制");
+                    btnRecord.setEnabled(true);
+                    btnRecord.setBackgroundResource(R.drawable.record_button_bg);
+                    tvRecordDuration.setVisibility(View.GONE);
+                });
             }
-
-            Toast.makeText(this, "录制已保存到相册", Toast.LENGTH_SHORT).show();
-            Log.d(TAG, "录制完成: videoFrameCount=" + videoFrameCount + ", audioFrameCount=" + audioFrameCount);
-
-        } catch (Exception e) {
-            Log.e(TAG, "Stop recording error", e);
-            Toast.makeText(this, "录制保存失败: " + e.getMessage(), Toast.LENGTH_SHORT).show();
-            if (currentVideoUri != null) {
-                getContentResolver().delete(currentVideoUri, null, null);
-            }
-        } finally {
-            isRecording = false;
-            currentVideoUri = null;
-            currentTempFilePath = null;
-            if (mapUpdateRunnable != null) {
-                mapUpdateHandler.removeCallbacks(mapUpdateRunnable);
-                mapUpdateRunnable = null;
-            }
-            videoFrameCount = 0;
-            audioFrameCount = 0;
-            btnRecord.setText("录制");
-            btnRecord.setBackgroundResource(R.drawable.record_button_bg);
-            if (captureSession != null) {
-                captureSession.close();
-                captureSession = null;
-            }
-            createCameraPreviewSession(false);
-        }
+        });
+        stopRecordingThread.start();
     }
 
     // ===== 地图 =====
@@ -1692,27 +1880,62 @@ public class CameraActivity extends AppCompatActivity {
 
     private void startMapBitmapUpdate() {
         if (mapUpdateRunnable != null) return;
+        mapScreenshotPending = false;
+        lastMapScreenshotTime = 0;
+        lastMapResumeTime = System.currentTimeMillis();
 
         mapUpdateRunnable = () -> {
             if (isRecording) {
+                long now = System.currentTimeMillis();
+                // 1. 地图截图
                 if (isMapEnabled && mapView != null) {
-                    try {
-                        mapView.getMap().getMapScreenShot(new AMap.OnMapScreenShotListener() {
-                            @Override public void onMapScreenShot(android.graphics.Bitmap bitmap) {
-                                handleMapScreenshot(bitmap);
+                    // ⭐ 定期主动 onResume 保活 AMap 渲染线程（防止屏外停渲染）
+                    if (now - lastMapResumeTime > MAP_RESUME_INTERVAL_MS) {
+                        lastMapResumeTime = now;
+                        try {
+                            mapView.onResume();
+                        } catch (Exception e) {
+                            Log.e(TAG, "mapView.onResume 保活失败", e);
+                        }
+                    }
+
+                    if (mapScreenshotPending) {
+                        // 看门狗：回调超时 5s 则强制恢复
+                        if (now - lastMapScreenshotTime > MAP_SCREENSHOT_TIMEOUT_MS) {
+                            Log.w(TAG, "⚠️ 地图截图回调超时(" + (now - lastMapScreenshotTime) + "ms)，强制恢复");
+                            mapScreenshotPending = false;
+                            try {
+                                mapView.onResume();
+                            } catch (Exception e) {
+                                Log.e(TAG, "恢复 AMap 渲染失败", e);
                             }
-                            @Override public void onMapScreenShot(android.graphics.Bitmap bitmap, int status) {
-                                handleMapScreenshot(bitmap);
-                            }
-                        });
-                    } catch (Exception e) {
-                        Log.e(TAG, "获取地图Bitmap失败", e);
+                        }
+                    } else {
+                        try {
+                            mapScreenshotPending = true;
+                            lastMapScreenshotTime = now;
+                            mapView.getMap().getMapScreenShot(new AMap.OnMapScreenShotListener() {
+                                @Override public void onMapScreenShot(android.graphics.Bitmap bitmap) {
+                                    handleMapScreenshot(bitmap);
+                                }
+                                @Override public void onMapScreenShot(android.graphics.Bitmap bitmap, int status) {
+                                    handleMapScreenshot(bitmap);
+                                }
+                            });
+                        } catch (Exception e) {
+                            mapScreenshotPending = false;
+                            Log.e(TAG, "获取地图Bitmap失败", e);
+                        }
                     }
                 }
 
-                if (isInfoPanelEnabled && infoPanelContainer != null && infoPanelContainer.getVisibility() == View.VISIBLE) {
+                // 2. 信息面板截图
+                if (isInfoPanelEnabled && infoPanelContainer != null
+                        && infoPanelContainer.getVisibility() == View.VISIBLE
+                        && now - lastOverlayUpdateTime >= OVERLAY_UPDATE_INTERVAL) {
+                    lastOverlayUpdateTime = now;
                     try {
-                        android.graphics.Bitmap bmp = captureViewBitmap(infoPanelContainer);
+                        android.graphics.Bitmap bmp = captureViewBitmap(infoPanelContainer, overlayVideoW, overlayVideoH);
                         if (bmp != null && glesRenderer != null) {
                             glesRenderer.updateOverlayBitmap(bmp);
                         }
@@ -1727,28 +1950,36 @@ public class CameraActivity extends AppCompatActivity {
             }
         };
 
+        lastOverlayUpdateTime = 0;
         mapUpdateHandler.post(mapUpdateRunnable);
-        Log.d(TAG, "地图/信息面板Bitmap定时更新已启动，间隔=" + MAP_UPDATE_INTERVAL + "ms");
+        Log.d(TAG, "地图/信息面板Bitmap定时更新已启动: map=" + MAP_UPDATE_INTERVAL + "ms, overlay=" + OVERLAY_UPDATE_INTERVAL + "ms");
     }
 
     private void handleMapScreenshot(android.graphics.Bitmap bitmap) {
+        mapScreenshotPending = false;
         if (bitmap == null || bitmap.isRecycled()) return;
         if (glesRenderer == null) {
             bitmap.recycle();
             return;
         }
-        android.graphics.Bitmap safeBitmap = bitmap.copy(android.graphics.Bitmap.Config.ARGB_8888, false);
+        android.graphics.Bitmap copy = bitmap.copy(android.graphics.Bitmap.Config.ARGB_8888, false);
         bitmap.recycle();
-        if (safeBitmap == null) return;
-        glesRenderer.updateMapBitmap(safeBitmap);
+        if (copy != null) {
+            glesRenderer.updateMapBitmap(copy);
+        }
     }
 
-    private android.graphics.Bitmap captureViewBitmap(View view) {
-        int w = view.getWidth();
-        int h = view.getHeight();
-        if (w <= 0 || h <= 0) return null;
-        android.graphics.Bitmap bmp = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888);
+    // ⭐ Step2: 按 tgtW×tgtH 创建 bitmap 并缩放绘制，让信息面板以 videoSize 分辨率离屏渲染（与预览分辨率解耦）
+    //   tgtW/tgtH <= 0 时回退到 view 自身尺寸（保持旧行为，防止 setupOverlayPosition 未调用的边界）
+    private android.graphics.Bitmap captureViewBitmap(View view, int tgtW, int tgtH) {
+        int viewW = view.getWidth();
+        int viewH = view.getHeight();
+        if (viewW <= 0 || viewH <= 0) return null;
+        int bmpW = tgtW > 0 ? tgtW : viewW;
+        int bmpH = tgtH > 0 ? tgtH : viewH;
+        android.graphics.Bitmap bmp = android.graphics.Bitmap.createBitmap(bmpW, bmpH, android.graphics.Bitmap.Config.ARGB_8888);
         android.graphics.Canvas canvas = new android.graphics.Canvas(bmp);
+        canvas.scale((float) bmpW / viewW, (float) bmpH / viewH);
         view.draw(canvas);
         return bmp;
     }
@@ -1834,11 +2065,45 @@ public class CameraActivity extends AppCompatActivity {
         resolutionDisplayNames.add(size.getHeight() + "p " + fps + "fps (" + size.getWidth() + "x" + size.getHeight() + ")");
     }
 
+    /** 在 fps 范围数组中找最匹配 targetFps 的范围。
+     *  优先设备提供的精确 [t,t]；若没有但有包含 t 的范围（如 [60,120]），则构造 [t,t] 固定帧率
+     *  （匹配编码器 KEY_FRAME_RATE，避免变帧率导致时间戳/编码问题）。 */
+    private Range<Integer> findBestFpsRange(Range<Integer>[] ranges, int targetFps) {
+        if (ranges == null) return null;
+        for (Range<Integer> r : ranges) {
+            if (r.getLower() == targetFps && r.getUpper() == targetFps) return r;
+        }
+        for (Range<Integer> r : ranges) {
+            if (r.getLower() <= targetFps && r.getUpper() >= targetFps) {
+                return new Range<>(targetFps, targetFps);
+            }
+        }
+        return null;
+    }
+
     private void applyVideoOption(int position) {
         videoSize = availableVideoSizes.get(position);
         previewSize = videoSize;
         selectedVideoFps = availableVideoFpsList.get(position);
         selectedFpsRange = availableVideoFpsRanges.get(position);
+        // ⭐ videoSize 变化时同步 GLES viewport 和预览 SurfaceTexture buffer：
+        //   setVideoSize 只在 startGlesAndCameraX 调过一次，spinner 改分辨率后若不同步，
+        //   录制时 encoder surface=新videoSize 而 GLES viewport=旧值 → glViewport 超出 surface，
+        //   画面只渲染到 surface 左下角，其余黑屏（即"4K 录制只看到 1080p 左下角"的根因）。
+        if (glesRenderer != null) {
+            glesRenderer.setVideoSize(videoSize.getWidth(), videoSize.getHeight());
+        }
+        if (textureView != null && textureView.isAvailable() && textureView.getSurfaceTexture() != null) {
+            textureView.getSurfaceTexture().setDefaultBufferSize(videoSize.getWidth(), videoSize.getHeight());
+        }
+        // ⭐ 重绑 CameraX 让 setTargetResolution(新 videoSize) 生效：之前不重绑时 CameraX 一直用旧 bind 的目标分辨率，
+        //   导致 4K 录制相机仍给 1080p（看不出清晰度提升）。录制中不重绑（会中断编码器），新分辨率下次录制生效。
+        if (glesRenderer != null && glesInitialized && !isRecording) {
+            Log.d(TAG, "分辨率变更，重绑 CameraX: " + videoSize.getWidth() + "x" + videoSize.getHeight());
+            startCameraX();
+        } else if (isRecording) {
+            Log.w(TAG, "录制中，分辨率变更将在下次录制生效: " + videoSize.getWidth() + "x" + videoSize.getHeight());
+        }
     }
 
     private int findDefaultVideoOptionIndex() {
@@ -1972,55 +2237,103 @@ public class CameraActivity extends AppCompatActivity {
         seekbarVideoBitrate.setProgress(bitrateMbps);
     }
 
-    private void startBackgroundThread() {
-        if (backgroundThread != null) return;
-        backgroundThread = new HandlerThread("CameraBackground");
-        backgroundThread.start();
-        backgroundHandler = new Handler(backgroundThread.getLooper());
-    }
-
-    private void stopBackgroundThread() {
-        if (backgroundThread != null) {
-            backgroundThread.quitSafely();
-            try {
-                backgroundThread.join();
-            } catch (InterruptedException e) {
-                Log.e(TAG, "Background thread join error", e);
-            }
-            backgroundThread = null;
-            backgroundHandler = null;
-        }
-    }
-
+    /**
+     * ⭐ 关闭摄像头：解绑 CameraX + 释放 GLES + 停止录制
+     */
     private void closeCamera() {
+        // 如果正在录制，先同步停止（用于 onPause/onDestroy）
         if (isRecording) {
-            stopRecording();
+            if (isStoppingRecording && stopRecordingThread != null) {
+                // 异步停止正在执行，等待完成
+                Log.d(TAG, "closeCamera: 等待异步停止录制线程完成...");
+                try {
+                    stopRecordingThread.join(3000);
+                } catch (InterruptedException e) {
+                    Log.e(TAG, "等待停止录制线程失败", e);
+                }
+                stopRecordingThread = null;
+            } else {
+                // 同步停止录制
+                stopRecordingSync();
+            }
         }
-        if (captureSession != null) {
-            captureSession.close();
-            captureSession = null;
+
+        // 解绑 CameraX（停止 Camera 输出到 GLES）
+        if (cameraProvider != null) {
+            cameraProvider.unbindAll();
+            Log.d(TAG, "CameraX 已解绑");
         }
-        if (cameraDevice != null) {
-            cameraDevice.close();
-            cameraDevice = null;
+
+        // 释放 GLES 渲染器
+        if (glesRenderer != null) {
+            glesRenderer.release();
+            glesRenderer = null;
+            Log.d(TAG, "GLES 渲染器已释放");
         }
-        stopBackgroundThread();
+        glesInitialized = false;
+
+        // 释放 previewSurface
+        if (previewSurface != null) {
+            previewSurface.release();
+            previewSurface = null;
+        }
+    }
+
+    /**
+     * 同步停止录制（用于 closeCamera）
+     */
+    private void stopRecordingSync() {
+        if (!isRecording) return;
+        try {
+            releaseEncoderResources();
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                if (currentVideoUri != null) {
+                    ContentValues updateValues = new ContentValues();
+                    updateValues.put(MediaStore.Video.Media.IS_PENDING, 0);
+                    getContentResolver().update(currentVideoUri, updateValues, null, null);
+                    Log.d(TAG, "视频已直接保存到相册: " + currentVideoUri);
+                }
+            } else if (currentTempFilePath != null) {
+                File outputFile = new File(currentTempFilePath);
+                if (outputFile.exists() && outputFile.length() > 0) {
+                    android.media.MediaScannerConnection.scanFile(this,
+                            new String[]{currentTempFilePath},
+                            new String[]{"video/mp4"},
+                            null);
+                    Log.d(TAG, "视频已直接保存到相册路径: " + currentTempFilePath + ", size=" + outputFile.length());
+                }
+            }
+
+            Log.d(TAG, "录制完成(同步): videoFrameCount=" + videoFrameCount + ", audioFrameCount=" + audioFrameCount);
+
+        } catch (Exception e) {
+            Log.e(TAG, "Stop recording error", e);
+            if (currentVideoUri != null) {
+                getContentResolver().delete(currentVideoUri, null, null);
+            }
+        } finally {
+            isRecording = false;
+            isStoppingRecording = false;
+            currentVideoUri = null;
+            currentTempFilePath = null;
+            if (mapUpdateRunnable != null) {
+                mapUpdateHandler.removeCallbacks(mapUpdateRunnable);
+                mapUpdateRunnable = null;
+            }
+            videoFrameCount = 0;
+            audioFrameCount = 0;
+            btnRecord.setText("录制");
+            btnRecord.setEnabled(true);
+            btnRecord.setBackgroundResource(R.drawable.record_button_bg);
+            tvRecordDuration.setVisibility(View.GONE);
+        }
     }
 
     private void configureTransform(int viewWidth, int viewHeight) {
-        if (textureView == null || previewSize == null || viewWidth == 0 || viewHeight == 0) return;
-
-        Matrix matrix = new Matrix();
-        RectF viewRect = new RectF(0, 0, viewWidth, viewHeight);
-        RectF bufferRect = new RectF(0, 0, previewSize.getHeight(), previewSize.getWidth());
-        float centerX = viewRect.centerX();
-        float centerY = viewRect.centerY();
-
-        bufferRect.offset(centerX - bufferRect.centerX(), centerY - bufferRect.centerY());
-        matrix.setRectToRect(viewRect, bufferRect, Matrix.ScaleToFit.FILL);
-        float scale = Math.max((float) viewHeight / previewSize.getHeight(), (float) viewWidth / previewSize.getWidth());
-        matrix.postScale(scale, scale, centerX, centerY);
-        matrix.postRotate(sensorOrientation == 270 ? 90 : -90, centerX, centerY);
-        textureView.setTransform(matrix);
+        if (textureView == null || viewWidth == 0 || viewHeight == 0) return;
+        // 横屏锁定应用：sensorOrientation(90) 与 displayRotation(90) 抵消，净旋转 0°，
+        // GLES 输出已是正确方向的横屏画面，TextureView 无需旋转。布局已保证 16:9，直接显示。
+        textureView.setTransform(new Matrix());
     }
 }

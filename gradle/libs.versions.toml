@@ -18,6 +18,7 @@ glide = "5.0.7"
 gridlayout = "1.0.0"
 sdp = "1.1.1"
 ssp = "1.1.1"
+camerax = "1.4.0"
 
 [libraries]
 jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "jacksonDatabind" }
@@ -38,6 +39,11 @@ glide = { module = "com.github.bumptech.glide:glide", version.ref = "glide" }
 gridlayout = { group = "androidx.gridlayout", name = "gridlayout", version.ref = "gridlayout" }
 sdp = { module = "com.intuit.sdp:sdp-android", version.ref = "sdp" }
 ssp = { module = "com.intuit.ssp:ssp-android", version.ref = "ssp" }
+camera-core = { group = "androidx.camera", name = "camera-core", version.ref = "camerax" }
+camera-camera2 = { group = "androidx.camera", name = "camera-camera2", version.ref = "camerax" }
+camera-lifecycle = { group = "androidx.camera", name = "camera-lifecycle", version.ref = "camerax" }
+camera-video = { group = "androidx.camera", name = "camera-video", version.ref = "camerax" }
+camera-view = { group = "androidx.camera", name = "camera-view", version.ref = "camerax" }
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 
