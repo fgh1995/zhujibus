@@ -243,6 +243,42 @@
                         android:layout_marginStart="6dp"
                         android:text="0/0" />
                 </LinearLayout>
+
+                <!-- 过时语音包清理通知（仅在发生过清理时显示） -->
+                <LinearLayout
+                    android:id="@+id/ll_voicepack_cleanup"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:background="@drawable/cleanup_notice_bg"
+                    android:padding="8dp"
+                    android:layout_marginTop="6dp"
+                    android:visibility="gone">
+
+                    <TextView
+                        android:id="@+id/tv_voicepack_cleanup_text"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:textSize="12sp"
+                        android:textColor="#2E7D32"
+                        android:maxLines="2"
+                        android:ellipsize="end"
+                        android:text="🧹 已自动清理过时语音包文件" />
+
+                    <TextView
+                        android:id="@+id/tv_voicepack_cleanup_close"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textSize="16sp"
+                        android:textColor="#66BB6A"
+                        android:paddingStart="8dp"
+                        android:paddingEnd="4dp"
+                        android:paddingTop="2dp"
+                        android:paddingBottom="2dp"
+                        android:text="×" />
+                </LinearLayout>
             </LinearLayout>
             <LinearLayout
                 android:gravity="center_vertical"

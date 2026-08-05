@@ -97,6 +97,8 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private int voicepackRetryCount = 0;
     private int lastMissingCount = 0;
     private VoicePackManager.MissingStat lastMissingStat = null;
+    /** 本页面已展示过的清理事件时间戳，避免同一事件重复提示 */
+    private long lastDisplayedCleanupTime = 0L;
 
     // ===== POV模式静态引用 =====
     /** ⭐ 当前 Activity 实例的静态引用（用于POV模式暂停/恢复业务） */
@@ -2485,19 +2487,35 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 lastMissingStat = stat;
                 int missing = stat.notInRemote.size() + stat.notDownloaded.size() + stat.needUpdate.size();
                 lastMissingCount = missing;
-                if (missing == 0) {
-                    // 已就绪：整个状态条隐藏
+                // 检查自动清理结果（仅在发生过清理且本页面未展示过时提示）
+                long[] cleanupResult = vpm.getLastCleanupResult();
+                int cleanupCount = (int) cleanupResult[0];
+                long cleanupTime = cleanupResult[1];
+                boolean hasNewCleanup = cleanupCount > 0 && cleanupTime > lastDisplayedCleanupTime;
+                if (hasNewCleanup) {
+                    lastDisplayedCleanupTime = cleanupTime;
+                }
+                if (missing == 0 && !hasNewCleanup) {
+                    // 已就绪且无清理通知：整个状态条隐藏
                     llVoicepackStatus.setVisibility(View.GONE);
                 } else {
                     StringBuilder sb = new StringBuilder();
-                    sb.append("⚠️ 缺少 ").append(missing).append(" 个语音包\n");
-                    sb.append("  · 未下载：").append(stat.notDownloaded.size()).append("\n");
-                    sb.append("  · 有更新：").append(stat.needUpdate.size()).append("\n");
-                    sb.append("  · 远程不存在：").append(stat.notInRemote.size());
+                    if (missing > 0) {
+                        sb.append("⚠️ 缺少 ").append(missing).append(" 个语音包\n");
+                        sb.append("  · 未下载：").append(stat.notDownloaded.size()).append("\n");
+                        sb.append("  · 有更新：").append(stat.needUpdate.size()).append("\n");
+                        sb.append("  · 远程不存在：").append(stat.notInRemote.size());
+                    }
+                    if (hasNewCleanup) {
+                        if (sb.length() > 0) sb.append("\n");
+                        sb.append("🧹 已自动清理 ").append(cleanupCount).append(" 个过时文件");
+                    }
                     tvVoicepackStatus.setText(sb.toString());
                     tvVoicepackStatus.setOnClickListener(null);
-                    if (btnVoicepackDetail != null) btnVoicepackDetail.setVisibility(View.VISIBLE);
-                    if (btnVoicepackDownload != null) btnVoicepackDownload.setVisibility(View.VISIBLE);
+                    // 仅在缺少语音包时显示下载/详情按钮
+                    int btnVisibility = missing > 0 ? View.VISIBLE : View.GONE;
+                    if (btnVoicepackDetail != null) btnVoicepackDetail.setVisibility(btnVisibility);
+                    if (btnVoicepackDownload != null) btnVoicepackDownload.setVisibility(btnVisibility);
                 }
             });
         }).start();
@@ -2526,6 +2544,15 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
 
         sb.append("\n\n❓ 远程不存在 (").append(stat.notInRemote.size()).append(")\n");
         sb.append(stat.notInRemote.isEmpty() ? "无" : joinStationNames(stat.notInRemote));
+
+        // 追加自动清理信息（若发生过清理则展示）
+        VoicePackManager vpm = VoicePackManager.getInstance(this);
+        long[] cleanupResult = vpm.getLastCleanupResult();
+        int cleanupCount = (int) cleanupResult[0];
+        if (cleanupCount > 0) {
+            sb.append("\n\n🧹 已清理过时文件 (").append(cleanupCount).append(")\n");
+            sb.append("配置更新后自动删除的本地冗余语音包");
+        }
 
         sb.append("\n\n说明：\n")
           .append("· 未下载：远程有但本地没有，可点击下载补齐\n")

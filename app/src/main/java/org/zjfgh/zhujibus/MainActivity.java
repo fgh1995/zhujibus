@@ -97,6 +97,12 @@ public class MainActivity extends AppCompatActivity {
     private TextView tvVoicepackProgress;
     private volatile boolean voicepackDownloading = false;
     private int voicepackStatusRetryCount = 0;
+    // 过时文件清理通知
+    private LinearLayout llVoicepackCleanup;
+    private TextView tvVoicepackCleanupText;
+    private TextView tvVoicepackCleanupClose;
+    /** 本页面已展示过的清理事件时间戳，避免同一事件重复提示 */
+    private long lastDisplayedCleanupTime = 0L;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -381,11 +387,20 @@ public class MainActivity extends AppCompatActivity {
         llVoicepackProgressRow = findViewById(R.id.ll_voicepack_progress_row);
         pbVoicepack = findViewById(R.id.pb_voicepack);
         tvVoicepackProgress = findViewById(R.id.tv_voicepack_progress);
+        llVoicepackCleanup = findViewById(R.id.ll_voicepack_cleanup);
+        tvVoicepackCleanupText = findViewById(R.id.tv_voicepack_cleanup_text);
+        tvVoicepackCleanupClose = findViewById(R.id.tv_voicepack_cleanup_close);
         if (tvVoicepackDownload == null) return;
         tvVoicepackDownload.setOnClickListener(v -> {
             if (voicepackDownloading) return;
             confirmAndDownloadAllVoicepack();
         });
+        // 关闭清理通知
+        if (tvVoicepackCleanupClose != null) {
+            tvVoicepackCleanupClose.setOnClickListener(v -> {
+                if (llVoicepackCleanup != null) llVoicepackCleanup.setVisibility(View.GONE);
+            });
+        }
         // 首次进入即触发状态刷新（含配置读取状态展示）
         refreshVoicepackStatus();
     }
@@ -435,8 +450,35 @@ public class MainActivity extends AppCompatActivity {
                     sb.append(" · 远程不存在 ").append(stat.notInRemote.size());
                     tvVoicepackStatus.setText(sb.toString());
                 }
+                // 检查并展示自动清理结果（仅一次）
+                showCleanupNoticeIfAny(vpm);
             });
         }).start();
+    }
+
+    /**
+     * 查询 VoicePackManager 最近一次自动清理结果，若发生过清理且本页面未展示过，
+     * 则在首页显示通知。同一清理事件只提示一次（基于时间戳比较）。
+     */
+    private void showCleanupNoticeIfAny(VoicePackManager vpm) {
+        if (llVoicepackCleanup == null || tvVoicepackCleanupText == null) return;
+        long[] result = vpm.getLastCleanupResult();
+        int count = (int) result[0];
+        long time = result[1];
+        // 未发生清理 或 已展示过该清理事件 → 隐藏
+        if (count <= 0 || time <= lastDisplayedCleanupTime) {
+            llVoicepackCleanup.setVisibility(View.GONE);
+            return;
+        }
+        tvVoicepackCleanupText.setText("🧹 已自动清理 " + count + " 个过时语音包文件");
+        llVoicepackCleanup.setVisibility(View.VISIBLE);
+        lastDisplayedCleanupTime = time;
+        // 5 秒后自动隐藏（不重置 lastDisplayedCleanupTime，避免重复提示）
+        llVoicepackCleanup.postDelayed(() -> {
+            if (!isFinishing() && !isDestroyed() && llVoicepackCleanup != null) {
+                llVoicepackCleanup.setVisibility(View.GONE);
+            }
+        }, 5000);
     }
 
     private void confirmAndDownloadAllVoicepack() {
