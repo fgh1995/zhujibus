@@ -90,6 +90,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private LinearLayout llVoicepackStatus;
     private TextView tvVoicepackStatus;
     private Button btnVoicepackDownload;
+    private Button btnVoicepackDetail;
     private ProgressBar pbVoicepackLine;
     private volatile boolean voicepackDownloadingLine = false;
     private List<String> voicepackStationNames = new ArrayList<>();
@@ -1532,12 +1533,16 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         llVoicepackStatus = findViewById(R.id.ll_voicepack_status);
         tvVoicepackStatus = findViewById(R.id.tv_voicepack_status);
         btnVoicepackDownload = findViewById(R.id.btn_voicepack_download);
+        btnVoicepackDetail = findViewById(R.id.btn_voicepack_detail);
         pbVoicepackLine = findViewById(R.id.pb_voicepack_line);
         if (btnVoicepackDownload != null) {
             btnVoicepackDownload.setOnClickListener(v -> {
                 if (voicepackDownloadingLine) return;
                 confirmAndDownloadLineVoicepack();
             });
+        }
+        if (btnVoicepackDetail != null) {
+            btnVoicepackDetail.setOnClickListener(v -> showVoicepackDetailDialog());
         }
 
         startErrorBlinkAnimation();
@@ -2438,6 +2443,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     /**
      * 检查当前线路缺失语音包数量并更新状态条。
      * 在站点列表加载完成后调用。classifyMissing 涉及磁盘 md5 校验，放后台线程。
+     * 已就绪时整个状态条隐藏，不显示"已就绪"。
      */
     private void checkLineVoicepackStatus() {
         if (llVoicepackStatus == null || tvVoicepackStatus == null) return;
@@ -2453,9 +2459,10 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
 
         // 显示状态条：检查中
         llVoicepackStatus.setVisibility(View.VISIBLE);
-        btnVoicepackDownload.setVisibility(View.GONE);
-        pbVoicepackLine.setVisibility(View.GONE);
-        tvVoicepackStatus.setText("检查语音包中...");
+        if (btnVoicepackDownload != null) btnVoicepackDownload.setVisibility(View.GONE);
+        if (btnVoicepackDetail != null) btnVoicepackDetail.setVisibility(View.GONE);
+        if (pbVoicepackLine != null) pbVoicepackLine.setVisibility(View.GONE);
+        tvVoicepackStatus.setText("🔊 检查语音包中...");
         tvVoicepackStatus.setOnClickListener(null);
 
         new Thread(() -> {
@@ -2465,12 +2472,12 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 if (isFinishing() || isDestroyed()) return;
                 if (stat == null) {
                     // 配置未就绪，延迟重试（最多 5 次，每次 2 秒）
-                    tvVoicepackStatus.setText("语音包配置加载中...");
+                    tvVoicepackStatus.setText("🔊 语音包配置加载中...");
                     if (voicepackRetryCount < 5) {
                         voicepackRetryCount++;
                         handler.postDelayed(this::checkLineVoicepackStatus, 2000);
                     } else {
-                        tvVoicepackStatus.setText("语音包配置加载失败");
+                        tvVoicepackStatus.setText("⚠️ 语音包配置加载失败");
                     }
                     return;
                 }
@@ -2479,19 +2486,18 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 int missing = stat.notInRemote.size() + stat.notDownloaded.size() + stat.needUpdate.size();
                 lastMissingCount = missing;
                 if (missing == 0) {
-                    tvVoicepackStatus.setText("语音包已就绪");
-                    tvVoicepackStatus.setOnClickListener(null);
-                    btnVoicepackDownload.setVisibility(View.GONE);
+                    // 已就绪：整个状态条隐藏
+                    llVoicepackStatus.setVisibility(View.GONE);
                 } else {
                     StringBuilder sb = new StringBuilder();
-                    sb.append("缺少 ").append(missing).append(" 个语音包");
-                    sb.append("（未下载 ").append(stat.notDownloaded.size());
-                    sb.append(" / 更新 ").append(stat.needUpdate.size());
-                    sb.append(" / 远程不存在 ").append(stat.notInRemote.size()).append("）");
-                    sb.append("\n点击文字查看详情");
+                    sb.append("⚠️ 缺少 ").append(missing).append(" 个语音包\n");
+                    sb.append("  · 未下载：").append(stat.notDownloaded.size()).append("\n");
+                    sb.append("  · 有更新：").append(stat.needUpdate.size()).append("\n");
+                    sb.append("  · 远程不存在：").append(stat.notInRemote.size());
                     tvVoicepackStatus.setText(sb.toString());
-                    tvVoicepackStatus.setOnClickListener(v -> showVoicepackDetailDialog());
-                    btnVoicepackDownload.setVisibility(View.VISIBLE);
+                    tvVoicepackStatus.setOnClickListener(null);
+                    if (btnVoicepackDetail != null) btnVoicepackDetail.setVisibility(View.VISIBLE);
+                    if (btnVoicepackDownload != null) btnVoicepackDownload.setVisibility(View.VISIBLE);
                 }
             });
         }).start();
@@ -2507,37 +2513,33 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             return;
         }
         VoicePackManager.MissingStat stat = lastMissingStat;
+        int total = stat.notInRemote.size() + stat.notDownloaded.size() + stat.needUpdate.size();
+
         StringBuilder sb = new StringBuilder();
+        sb.append("本线路共缺少 ").append(total).append(" 个语音包。\n\n");
 
-        sb.append("未下载 (").append(stat.notDownloaded.size()).append(")：\n");
-        if (stat.notDownloaded.isEmpty()) {
-            sb.append("无");
-        } else {
-            sb.append(joinStationNames(stat.notDownloaded));
-        }
+        sb.append("📥 未下载 (").append(stat.notDownloaded.size()).append(")\n");
+        sb.append(stat.notDownloaded.isEmpty() ? "无" : joinStationNames(stat.notDownloaded));
 
-        sb.append("\n\n有更新 (").append(stat.needUpdate.size()).append(")：\n");
-        if (stat.needUpdate.isEmpty()) {
-            sb.append("无");
-        } else {
-            sb.append(joinStationNames(stat.needUpdate));
-        }
+        sb.append("\n\n🔄 有更新 (").append(stat.needUpdate.size()).append(")\n");
+        sb.append(stat.needUpdate.isEmpty() ? "无" : joinStationNames(stat.needUpdate));
 
-        sb.append("\n\n远程不存在 (").append(stat.notInRemote.size()).append(")：\n");
-        if (stat.notInRemote.isEmpty()) {
-            sb.append("无");
-        } else {
-            sb.append(joinStationNames(stat.notInRemote));
-        }
+        sb.append("\n\n❓ 远程不存在 (").append(stat.notInRemote.size()).append(")\n");
+        sb.append(stat.notInRemote.isEmpty() ? "无" : joinStationNames(stat.notInRemote));
+
+        sb.append("\n\n说明：\n")
+          .append("· 未下载：远程有但本地没有，可点击下载补齐\n")
+          .append("· 有更新：本地已下载但 md5 不匹配，可点击下载更新\n")
+          .append("· 远程不存在：配置文件中无此站，需更新配置");
 
         new AlertDialog.Builder(this)
-                .setTitle("语音包详情")
+                .setTitle("🔊 语音包详情")
                 .setMessage(sb.toString())
                 .setPositiveButton("关闭", null)
                 .show();
     }
 
-    /** 用顿号拼接站名列表，超长时换行可读 */
+    /** 用顿号拼接站名列表 */
     private String joinStationNames(List<String> names) {
         if (names == null || names.isEmpty()) return "无";
         StringBuilder sb = new StringBuilder();

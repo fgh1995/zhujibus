@@ -91,9 +91,12 @@ public class MainActivity extends AppCompatActivity {
 
     // ===== 语音包全量下载 =====
     private TextView tvVoicepackDownload;
+    private TextView tvVoicepackStatus;
+    private LinearLayout llVoicepackProgressRow;
     private ProgressBar pbVoicepack;
     private TextView tvVoicepackProgress;
     private volatile boolean voicepackDownloading = false;
+    private int voicepackStatusRetryCount = 0;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -204,6 +207,10 @@ public class MainActivity extends AppCompatActivity {
             runOnUiThread(() -> loadNearbyStations());
         } else if (PermissionUtils.hasLocationPermission(this)) {
             startGpsIfNeeded();
+        }
+        // 回到首页时刷新语音包状态（可能在线路详情页下载过）
+        if (!voicepackDownloading) {
+            refreshVoicepackStatus();
         }
     }
 
@@ -370,6 +377,8 @@ public class MainActivity extends AppCompatActivity {
 
     private void setupVoicepackDownload() {
         tvVoicepackDownload = findViewById(R.id.tv_voicepack_download);
+        tvVoicepackStatus = findViewById(R.id.tv_voicepack_status);
+        llVoicepackProgressRow = findViewById(R.id.ll_voicepack_progress_row);
         pbVoicepack = findViewById(R.id.pb_voicepack);
         tvVoicepackProgress = findViewById(R.id.tv_voicepack_progress);
         if (tvVoicepackDownload == null) return;
@@ -377,6 +386,57 @@ public class MainActivity extends AppCompatActivity {
             if (voicepackDownloading) return;
             confirmAndDownloadAllVoicepack();
         });
+        // 首次进入即触发状态刷新（含配置读取状态展示）
+        refreshVoicepackStatus();
+    }
+
+    /**
+     * 刷新首页语音包状态文字，含配置读取状态。
+     * classifyMissing 涉及磁盘 md5 校验，放后台线程；UI 更新走 runOnUiThread。
+     * 配置未就绪时延迟重试最多 5 次（每次 2 秒）。
+     */
+    private void refreshVoicepackStatus() {
+        if (tvVoicepackStatus == null) return;
+        VoicePackManager vpm = VoicePackManager.getInstance(this);
+        if (!vpm.isConfigLoaded()) {
+            tvVoicepackStatus.setText("🔊 语音包配置加载中...");
+            if (voicepackStatusRetryCount < 5) {
+                voicepackStatusRetryCount++;
+                tvVoicepackStatus.postDelayed(this::refreshVoicepackStatus, 2000);
+            } else {
+                tvVoicepackStatus.setText("⚠️ 语音包配置加载失败");
+            }
+            return;
+        }
+        voicepackStatusRetryCount = 0;
+        tvVoicepackStatus.setText("🔊 语音包：统计中...");
+        final List<String> allNames = vpm.getAllStationNames();
+        new Thread(() -> {
+            VoicePackManager.MissingStat stat = vpm.classifyMissing(allNames);
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                if (stat == null) {
+                    tvVoicepackStatus.setText("⚠️ 语音包配置未就绪");
+                    return;
+                }
+                int total = allNames.size();
+                int missing = stat.notInRemote.size() + stat.notDownloaded.size() + stat.needUpdate.size();
+                int ready = total - stat.notInRemote.size(); // 远程可下发的站点数
+                int downloaded = ready - stat.notDownloaded.size() - stat.needUpdate.size();
+                if (downloaded < 0) downloaded = 0;
+                if (missing == 0) {
+                    tvVoicepackStatus.setText("✅ 语音包已就绪（" + total + " 个站点）");
+                } else {
+                    StringBuilder sb = new StringBuilder();
+                    sb.append("🔊 语音包：已就绪 ").append(downloaded).append("/").append(ready);
+                    sb.append("，缺少 ").append(missing).append("\n");
+                    sb.append("  · 未下载 ").append(stat.notDownloaded.size());
+                    sb.append(" · 更新 ").append(stat.needUpdate.size());
+                    sb.append(" · 远程不存在 ").append(stat.notInRemote.size());
+                    tvVoicepackStatus.setText(sb.toString());
+                }
+            });
+        }).start();
     }
 
     private void confirmAndDownloadAllVoicepack() {
@@ -408,10 +468,12 @@ public class MainActivity extends AppCompatActivity {
         voicepackDownloading = true;
         tvVoicepackDownload.setEnabled(false);
         tvVoicepackDownload.setTextColor(0xFF999999);
+        if (llVoicepackProgressRow != null) llVoicepackProgressRow.setVisibility(View.VISIBLE);
         pbVoicepack.setVisibility(View.VISIBLE);
         tvVoicepackProgress.setVisibility(View.VISIBLE);
         pbVoicepack.setProgress(0);
         tvVoicepackProgress.setText("0/0");
+        if (tvVoicepackStatus != null) tvVoicepackStatus.setText("📥 语音包下载中...");
 
         VoicePackManager.getInstance(this).downloadAllStations(new VoicePackManager.ProgressCallback() {
             @Override
@@ -421,6 +483,9 @@ public class MainActivity extends AppCompatActivity {
                     int p = total > 0 ? done * 100 / total : 0;
                     pbVoicepack.setProgress(p);
                     tvVoicepackProgress.setText(done + "/" + total);
+                    if (tvVoicepackStatus != null) {
+                        tvVoicepackStatus.setText("📥 语音包下载中... " + p + "%");
+                    }
                 });
             }
 
@@ -429,6 +494,7 @@ public class MainActivity extends AppCompatActivity {
                 runOnUiThread(() -> {
                     if (isFinishing() || isDestroyed()) return;
                     voicepackDownloading = false;
+                    if (llVoicepackProgressRow != null) llVoicepackProgressRow.setVisibility(View.GONE);
                     pbVoicepack.setVisibility(View.GONE);
                     tvVoicepackProgress.setVisibility(View.GONE);
                     tvVoicepackDownload.setEnabled(true);
@@ -436,6 +502,8 @@ public class MainActivity extends AppCompatActivity {
                     Toast.makeText(MainActivity.this,
                             success ? "语音包下载完成" : "语音包下载结束（部分可能失败）",
                             Toast.LENGTH_SHORT).show();
+                    // 下载完成后刷新状态
+                    refreshVoicepackStatus();
                 });
             }
         });
