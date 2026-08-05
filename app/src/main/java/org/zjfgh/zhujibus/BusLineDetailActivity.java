@@ -95,6 +95,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private List<String> voicepackStationNames = new ArrayList<>();
     private int voicepackRetryCount = 0;
     private int lastMissingCount = 0;
+    private VoicePackManager.MissingStat lastMissingStat = null;
 
     // ===== POV模式静态引用 =====
     /** ⭐ 当前 Activity 实例的静态引用（用于POV模式暂停/恢复业务） */
@@ -2436,7 +2437,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
 
     /**
      * 检查当前线路缺失语音包数量并更新状态条。
-     * 在站点列表加载完成后调用。countMissing 涉及磁盘 md5 校验，放后台线程。
+     * 在站点列表加载完成后调用。classifyMissing 涉及磁盘 md5 校验，放后台线程。
      */
     private void checkLineVoicepackStatus() {
         if (llVoicepackStatus == null || tvVoicepackStatus == null) return;
@@ -2455,13 +2456,14 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         btnVoicepackDownload.setVisibility(View.GONE);
         pbVoicepackLine.setVisibility(View.GONE);
         tvVoicepackStatus.setText("检查语音包中...");
+        tvVoicepackStatus.setOnClickListener(null);
 
         new Thread(() -> {
             VoicePackManager vpm = VoicePackManager.getInstance(this);
-            int missing = vpm.countMissing(names);
+            VoicePackManager.MissingStat stat = vpm.classifyMissing(names);
             runOnUiThread(() -> {
                 if (isFinishing() || isDestroyed()) return;
-                if (missing < 0) {
+                if (stat == null) {
                     // 配置未就绪，延迟重试（最多 5 次，每次 2 秒）
                     tvVoicepackStatus.setText("语音包配置加载中...");
                     if (voicepackRetryCount < 5) {
@@ -2473,16 +2475,77 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                     return;
                 }
                 voicepackRetryCount = 0;
+                lastMissingStat = stat;
+                int missing = stat.notInRemote.size() + stat.notDownloaded.size() + stat.needUpdate.size();
                 lastMissingCount = missing;
                 if (missing == 0) {
                     tvVoicepackStatus.setText("语音包已就绪");
+                    tvVoicepackStatus.setOnClickListener(null);
                     btnVoicepackDownload.setVisibility(View.GONE);
                 } else {
-                    tvVoicepackStatus.setText("当前线路缺少 " + missing + " 个语音包，点击下载");
+                    StringBuilder sb = new StringBuilder();
+                    sb.append("缺少 ").append(missing).append(" 个语音包");
+                    sb.append("（未下载 ").append(stat.notDownloaded.size());
+                    sb.append(" / 更新 ").append(stat.needUpdate.size());
+                    sb.append(" / 远程不存在 ").append(stat.notInRemote.size()).append("）");
+                    sb.append("\n点击文字查看详情");
+                    tvVoicepackStatus.setText(sb.toString());
+                    tvVoicepackStatus.setOnClickListener(v -> showVoicepackDetailDialog());
                     btnVoicepackDownload.setVisibility(View.VISIBLE);
                 }
             });
         }).start();
+    }
+
+    /**
+     * 弹出语音包详情对话框，列出三分类下的具体站名。
+     * 用 AlertDialog.setMessage 拼接文本，自带滚动，不创建新 layout 文件。
+     */
+    private void showVoicepackDetailDialog() {
+        if (lastMissingStat == null) {
+            Toast.makeText(this, "暂无详情", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        VoicePackManager.MissingStat stat = lastMissingStat;
+        StringBuilder sb = new StringBuilder();
+
+        sb.append("未下载 (").append(stat.notDownloaded.size()).append(")：\n");
+        if (stat.notDownloaded.isEmpty()) {
+            sb.append("无");
+        } else {
+            sb.append(joinStationNames(stat.notDownloaded));
+        }
+
+        sb.append("\n\n有更新 (").append(stat.needUpdate.size()).append(")：\n");
+        if (stat.needUpdate.isEmpty()) {
+            sb.append("无");
+        } else {
+            sb.append(joinStationNames(stat.needUpdate));
+        }
+
+        sb.append("\n\n远程不存在 (").append(stat.notInRemote.size()).append(")：\n");
+        if (stat.notInRemote.isEmpty()) {
+            sb.append("无");
+        } else {
+            sb.append(joinStationNames(stat.notInRemote));
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle("语音包详情")
+                .setMessage(sb.toString())
+                .setPositiveButton("关闭", null)
+                .show();
+    }
+
+    /** 用顿号拼接站名列表，超长时换行可读 */
+    private String joinStationNames(List<String> names) {
+        if (names == null || names.isEmpty()) return "无";
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < names.size(); i++) {
+            if (i > 0) sb.append("、");
+            sb.append(names.get(i));
+        }
+        return sb.toString();
     }
 
     private void confirmAndDownloadLineVoicepack() {
