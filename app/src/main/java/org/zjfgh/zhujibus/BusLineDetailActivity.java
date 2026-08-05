@@ -31,8 +31,10 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
+import android.widget.Button;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
@@ -83,6 +85,16 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private final List<BusEtaItem> etaItems = new ArrayList<>();
     private BusEtaAdapter busEtaAdapter;
     private static final String TAG = "BusLineDetailActivity";
+
+    // ===== 语音包状态条 =====
+    private LinearLayout llVoicepackStatus;
+    private TextView tvVoicepackStatus;
+    private Button btnVoicepackDownload;
+    private ProgressBar pbVoicepackLine;
+    private volatile boolean voicepackDownloadingLine = false;
+    private List<String> voicepackStationNames = new ArrayList<>();
+    private int voicepackRetryCount = 0;
+    private int lastMissingCount = 0;
 
     // ===== POV模式静态引用 =====
     /** ⭐ 当前 Activity 实例的静态引用（用于POV模式暂停/恢复业务） */
@@ -1515,6 +1527,18 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         networkModeText.setTypeface(dottedSongti);
         // ⭐ gpsSpeedText 已迁移到 NavigationMainFragment，字体设置在 fragment.onViewCreated() 中完成
 
+        // 语音包状态条
+        llVoicepackStatus = findViewById(R.id.ll_voicepack_status);
+        tvVoicepackStatus = findViewById(R.id.tv_voicepack_status);
+        btnVoicepackDownload = findViewById(R.id.btn_voicepack_download);
+        pbVoicepackLine = findViewById(R.id.pb_voicepack_line);
+        if (btnVoicepackDownload != null) {
+            btnVoicepackDownload.setOnClickListener(v -> {
+                if (voicepackDownloadingLine) return;
+                confirmAndDownloadLineVoicepack();
+            });
+        }
+
         startErrorBlinkAnimation();
     }
 
@@ -2382,6 +2406,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 }
                 setupEtaList();
                 Log.d(TAG, "=== setupStationList 完成 ===");
+                checkLineVoicepackStatus();
 
             } catch (Exception e) {
                 Log.e(TAG, "设置站点列表失败", e);
@@ -2405,6 +2430,111 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         busEtaAdapter = new BusEtaAdapter(etaItems, item -> {
         });
         rvLiveVehicles.setAdapter(busEtaAdapter);
+    }
+
+    // ==================== 语音包缺失检查与下载 ====================
+
+    /**
+     * 检查当前线路缺失语音包数量并更新状态条。
+     * 在站点列表加载完成后调用。countMissing 涉及磁盘 md5 校验，放后台线程。
+     */
+    private void checkLineVoicepackStatus() {
+        if (llVoicepackStatus == null || tvVoicepackStatus == null) return;
+        if (realTimeManager == null || realTimeManager.getStationList() == null) return;
+
+        List<String> names = new ArrayList<>();
+        for (BusApiClient.BusLineStation s : realTimeManager.getStationList()) {
+            if (s != null && s.stationName != null && !s.stationName.isEmpty()) {
+                names.add(s.stationName);
+            }
+        }
+        voicepackStationNames = names;
+
+        // 显示状态条：检查中
+        llVoicepackStatus.setVisibility(View.VISIBLE);
+        btnVoicepackDownload.setVisibility(View.GONE);
+        pbVoicepackLine.setVisibility(View.GONE);
+        tvVoicepackStatus.setText("检查语音包中...");
+
+        new Thread(() -> {
+            VoicePackManager vpm = VoicePackManager.getInstance(this);
+            int missing = vpm.countMissing(names);
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                if (missing < 0) {
+                    // 配置未就绪，延迟重试（最多 5 次，每次 2 秒）
+                    tvVoicepackStatus.setText("语音包配置加载中...");
+                    if (voicepackRetryCount < 5) {
+                        voicepackRetryCount++;
+                        handler.postDelayed(this::checkLineVoicepackStatus, 2000);
+                    } else {
+                        tvVoicepackStatus.setText("语音包配置加载失败");
+                    }
+                    return;
+                }
+                voicepackRetryCount = 0;
+                lastMissingCount = missing;
+                if (missing == 0) {
+                    tvVoicepackStatus.setText("语音包已就绪");
+                    btnVoicepackDownload.setVisibility(View.GONE);
+                } else {
+                    tvVoicepackStatus.setText("当前线路缺少 " + missing + " 个语音包，点击下载");
+                    btnVoicepackDownload.setVisibility(View.VISIBLE);
+                }
+            });
+        }).start();
+    }
+
+    private void confirmAndDownloadLineVoicepack() {
+        if (voicepackStationNames.isEmpty()) {
+            Toast.makeText(this, "未获取到站点信息", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        int missing = lastMissingCount;
+        String msg = missing > 0
+                ? "是否在线下载缺少的 " + missing + " 个语音包？"
+                : "是否下载本线路语音包？";
+        new AlertDialog.Builder(this)
+                .setTitle("下载语音包")
+                .setMessage(msg)
+                .setPositiveButton("下载", (d, w) -> startDownloadLineVoicepack())
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void startDownloadLineVoicepack() {
+        if (tvVoicepackStatus == null || btnVoicepackDownload == null || pbVoicepackLine == null) return;
+        voicepackDownloadingLine = true;
+        btnVoicepackDownload.setVisibility(View.GONE);
+        pbVoicepackLine.setVisibility(View.VISIBLE);
+        pbVoicepackLine.setProgress(0);
+        tvVoicepackStatus.setText("下载中... 0%");
+
+        VoicePackManager.getInstance(this).downloadBatchAsync(voicepackStationNames, new VoicePackManager.ProgressCallback() {
+            @Override
+            public void onProgress(int done, int total) {
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    int p = total > 0 ? done * 100 / total : 0;
+                    pbVoicepackLine.setProgress(p);
+                    tvVoicepackStatus.setText("下载中... " + p + "%");
+                });
+            }
+
+            @Override
+            public void onComplete(boolean success) {
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    voicepackDownloadingLine = false;
+                    pbVoicepackLine.setVisibility(View.GONE);
+                    Toast.makeText(BusLineDetailActivity.this,
+                            success ? "下载完成" : "下载结束（部分可能失败）",
+                            Toast.LENGTH_SHORT).show();
+                    // 重新检查状态
+                    checkLineVoicepackStatus();
+                });
+            }
+        });
     }
 
     private void showFullNoticeDialog(String noticeContent) {

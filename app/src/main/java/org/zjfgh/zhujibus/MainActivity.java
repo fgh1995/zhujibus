@@ -9,6 +9,8 @@ import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
 import android.location.Location;
 import android.location.LocationListener;
+import android.net.ConnectivityManager;
+import android.net.NetworkInfo;
 import android.net.Uri;
 import android.os.Bundle;
 import io.sgr.geometry.Coordinate;
@@ -26,10 +28,12 @@ import android.view.Window;
 import android.view.WindowManager;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.cardview.widget.CardView;
 import androidx.recyclerview.widget.DividerItemDecoration;
@@ -85,6 +89,12 @@ public class MainActivity extends AppCompatActivity {
     /** ⭐ 当前在线人数（-1 表示尚未收到广播） */
     private volatile int currentOnlineCount = -1;
 
+    // ===== 语音包全量下载 =====
+    private TextView tvVoicepackDownload;
+    private ProgressBar pbVoicepack;
+    private TextView tvVoicepackProgress;
+    private volatile boolean voicepackDownloading = false;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -122,6 +132,7 @@ public class MainActivity extends AppCompatActivity {
                 });
             }
             TTSUtils.getInstance(this);
+            setupVoicepackDownload();
             tv_search_line.setOnClickListener(v -> {
                 try {
                     Intent intent = new Intent(MainActivity.this, BusRouteSearchActivity.class);
@@ -355,6 +366,94 @@ public class MainActivity extends AppCompatActivity {
         return textView;
     }
 
+    // ==================== 语音包全量下载 ====================
+
+    private void setupVoicepackDownload() {
+        tvVoicepackDownload = findViewById(R.id.tv_voicepack_download);
+        pbVoicepack = findViewById(R.id.pb_voicepack);
+        tvVoicepackProgress = findViewById(R.id.tv_voicepack_progress);
+        if (tvVoicepackDownload == null) return;
+        tvVoicepackDownload.setOnClickListener(v -> {
+            if (voicepackDownloading) return;
+            confirmAndDownloadAllVoicepack();
+        });
+    }
+
+    private void confirmAndDownloadAllVoicepack() {
+        VoicePackManager vpm = VoicePackManager.getInstance(this);
+        if (!vpm.isConfigLoaded()) {
+            Toast.makeText(this, "语音包配置加载中，请稍后再试", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        int totalStations = vpm.getAllStationNames().size();
+        if (totalStations == 0) {
+            Toast.makeText(this, "语音包配置加载中，请稍后再试", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        boolean isMobile = isMobileNetwork();
+        String msg = isMobile
+                ? "全量语音包约 358MB，建议在 WiFi 下下载，是否继续？"
+                : "将下载全量语音包（约 358MB，共 " + totalStations + " 个站点），是否继续？";
+        new AlertDialog.Builder(this)
+                .setTitle("下载语音包")
+                .setMessage(msg)
+                .setPositiveButton("下载", (d, w) -> startDownloadAllVoicepack())
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void startDownloadAllVoicepack() {
+        if (tvVoicepackDownload == null || pbVoicepack == null || tvVoicepackProgress == null) return;
+        voicepackDownloading = true;
+        tvVoicepackDownload.setEnabled(false);
+        tvVoicepackDownload.setTextColor(0xFF999999);
+        pbVoicepack.setVisibility(View.VISIBLE);
+        tvVoicepackProgress.setVisibility(View.VISIBLE);
+        pbVoicepack.setProgress(0);
+        tvVoicepackProgress.setText("0/0");
+
+        VoicePackManager.getInstance(this).downloadAllStations(new VoicePackManager.ProgressCallback() {
+            @Override
+            public void onProgress(int done, int total) {
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    int p = total > 0 ? done * 100 / total : 0;
+                    pbVoicepack.setProgress(p);
+                    tvVoicepackProgress.setText(done + "/" + total);
+                });
+            }
+
+            @Override
+            public void onComplete(boolean success) {
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    voicepackDownloading = false;
+                    pbVoicepack.setVisibility(View.GONE);
+                    tvVoicepackProgress.setVisibility(View.GONE);
+                    tvVoicepackDownload.setEnabled(true);
+                    tvVoicepackDownload.setTextColor(0xFF0D8DFB);
+                    Toast.makeText(MainActivity.this,
+                            success ? "语音包下载完成" : "语音包下载结束（部分可能失败）",
+                            Toast.LENGTH_SHORT).show();
+                });
+            }
+        });
+    }
+
+    /** 判断当前是否移动网络 */
+    private boolean isMobileNetwork() {
+        try {
+            ConnectivityManager cm = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
+            if (cm == null) return false;
+            NetworkInfo info = cm.getActiveNetworkInfo();
+            return info != null && info.isConnected()
+                    && info.getType() == ConnectivityManager.TYPE_MOBILE;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     // ==================== 远程配置（更新/公告） ====================
 
     /**
@@ -467,6 +566,9 @@ public class MainActivity extends AppCompatActivity {
     private void applyRemoteConfig() {
         if (remoteConfig == null
                 || isFinishing() || isDestroyed()) return;
+
+        // 推送 githubAddSpeed 到语音包管理器（作为降级链的配置源）
+        VoicePackManager.getInstance(this).setConfigAccelUrl(remoteConfig.githubAddSpeed);
 
         int localVersionCode = getLocalVersionCode();
         boolean isRemoteNewer = remoteConfig.remoteVersionCode > localVersionCode;

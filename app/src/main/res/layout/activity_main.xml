@@ -203,6 +203,48 @@
                     app:intervalDuration="4000" />
             </LinearLayout>
 
+            <!-- 下载语音包横条 -->
+            <LinearLayout
+                android:id="@+id/ll_voicepack_download"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:background="@drawable/white_bg_rounded"
+                android:padding="10dp"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp">
+
+                <TextView
+                    android:id="@+id/tv_voicepack_download"
+                    android:textSize="16sp"
+                    android:textColor="#0d8dfb"
+                    android:textStyle="bold"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="下载语音包" />
+
+                <ProgressBar
+                    android:id="@+id/pb_voicepack"
+                    style="?android:attr/progressBarStyleHorizontal"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="10dp"
+                    android:max="100"
+                    android:progress="0"
+                    android:visibility="gone" />
+
+                <TextView
+                    android:id="@+id/tv_voicepack_progress"
+                    android:textSize="13sp"
+                    android:textColor="#666666"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="6dp"
+                    android:text="0/0"
+                    android:visibility="gone" />
+            </LinearLayout>
+
             <LinearLayout
                 android:gravity="center_vertical"
                 android:orientation="vertical"

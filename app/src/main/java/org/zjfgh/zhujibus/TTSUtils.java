@@ -20,16 +20,12 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
-import java.lang.reflect.Field;
 
 public class TTSUtils implements TextToSpeech.OnInitListener {
     private static final String TAG = "TTSUtils";
@@ -56,9 +52,6 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
     private AudioFocusRequest audioFocusRequest;
     private boolean hasAudioFocus = false;
 
-    private final ConcurrentHashMap<String, Integer> stationResIdCache = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<String, String> md5Cache = new ConcurrentHashMap<>();
-
     private byte[] mergedAudioBytes;
 
     private static final AudioAttributes UNIFIED_AUDIO_ATTRIBUTES = new AudioAttributes.Builder()
@@ -67,10 +60,11 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
             .build();
 
     private static class PlaybackItem {
-        enum Type { WAV, TTS_CN, TTS_EN, MEDIA_PLAYER_WAV }
+        enum Type { WAV, TTS_CN, TTS_EN, MEDIA_PLAYER_WAV, FILE_WAV }
         Type type;
         int rawResId;
         String text;
+        String wavFilePath;
 
         PlaybackItem(int rawResId) {
             this.type = Type.WAV;
@@ -85,6 +79,11 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
         PlaybackItem(int rawResId, Type type) {
             this.type = type;
             this.rawResId = rawResId;
+        }
+
+        PlaybackItem(String wavFilePath, boolean isFileWav) {
+            this.type = Type.FILE_WAV;
+            this.wavFilePath = wavFilePath;
         }
     }
 
@@ -584,6 +583,11 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
                             item.type == PlaybackItem.Type.TTS_EN ? Locale.US : Locale.CHINESE);
                     if (ttsWav != null && ttsWav.pcmData.length > 0) {
                         wavInfos.add(ttsWav);
+                    }
+                } else if (item.type == PlaybackItem.Type.FILE_WAV) {
+                    WavInfo fileWav = readWavFile(new File(item.wavFilePath));
+                    if (fileWav != null && fileWav.pcmData.length > 0) {
+                        wavInfos.add(fileWav);
                     }
                 } else {
                     WavInfo rawWav = readRawWav(item.rawResId);
@@ -1106,95 +1110,20 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
     }
 
     private void addCnStationName(List<PlaybackItem> items, String stationName) {
-        Integer resId = getCachedStationResId(stationName, "cn_stations_");
-        if (resId != null) {
-            items.add(new PlaybackItem(resId, PlaybackItem.Type.MEDIA_PLAYER_WAV));
+        File file = VoicePackManager.getInstance(context).getStationFile(stationName, true);
+        if (file != null) {
+            items.add(new PlaybackItem(file.getAbsolutePath(), true));
         } else {
             items.add(new PlaybackItem(stationName, PlaybackItem.Type.TTS_CN));
         }
     }
 
     private void addEnStationName(List<PlaybackItem> items, String stationName) {
-        Integer resId = getCachedStationResId(stationName, "en_stations_");
-        if (resId != null) {
-            items.add(new PlaybackItem(resId, PlaybackItem.Type.MEDIA_PLAYER_WAV));
+        File file = VoicePackManager.getInstance(context).getStationFile(stationName, false);
+        if (file != null) {
+            items.add(new PlaybackItem(file.getAbsolutePath(), true));
         } else {
             items.add(new PlaybackItem(stationName, PlaybackItem.Type.TTS_CN));
-        }
-    }
-
-    private Integer getCachedStationResId(String stationName, String prefix) {
-        String cacheKey = prefix + stationName;
-        Integer cached = stationResIdCache.get(cacheKey);
-        if (cached != null) {
-            return cached == -1 ? null : cached;
-        }
-
-        String normalized = normalizeStationName(stationName);
-        String md5Hash = getCachedMd5(normalized);
-        if (md5Hash != null) {
-            Integer resId = getStationResIdByMd5(md5Hash, prefix);
-            stationResIdCache.put(cacheKey, resId == null ? -1 : resId);
-            return resId;
-        }
-        stationResIdCache.put(cacheKey, -1);
-        return null;
-    }
-
-    private String getCachedMd5(String input) {
-        String cached = md5Cache.get(input);
-        if (cached != null) {
-            return cached;
-        }
-        String md5 = toMd5(input);
-        if (md5 != null) {
-            md5Cache.put(input, md5);
-        }
-        return md5;
-    }
-
-    private Integer getStationResIdByMd5(String md5Hash, String prefix) {
-        try {
-            Field field = R.raw.class.getField(prefix + md5Hash);
-            return field.getInt(null);
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    private Integer getStationResId(String pinyinName, String prefix) {
-        try {
-            Field field = R.raw.class.getField(prefix + pinyinName);
-            return field.getInt(null);
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    private String normalizeStationName(String stationName) {
-        String normalized = stationName;
-        normalized = normalized.replace("（", "(").replace("）", ")");
-        normalized = normalized.replace("【", "[").replace("】", "]");
-        normalized = normalized.replace("《", "<").replace("》", ">");
-        normalized = normalized.replace("、", ",");
-        normalized = normalized.replace("。", ".");
-        normalized = normalized.replace("，", ",");
-        normalized = normalized.replaceAll("[()\\[\\]<>.,，。、]", "");
-        return normalized;
-    }
-
-    private String toMd5(String input) {
-        try {
-            MessageDigest md = MessageDigest.getInstance("MD5");
-            byte[] hashBytes = md.digest(input.getBytes(StandardCharsets.UTF_8));
-            StringBuilder sb = new StringBuilder();
-            for (byte b : hashBytes) {
-                sb.append(String.format("%02x", b));
-            }
-            return sb.toString();
-        } catch (Exception e) {
-            Log.e(TAG, "MD5计算失败", e);
-            return null;
         }
     }
 
