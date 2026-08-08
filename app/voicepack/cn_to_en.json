@@ -135,6 +135,15 @@
     "enMd5": "8ab50bbf3aa00531334624573fe24e0e"
   },
   {
+    "stationName": "万安桥头",
+    "en": "Wan'an Bridge End",
+    "voice": "万安 Bridge End",
+    "cnFile": "cn_stations_1337a90f671228aab52f23ad6d13728f.wav",
+    "enFile": "en_stations_1337a90f671228aab52f23ad6d13728f.wav",
+    "cnMd5": "3f65caf96b4ac1c98cce5b8cd7510d24",
+    "enMd5": "86aa3a377bbff9e56d8721b525d5e459"
+  },
+  {
     "stationName": "万安科技(军联铜业)",
     "en": "Wanan Technology (Junlian Copper)",
     "voice": "万安 Technology (军联 Copper)",
@@ -322,6 +331,24 @@
     "enFile": "en_stations_48492109746c55ea584cd77fabfacdf8.wav",
     "cnMd5": "28a330b4de9747f2c411f0119f3616cd",
     "enMd5": "5cb2c8df0a1aaf824be859ae45ce97db"
+  },
+  {
+    "stationName": "三江口下陈",
+    "en": "Sanjiangkou Xiachen",
+    "voice": "三江口下陈",
+    "cnFile": "cn_stations_87b2b1c522ff6949f92c31acc2ef796c.wav",
+    "enFile": "en_stations_87b2b1c522ff6949f92c31acc2ef796c.wav",
+    "cnMd5": "8387451747a8545088a01d662496b0be",
+    "enMd5": "3e573afda8e3e57ecbb0dea4bd43f69d"
+  },
+  {
+    "stationName": "三江口郑应",
+    "en": "Sanjiangkou Zhengchen",
+    "voice": "三江口郑应",
+    "cnFile": "cn_stations_847ff8edc07908094b44a4a416fc0fc3.wav",
+    "enFile": "en_stations_847ff8edc07908094b44a4a416fc0fc3.wav",
+    "cnMd5": "3f9bff38a2363d772df363568c6c5cab",
+    "enMd5": "ee8469be5dadb2ee788c449c7a8cb893"
   },
   {
     "stationName": "三江口（高新园区）",
@@ -1746,6 +1773,15 @@
     "enMd5": "5c042d42dfae23959d575d68945c7ad8"
   },
   {
+    "stationName": "不夜城",
+    "en": "Everbright City",
+    "voice": "Everbright City",
+    "cnFile": "cn_stations_6f901af7cbcbb2894bc6226fe59da935.wav",
+    "enFile": "en_stations_6f901af7cbcbb2894bc6226fe59da935.wav",
+    "cnMd5": "84a2fcdc59370fe3a855e0a9c060ed8a",
+    "enMd5": "fffcc5ff936367b9f620d38eeb07c80a"
+  },
+  {
     "stationName": "世纪花城",
     "en": "Shiji Flower City",
     "voice": "世纪 Flower City",
@@ -1796,13 +1832,13 @@
     "voice": "东三 Road (住萝 East Intersection)",
     "cnFile": "cn_stations_2efa2a8e13801c776692a1b3da9ee4ab.wav",
     "enFile": "en_stations_2efa2a8e13801c776692a1b3da9ee4ab.wav",
-    "cnMd5": "c72a100105a756361a5ea9b3fb52c85b",
+    "cnMd5": "323c37221a49d698ad5c768309dd0a5c",
     "enMd5": "7f4e1bc7062e5bbf1f46abd2028adcdc"
   },
   {
     "stationName": "东二环（东江路）",
     "en": "East Second Ring Road (Dongjiang Road)",
-    "voice": "East 2nd Ring Road (东江 Road)",
+    "voice": "East Second Ring Road (东江 Road)",
     "cnFile": "cn_stations_ccc1d452ff150efd3d2997105690a756.wav",
     "enFile": "en_stations_ccc1d452ff150efd3d2997105690a756.wav",
     "cnMd5": "ccade08a038de65e79ba3d44e89635c4",
@@ -1810,12 +1846,12 @@
   },
   {
     "stationName": "东二路（老年大学）",
-    "en": "Donger Road (Laonian University)",
-    "voice": "东二 Road (老年大学)",
+    "en": "East Second Road (Laonian University)",
+    "voice": "East Second Road (老年 University)",
     "cnFile": "cn_stations_d578351b45323ae4ebde15cc71adaac9.wav",
     "enFile": "en_stations_d578351b45323ae4ebde15cc71adaac9.wav",
     "cnMd5": "9ba158b71c46c1bdc2325333078790a9",
-    "enMd5": "e9fabf5514794cc169c2f81e7f4f17ed"
+    "enMd5": "f0cab22af5234b70bfb50f24a08b226d"
   },
   {
     "stationName": "东兴村",
@@ -2374,6 +2410,15 @@
     "enFile": "en_stations_8156f8413e3d8b8d45c3d22a53fd93ef.wav",
     "cnMd5": "6bc6ca55ac6283c37a127183f8775fc7",
     "enMd5": "7147496f12212c2c6475e69de7bd7130"
+  },
+  {
+    "stationName": "中锐桥头（六村）",
+    "en": "Zhongrui Bridge （Liucun）",
+    "voice": "中锐 Bridge End（六村）",
+    "cnFile": "cn_stations_eb2a2c73d676d1c82ac3a4481fa7cf7e.wav",
+    "enFile": "en_stations_eb2a2c73d676d1c82ac3a4481fa7cf7e.wav",
+    "cnMd5": "a7e7369a51b22765fc5ad0fb2db60c84",
+    "enMd5": "2b629b6a0916989cfaa4d96a06b6eab6"
   },
   {
     "stationName": "丰南路（商龙宾馆）",
@@ -3557,11 +3602,11 @@
   {
     "stationName": "兆山水泥二厂",
     "en": "Zhaoshan Cement Plant No. 2",
-    "voice": "兆山 Cement Plant No. 2",
+    "voice": "兆山 Cement Plant Number two",
     "cnFile": "cn_stations_ecf92bd347563beb271d66222c507d3a.wav",
     "enFile": "en_stations_ecf92bd347563beb271d66222c507d3a.wav",
     "cnMd5": "908f714f6f53ddbc2c51dbe2f0b7ef75",
-    "enMd5": "0257a9dba8aed4b48ca7d92bcffb2e10"
+    "enMd5": "4ddf8355e6f9d3fde81ab8b27aee074a"
   },
   {
     "stationName": "兆山集团",
@@ -3800,11 +3845,11 @@
   {
     "stationName": "兴业二路口",
     "en": "Xingye No. 2 Road Intersection",
-    "voice": "兴业 No.2 Road Intersection",
+    "voice": "兴业 Number two Road Intersection",
     "cnFile": "cn_stations_d3f78e0afd62b3e131a926fba952168b.wav",
     "enFile": "en_stations_d3f78e0afd62b3e131a926fba952168b.wav",
     "cnMd5": "4628509c765ed29ed58cc6a698221ecf",
-    "enMd5": "b4ad6cb43c746d8d0afc522b4e256dd0"
+    "enMd5": "e479703ddb98dd691319857b96473a17"
   },
   {
     "stationName": "兴城花园",
@@ -5490,6 +5535,15 @@
     "enMd5": "f248d2a144502a1c2e7e02c0960a3fe6"
   },
   {
+    "stationName": "和庄.沁园",
+    "en": "He Zhuang.Qinyuan",
+    "voice": "和庄沁园",
+    "cnFile": "cn_stations_98082bc1c459da19843ddf799def167f.wav",
+    "enFile": "en_stations_98082bc1c459da19843ddf799def167f.wav",
+    "cnMd5": "93cb283d40453212538c6c8d781b75df",
+    "enMd5": "28eed308b06a9922dc9025790a3fe244"
+  },
+  {
     "stationName": "和庄·沁园",
     "en": "Hezhuang·Qinyuan",
     "voice": "和庄·沁园",
@@ -5731,6 +5785,15 @@
     "enFile": "en_stations_2ee699e0e959d2068670ca71eb6c9fab.wav",
     "cnMd5": "704bd8ffffe88daa9deb2ef342ea8b85",
     "enMd5": "d8e1e4bfe4949a8b7a3ea18e2b558f3f"
+  },
+  {
+    "stationName": "国际商贸城粤港城西门",
+    "en": "International Trade City Yuegang City West Gate",
+    "voice": "International Trade City 粤港 City West Gate",
+    "cnFile": "cn_stations_2e00e73706ac90b5a813d9c546a03029.wav",
+    "enFile": "en_stations_2e00e73706ac90b5a813d9c546a03029.wav",
+    "cnMd5": "34199c91da9f4b3497134e49f5b67464",
+    "enMd5": "bcdd70196f64e07812909459dcf583ff"
   },
   {
     "stationName": "国际商贸城（粤港城）",
@@ -9983,11 +10046,11 @@
   {
     "stationName": "技师学院（北二环）",
     "en": "Technician College (N. 2nd Ring Rd.)",
-    "voice": "Technician College (North 2nd Ring Road)",
+    "voice": "Technician College (North Second  Ring Road)",
     "cnFile": "cn_stations_38f9434509c66aa7cb78a371215c8ad5.wav",
     "enFile": "en_stations_38f9434509c66aa7cb78a371215c8ad5.wav",
     "cnMd5": "288454879ea6a6d1060791fc004b8131",
-    "enMd5": "b597a64c59fbf4c611213715a46a721b"
+    "enMd5": "7bcb75d4ffe56de78eda0cb7f139cef4"
   },
   {
     "stationName": "技师学院（育才路）",
@@ -10105,6 +10168,15 @@
     "enFile": "en_stations_cb46dd9130c23c1712f7b367f75821e7.wav",
     "cnMd5": "799276284660a17becc6e7f107f7741d",
     "enMd5": "78285b5e55e29ec388b04a96625b0eb5"
+  },
+  {
+    "stationName": "文种路（浣江实验室）",
+    "en": "Wenzhong Road（Huanjiang Laboratory）",
+    "voice": "文种 Road（浣江 Laboratory）",
+    "cnFile": "cn_stations_01d14641a4ec2b4faeff40098246a657.wav",
+    "enFile": "en_stations_01d14641a4ec2b4faeff40098246a657.wav",
+    "cnMd5": "aac401712fff63a91a7bd59ff8998313",
+    "enMd5": "0d4f07c916605f73ad7c73b0d3b55de3"
   },
   {
     "stationName": "文霞超市",
@@ -11071,12 +11143,12 @@
   },
   {
     "stationName": "望云西路口（西二环路）",
-    "en": "Wangyun West Intersection (West 2nd Ring Road)",
+    "en": "Wangyun West Intersection (W. 2nd Ring Road)",
     "voice": "望云 West Intersection (West Second Ring Road)",
     "cnFile": "cn_stations_ada05abd1b2689c0215bd2426fc7fc11.wav",
     "enFile": "en_stations_ada05abd1b2689c0215bd2426fc7fc11.wav",
     "cnMd5": "4b50f42e66f32a0372a5c3a03f557522",
-    "enMd5": "7bc928cbf697a3116ce33c018bd93dad"
+    "enMd5": "b9c883fb22c3a19f1effe79983e6de81"
   },
   {
     "stationName": "望江二路",
@@ -12499,6 +12571,15 @@
     "enFile": "en_stations_44fb1a2960a598c6682752a0d308a05b.wav",
     "cnMd5": "faf9fcc7ac3d97941a7d201792361da8",
     "enMd5": "54216acc05f22050396f3ad7c4c0ab26"
+  },
+  {
+    "stationName": "横畈塘村口临时站",
+    "en": "Hengfantangcun Entrance Temporary Stop‌",
+    "voice": "横畈塘村 Entrance Temporary Stop‌",
+    "cnFile": "cn_stations_3632bd9d45008e98bdc41a480e1c4d06.wav",
+    "enFile": "en_stations_3632bd9d45008e98bdc41a480e1c4d06.wav",
+    "cnMd5": "143fa22ded4c4c0283b0912352bf6cd9",
+    "enMd5": "737535a5c64192610de6fb3c39fad1ea"
   },
   {
     "stationName": "横畈塘村口（临时站）",
@@ -13995,6 +14076,15 @@
     "enMd5": "48b1af41b93ce31688bbd9f913478fed"
   },
   {
+    "stationName": "海亮融爱学校（西林路）",
+    "en": "Hailiang Rong'ai School（Xilin Road）",
+    "voice": "海亮融爱 School（西林 Road）",
+    "cnFile": "cn_stations_67f3499a58f5ec40a9ef5b4f6e14cd66.wav",
+    "enFile": "en_stations_67f3499a58f5ec40a9ef5b4f6e14cd66.wav",
+    "cnMd5": "c327ad78a06b7d2127654627d485bb3b",
+    "enMd5": "2cc6b0d792f484d942da4e451439f681"
+  },
+  {
     "stationName": "海关",
     "en": "Customs",
     "voice": "Customs",
@@ -14158,7 +14248,7 @@
   },
   {
     "stationName": "湄二自然村",
-    "en": " Mei'er Zirancun",
+    "en": "Mei'er Zirancun",
     "voice": "湄二自然村",
     "cnFile": "cn_stations_431fdda1a9e2c909742526adc9fd2f9b.wav",
     "enFile": "en_stations_431fdda1a9e2c909742526adc9fd2f9b.wav",
@@ -14182,6 +14272,15 @@
     "enFile": "en_stations_0248b705229188ed440a8b80fb13c116.wav",
     "cnMd5": "3484ec6e11ce804022b2ea4405e65475",
     "enMd5": "b90bdcf0b2a54e4f7915332cf1c8e5c8"
+  },
+  {
+    "stationName": "湄池农贸市场（西林路口）",
+    "en": "Meichi Farmers Market（Xilin Road Intersection）",
+    "voice": "湄池 Farmers Market（西林 Road Intersection）",
+    "cnFile": "cn_stations_59c32f250a3af530f75283844af5421d.wav",
+    "enFile": "en_stations_59c32f250a3af530f75283844af5421d.wav",
+    "cnMd5": "6a95753b9304e65064439627ff592112",
+    "enMd5": "fbf040094b1c1ffae23751fa7970937d"
   },
   {
     "stationName": "湄池埠头",
@@ -16561,12 +16660,12 @@
   },
   {
     "stationName": "第二高级中学",
-    "en": "No.2 Middle School",
-    "voice": "No.2 Middle School",
+    "en": "Second Middle School",
+    "voice": "Second Middle School",
     "cnFile": "cn_stations_414106b681caf29149db81099dcd2011.wav",
     "enFile": "en_stations_414106b681caf29149db81099dcd2011.wav",
     "cnMd5": "e64537c4976a96e47490a90b985467b6",
-    "enMd5": "2969a079d1e143149423a1da22395432"
+    "enMd5": "784b76e9e1172ba787f10a94ba2a5223"
   },
   {
     "stationName": "第五人民医院",
@@ -16830,6 +16929,15 @@
     "enMd5": "2cee4f68635e6d59764585b80fe1d849"
   },
   {
+    "stationName": "红旗路悦新路口",
+    "en": "Hongqi Road Yuexin Intersection",
+    "voice": "红旗 Road 悦新 Intersection",
+    "cnFile": "cn_stations_c075eb22da2106f3d594ff76b634f6fb.wav",
+    "enFile": "en_stations_c075eb22da2106f3d594ff76b634f6fb.wav",
+    "cnMd5": "6111dfcda970e0f16039bdb4985b6fa5",
+    "enMd5": "c19be46eb662f601303fd211753a614f"
+  },
+  {
     "stationName": "红星村",
     "en": "Hongxingcun",
     "voice": "红星村",
@@ -17003,11 +17111,11 @@
   {
     "stationName": "绢纺二村",
     "en": "Juanfangcun No.2",
-    "voice": "绢纺村 No.2",
+    "voice": "绢纺村  Number two",
     "cnFile": "cn_stations_0815975c8a210a0198cf6514dcb9b727.wav",
     "enFile": "en_stations_0815975c8a210a0198cf6514dcb9b727.wav",
     "cnMd5": "7620fd936ef82193e5a131a7b589889b",
-    "enMd5": "d5778a947f5488c8f9ecdcc09875f2c9"
+    "enMd5": "f8a3282d353f694724ea8d1c7f068906"
   },
   {
     "stationName": "缝制设备厂",
@@ -17447,7 +17555,7 @@
     "voice": "住萝 East Road Intersection",
     "cnFile": "cn_stations_e0fb9f895f034dc1f9624ea71e7c5a4b.wav",
     "enFile": "en_stations_e0fb9f895f034dc1f9624ea71e7c5a4b.wav",
-    "cnMd5": "724e9e4de023503fbd6a78ebffa90f86",
+    "cnMd5": "455673511487c833e64f3159ae4aaff6",
     "enMd5": "2e557b11cd8cbe11a901c4506551d177"
   },
   {
@@ -17456,17 +17564,17 @@
     "voice": "住萝 East Road (安平 Intersection)",
     "cnFile": "cn_stations_254d8e6394bc23d21ddeb4dc555f5ef7.wav",
     "enFile": "en_stations_254d8e6394bc23d21ddeb4dc555f5ef7.wav",
-    "cnMd5": "99a312a51783f3b3ccb364bcb5e9049a",
+    "cnMd5": "8bc1ada5507a3f19b86b5907f830173a",
     "enMd5": "59f43f116a4f7fe0d843b011f697f6e8"
   },
   {
     "stationName": "苎萝二村",
     "en": "Zhuluocun No.2",
-    "voice": "住萝村 No.2",
+    "voice": "住萝村 Number two",
     "cnFile": "cn_stations_56da1d13599e02262cfddcb1125ee1f5.wav",
     "enFile": "en_stations_56da1d13599e02262cfddcb1125ee1f5.wav",
-    "cnMd5": "5e5ec902a7eac478623d71e5c1b6402b",
-    "enMd5": "acca5389dd8be4bb36565943551d8647"
+    "cnMd5": "44907140116b53a574b80d0d8309c5f3",
+    "enMd5": "81ba5c24697eb2e3e802680e34c3f44b"
   },
   {
     "stationName": "苎萝新村",
@@ -17474,7 +17582,7 @@
     "voice": "住萝新村",
     "cnFile": "cn_stations_c0800cc2f65a9fc743bd90408e7cd7d2.wav",
     "enFile": "en_stations_c0800cc2f65a9fc743bd90408e7cd7d2.wav",
-    "cnMd5": "a4d574fad733b39ad09a90c83665de19",
+    "cnMd5": "787E73960EC0FE4523401951F8F58366",
     "enMd5": "3de10b86a9176e41591a8f9c62f062ce"
   },
   {
@@ -17539,6 +17647,15 @@
     "enFile": "en_stations_038dde223769fc27020e2356292fd8f7.wav",
     "cnMd5": "4465a3eb9db480092c6451b13bc27a73",
     "enMd5": "2864f60d88ca20c107a744b5553a6f8d"
+  },
+  {
+    "stationName": "茅秧岭村",
+    "en": "Maoyang Lingcun",
+    "voice": "茅秧岭村",
+    "cnFile": "cn_stations_22ea86bcc672a17dda4914f2f415213b.wav",
+    "enFile": "en_stations_22ea86bcc672a17dda4914f2f415213b.wav",
+    "cnMd5": "9c01ad31aabe4116b858b800c7651077",
+    "enMd5": "1d1957f93e1d8c48cf03c18e56835311"
   },
   {
     "stationName": "茅草坞",
@@ -19035,6 +19152,15 @@
     "enMd5": "7ecc66e6d0ad4c825f29f8897a326d0c"
   },
   {
+    "stationName": "越宁路（欢乐世界路口）",
+    "en": "Yuening Road（Happy World Intersection）",
+    "voice": "越宁 Road（Happy World Intersection）",
+    "cnFile": "cn_stations_8d08942675b064c8a40a8146d24b3ea2.wav",
+    "enFile": "en_stations_8d08942675b064c8a40a8146d24b3ea2.wav",
+    "cnMd5": "a0bb1440dc3d7fe359b02b3b251bfb40",
+    "enMd5": "bb51219e14a082dbaf963c934ebc2c9a"
+  },
+  {
     "stationName": "越山寺",
     "en": "Yueshan Temple",
     "voice": "越山 Temple",
@@ -20412,6 +20538,15 @@
     "enMd5": "706377adf787204958110493bd2ba4a4"
   },
   {
+    "stationName": "闪阳村（北）",
+    "en": "Shanyang Cun（North）",
+    "voice": "闪阳村（North）",
+    "cnFile": "cn_stations_042b04b95e1ef35daeaaabd1cccc7976.wav",
+    "enFile": "en_stations_042b04b95e1ef35daeaaabd1cccc7976.wav",
+    "cnMd5": "e14f42018fdc26d84c77ca4c13369ab6",
+    "enMd5": "a412be4b55a7043e80fd37ec7b160871"
+  },
+  {
     "stationName": "闪阳村（南）",
     "en": "Shanyangcun (South)",
     "voice": "闪阳村 (South)",
@@ -21312,6 +21447,15 @@
     "enMd5": "d9a9a55f98174e1e3274937d0d0a5d2c"
   },
   {
+    "stationName": "马坞村口",
+    "en": "Mawu Cun Entrance",
+    "voice": "马坞村口",
+    "cnFile": "cn_stations_a150bac273bb81e92af22dcef4f0dd65.wav",
+    "enFile": "en_stations_a150bac273bb81e92af22dcef4f0dd65.wav",
+    "cnMd5": "89d77c5efd95119b76b43a2870e66011",
+    "enMd5": "84409169362eb97eae5ed436e23060c6"
+  },
+  {
     "stationName": "马塘",
     "en": "Matang",
     "voice": "马塘",
@@ -21661,6 +21805,15 @@
     "enFile": "en_stations_e8c594e33108450b8902a52eccc46330.wav",
     "cnMd5": "cce1ae1e47fd3b4125804ed2c3dafdda",
     "enMd5": "6eb5dd80464adb300c23bf20fcd92acb"
+  },
+  {
+    "stationName": "鲁戈村",
+    "en": "Lugo Cun",
+    "voice": "鲁戈村",
+    "cnFile": "cn_stations_79125ff3294ba1a6d279db9d25de1742.wav",
+    "enFile": "en_stations_79125ff3294ba1a6d279db9d25de1742.wav",
+    "cnMd5": "1d59145754608344a56cd58386d871d2",
+    "enMd5": "2ad8a51737c4a70f36003bc7adb75b8e"
   },
   {
     "stationName": "鲁村堰",

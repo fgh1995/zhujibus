@@ -20,3 +20,6 @@ local.properties
 /app/release/*
 !/app/release/.gitkeep
 /ApkUpload.py
+/诸暨公交地图全揽
+公交报站AI语音生成.py
+voicepack_online_plan.md
