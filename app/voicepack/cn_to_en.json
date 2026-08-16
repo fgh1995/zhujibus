@@ -672,12 +672,12 @@
   {
     "stationName": "上三畈",
     "en": "Shangsanfan",
-    "voice": "上三畈",
-    "cnVoice": "上三畈",
+    "voice": "上三饭",
+    "cnVoice": "上三饭",
     "cnFile": "cn_stations_cb43a683bcbb9092274e0440116787ac.wav",
     "enFile": "en_stations_cb43a683bcbb9092274e0440116787ac.wav",
-    "cnMd5": "f1b0bfe7974b159c2eb069bb3b878167",
-    "enMd5": "e7b3f85640800d46434864447e1e5332"
+    "cnMd5": "302a52cfc5a6845ed2fd62869ff24c56",
+    "enMd5": "8e3b6750cb8e0ca4a3eca4f5e52531d6"
   },
   {
     "stationName": "上下坞路口",
@@ -762,12 +762,12 @@
   {
     "stationName": "上史畈工业园区",
     "en": "Shangshifan Industrial Park",
-    "voice": "上史畈 Industrial Park",
-    "cnVoice": "上史畈工业园区",
+    "voice": "上史饭 Industrial Park",
+    "cnVoice": "上史饭工业园区",
     "cnFile": "cn_stations_f92bfc9ce7c8d916ed2dac4f198705ac.wav",
     "enFile": "en_stations_f92bfc9ce7c8d916ed2dac4f198705ac.wav",
-    "cnMd5": "f8a02474198c038c4b55427e792d50bc",
-    "enMd5": "b8b2a5292c592a009f93f7ad174b0f90"
+    "cnMd5": "e4bf2d5cbaf4d9c4f290392f2469f2ca",
+    "enMd5": "83cecb9cb635d2e7aec3f36812272d4f"
   },
   {
     "stationName": "上合村",
@@ -1472,12 +1472,12 @@
   {
     "stationName": "上畈",
     "en": "Shangfan",
-    "voice": "上畈",
-    "cnVoice": "上畈",
+    "voice": "上饭",
+    "cnVoice": "上饭",
     "cnFile": "cn_stations_a47d754c36f302b78bedb56bfeb719a7.wav",
     "enFile": "en_stations_a47d754c36f302b78bedb56bfeb719a7.wav",
-    "cnMd5": "be65cd13f8ba7a324298f6f769a784d8",
-    "enMd5": "4e10e79f4b89980d7ed40f11dcb40f5c"
+    "cnMd5": "3d29f1f6e91337286af87282a3ff6751",
+    "enMd5": "36ebea2bab6a931de3f3b24791bd1937"
   },
   {
     "stationName": "上白石庙",
@@ -1856,8 +1856,8 @@
     "cnVoice": "下塘饭工业区",
     "cnFile": "cn_stations_46b87d36547eac8999541f38a206c42f.wav",
     "enFile": "en_stations_46b87d36547eac8999541f38a206c42f.wav",
-    "cnMd5": "",
-    "enMd5": ""
+    "cnMd5": "dc37917a8d1be8739272a85b9b5e449c",
+    "enMd5": "2969ba686bdf9ccad955fee39058df41"
   },
   {
     "stationName": "下塘谷",
@@ -2272,12 +2272,12 @@
   {
     "stationName": "下畈",
     "en": "Xiafan",
-    "voice": "下畈",
-    "cnVoice": "下畈",
+    "voice": "下饭",
+    "cnVoice": "下饭",
     "cnFile": "cn_stations_543a13dd829828501da37800bd202839.wav",
     "enFile": "en_stations_543a13dd829828501da37800bd202839.wav",
-    "cnMd5": "d94470333b8872cc2a1bb3d45f2f0650",
-    "enMd5": "81bf3ac4b23c413b9e882f662fe5cdb3"
+    "cnMd5": "fbf8b03839f753fdeb0fd6773fb618a2",
+    "enMd5": "816082ecd074853d23123492ebd81ad9"
   },
   {
     "stationName": "下白石庙",
@@ -4462,32 +4462,32 @@
   {
     "stationName": "仕畈坞",
     "en": "Shifan Wu",
-    "voice": "仕畈坞",
-    "cnVoice": "仕畈坞",
+    "voice": "仕饭坞",
+    "cnVoice": "仕饭坞",
     "cnFile": "cn_stations_12ad39cd91fce79a795349089d231bcc.wav",
     "enFile": "en_stations_12ad39cd91fce79a795349089d231bcc.wav",
-    "cnMd5": "ca0fb8d19a2b735643f6f0a2effac2cb",
-    "enMd5": "9f94c4766464c7878d420835c182a99b"
+    "cnMd5": "e3099ac95525d68f9ae2b46f51a3e225",
+    "enMd5": "18cf8e692eb71e48ce36b0c0a4b6ab13"
   },
   {
     "stationName": "仕畈坞卫生院",
-    "en": "",
-    "voice": "",
-    "cnVoice": "仕畈坞卫生院",
+    "en": "Shifanwu Health Center",
+    "voice": "仕饭坞 Health Center",
+    "cnVoice": "仕饭坞卫生院",
     "cnFile": "cn_stations_dd33a079b1f8e18821fe0fc18598083d.wav",
     "enFile": "en_stations_dd33a079b1f8e18821fe0fc18598083d.wav",
-    "cnMd5": "",
-    "enMd5": ""
+    "cnMd5": "81a253dc0a557de5a76a13c4ad61e82f",
+    "enMd5": "6cd2ffc102de7954dd7f607f200afee9"
   },
   {
     "stationName": "仕畈坞年糕厂",
     "en": "Shifanwu Rice Cake Factory",
-    "voice": "仕畈坞 Rice cake factory",
-    "cnVoice": "仕畈坞年糕厂",
+    "voice": "仕饭坞 Rice cake factory",
+    "cnVoice": "仕饭坞年糕厂",
     "cnFile": "cn_stations_fbcaf884eca99f2dfee72c33acc93006.wav",
     "enFile": "en_stations_fbcaf884eca99f2dfee72c33acc93006.wav",
-    "cnMd5": "e224f3dc66891df21348dce75fe8001b",
-    "enMd5": "e3152ce8bc947847d509eca5cccf9da8"
+    "cnMd5": "5f1e528af2c0e43593f58de1261cf9be",
+    "enMd5": "d6eaeed8edd84e82ce72772405186da6"
   },
   {
     "stationName": "仙小坞",
@@ -4572,22 +4572,22 @@
   {
     "stationName": "伍堡畈",
     "en": "Wubaofan",
-    "voice": "伍堡畈",
-    "cnVoice": "伍堡畈",
+    "voice": "伍堡饭",
+    "cnVoice": "伍堡饭",
     "cnFile": "cn_stations_67e284785f27406ddff53523f8ff5801.wav",
     "enFile": "en_stations_67e284785f27406ddff53523f8ff5801.wav",
-    "cnMd5": "9a8cba0c9f6cc2354fb0f06795259521",
-    "enMd5": "e577e3f94b861150c73d3842aa1b417a"
+    "cnMd5": "04b23a7cf006be1caf754c653368ac8f",
+    "enMd5": "83f753efc56b6a9d8bd5054dc63eb70c"
   },
   {
     "stationName": "伍堡畈村",
-    "en": "Wubaofan Village",
-    "voice": "伍堡畈村",
-    "cnVoice": "伍堡畈村",
+    "en": "Wubaofan Cun",
+    "voice": "伍堡饭村",
+    "cnVoice": "伍堡饭村",
     "cnFile": "cn_stations_038dedf5b662479e82cffb496d3121ba.wav",
     "enFile": "en_stations_038dedf5b662479e82cffb496d3121ba.wav",
-    "cnMd5": "bcf5d2b18834c25e3707f4a0d627cbc9",
-    "enMd5": "52475ffa858ec8d63b4201a43bf52565"
+    "cnMd5": "20d857a2747443409b75ed6861408cd8",
+    "enMd5": "8cf12c42a58518c124cf99ec96248bb8"
   },
   {
     "stationName": "会义桥",
@@ -5032,12 +5032,12 @@
   {
     "stationName": "兆子畈",
     "en": "Zhaozifan",
-    "voice": "兆子畈",
-    "cnVoice": "兆子畈",
+    "voice": "兆子饭",
+    "cnVoice": "兆子饭",
     "cnFile": "cn_stations_e5b0f1b67bf5eb12f35a8ac554b29ced.wav",
     "enFile": "en_stations_e5b0f1b67bf5eb12f35a8ac554b29ced.wav",
-    "cnMd5": "47dbf3f23c839312ba8acdc85e38f085",
-    "enMd5": "72b43a9b8a32fb272f249b07be501907"
+    "cnMd5": "2d41356c44c4981ca870efd7d5f3910b",
+    "enMd5": "c2d8e1f9417079a3c219d5d02c526406"
   },
   {
     "stationName": "兆山新星集团",
@@ -5952,12 +5952,12 @@
   {
     "stationName": "前庄畈",
     "en": "Qianzhuangfan",
-    "voice": "前庄畈",
-    "cnVoice": "前庄畈",
+    "voice": "前庄饭",
+    "cnVoice": "前庄饭",
     "cnFile": "cn_stations_8e877fc3caa801564cd54632e5d9f48b.wav",
     "enFile": "en_stations_8e877fc3caa801564cd54632e5d9f48b.wav",
-    "cnMd5": "f35daa9c018902622cdde711fd2f702d",
-    "enMd5": "37fd0d4dd17c268c6049bb254c730ba3"
+    "cnMd5": "3079048262f426d65c246132cd9e52b2",
+    "enMd5": "4334a25632fd159564b0277180a82d3a"
   },
   {
     "stationName": "前店",
@@ -6012,12 +6012,12 @@
   {
     "stationName": "前畈",
     "en": "Qianfan",
-    "voice": "前畈",
-    "cnVoice": "前畈",
+    "voice": "前饭",
+    "cnVoice": "前饭",
     "cnFile": "cn_stations_d57bef91d0064879f724ef4c15054b22.wav",
     "enFile": "en_stations_d57bef91d0064879f724ef4c15054b22.wav",
-    "cnMd5": "143affaa337e4f5d07b944825479b691",
-    "enMd5": "f775b7fb677f7d7b4c26c5ab0835e233"
+    "cnMd5": "cb56df2d2ff6451bfd5c9185e26ffb82",
+    "enMd5": "9c6dadc3f1e81447592060dd0a61e8ff"
   },
   {
     "stationName": "前阳村",
@@ -7262,12 +7262,12 @@
   {
     "stationName": "后畈",
     "en": "Houfan",
-    "voice": "后畈",
-    "cnVoice": "后畈",
+    "voice": "后饭",
+    "cnVoice": "后饭",
     "cnFile": "cn_stations_b14d3955aed2a73a1c68bc43b1070c4f.wav",
     "enFile": "en_stations_b14d3955aed2a73a1c68bc43b1070c4f.wav",
-    "cnMd5": "3b9e0167165cfc827bd4424ce78a1033",
-    "enMd5": "13dd1faeaff12ba78b80382eeadc8a44"
+    "cnMd5": "c16b1840f7dbfa4fca8debc5a30a1ef5",
+    "enMd5": "4c9a2bfb35416067e37fbe93d8429e6b"
   },
   {
     "stationName": "后郭家",
@@ -7422,11 +7422,11 @@
   {
     "stationName": "吴屋畈",
     "en": "Wuwufan",
-    "voice": "吴屋畈",
-    "cnVoice": "吴屋畈",
+    "voice": "吴屋饭",
+    "cnVoice": "吴屋饭",
     "cnFile": "cn_stations_2b7bd721860ae7c2ea1685b5ac07cb8b.wav",
     "enFile": "en_stations_2b7bd721860ae7c2ea1685b5ac07cb8b.wav",
-    "cnMd5": "2265b65da0dec8ba9be68ff544ef301e",
+    "cnMd5": "382839748a3aa0a00e245d56bb04cb74",
     "enMd5": "77ebb1f1a8f3ca92edcf17c2c5b0b071"
   },
   {
@@ -7951,13 +7951,13 @@
   },
   {
     "stationName": "地塔畈",
-    "en": "",
-    "voice": "",
-    "cnVoice": "地塔畈",
+    "en": "Ditafan",
+    "voice": "地塔饭",
+    "cnVoice": "地塔饭",
     "cnFile": "cn_stations_c8d16df8b3ae676275bda334ad7c7950.wav",
     "enFile": "en_stations_c8d16df8b3ae676275bda334ad7c7950.wav",
-    "cnMd5": "",
-    "enMd5": ""
+    "cnMd5": "16cc149ba076e0e5f0390390554064ff",
+    "enMd5": "be5aeec253c51c29119f137b580e4792"
   },
   {
     "stationName": "坎头",
@@ -10962,12 +10962,12 @@
   {
     "stationName": "寺下张（下畈）",
     "en": "Sixiazhang (Xiafan)",
-    "voice": "寺下张 (下畈)",
-    "cnVoice": "寺下张（下畈）",
+    "voice": "寺下张 (下饭饭)",
+    "cnVoice": "寺下张（下饭）",
     "cnFile": "cn_stations_feaec2c2c9e26cb890c324398f0264a3.wav",
     "enFile": "en_stations_feaec2c2c9e26cb890c324398f0264a3.wav",
-    "cnMd5": "d4de71d31307f26032e1b33c52189950",
-    "enMd5": "55bf9c9e34962c85d93b86aef1be5cf9"
+    "cnMd5": "5754ca6d66a212c393eb09c6c9beea44",
+    "enMd5": "04618176db7212932d27f39bec5a7967"
   },
   {
     "stationName": "寺前",
@@ -11062,12 +11062,12 @@
   {
     "stationName": "小下畈",
     "en": "Xiaoxiafan",
-    "voice": "小下畈",
-    "cnVoice": "小下畈",
+    "voice": "小下饭",
+    "cnVoice": "小下饭",
     "cnFile": "cn_stations_72ad83eb74c96e527cb8f8865100bb65.wav",
     "enFile": "en_stations_72ad83eb74c96e527cb8f8865100bb65.wav",
-    "cnMd5": "d1660ffaaf11f2049635fd69f9805a11",
-    "enMd5": "c5c5b356a89a6711688e05364ed6b07a"
+    "cnMd5": "ac1ebb6e426c0a890164d2b6ea561165",
+    "enMd5": "ad3e443e3a7c723c5de04e760b674023"
   },
   {
     "stationName": "小东",
@@ -12022,12 +12022,12 @@
   {
     "stationName": "岭上畈",
     "en": "Lingshangfan",
-    "voice": "岭上畈",
-    "cnVoice": "岭上畈",
+    "voice": "岭上饭",
+    "cnVoice": "岭上饭",
     "cnFile": "cn_stations_4b9d35557fd0b24fe60afd2122ca223c.wav",
     "enFile": "en_stations_4b9d35557fd0b24fe60afd2122ca223c.wav",
-    "cnMd5": "6ea96caf2331456be454fda6fe3cf55d",
-    "enMd5": "d3b06676893a3c5e987abc9ced82f4eb"
+    "cnMd5": "321c4ebf39c13c49ea05d93747810aae",
+    "enMd5": "36659ab082e4caeb2e888b551d276bd5"
   },
   {
     "stationName": "岭下",
@@ -14802,12 +14802,12 @@
   {
     "stationName": "新畈",
     "en": "Xinfan",
-    "voice": "新畈",
-    "cnVoice": "新畈",
+    "voice": "新饭",
+    "cnVoice": "新饭",
     "cnFile": "cn_stations_685a40d9e0a1c010cc49f6b4551406c5.wav",
     "enFile": "en_stations_685a40d9e0a1c010cc49f6b4551406c5.wav",
-    "cnMd5": "275f4b7930bc616a2f820a89c712cbf3",
-    "enMd5": "3c5453dedf8b5c469ddc78513e1ec1f6"
+    "cnMd5": "34d229f8ee7e2a0a2f466a5dcd81e165",
+    "enMd5": "a894e6f4e6fddb308bd8c15f7ce849b1"
   },
   {
     "stationName": "新石家",
