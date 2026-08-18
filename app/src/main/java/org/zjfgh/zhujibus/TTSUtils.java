@@ -360,13 +360,9 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
     private void buildArrivalAnnouncementWithDirection(List<PlaybackItem> items, String lineName, String endStation, String nextStationName) {
         items.add(new PlaybackItem(R.raw.network_stop_chime));
         items.add(new PlaybackItem(R.raw.cn_01_zhuji_bus_reminder));
-        items.add(new PlaybackItem(R.raw.cn_02_heading_to));
-        addCnStationName(items, endStation);
-        items.add(new PlaybackItem(R.raw.cn_03_direction));
         addCnLineNumber(items, lineName);
         items.add(new PlaybackItem(R.raw.cn_04_arriving));
         addCnStationName(items, nextStationName);
-
         String lineNameEn = lineName.replace("路", "");
         items.add(new PlaybackItem(R.raw.en_01_zhuji_bus_reminder));
         addEnLineNumber(items, lineNameEn);

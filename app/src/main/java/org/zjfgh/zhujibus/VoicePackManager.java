@@ -18,7 +18,10 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
+
+import java.util.concurrent.TimeUnit;
 
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -30,9 +33,11 @@ import okhttp3.Response;
  * 职责：
  * - 拉取并解析 cn_to_en.json，建立 stationName → entry 索引
  * - 站名 wav 文件本地缓存（context.filesDir/voicepack）
- * - 降级链下载：原始 raw → 配置源 githubAddSpeed → 硬编码 github.360967.xyz
+ * - 降级链下载：原始 raw → 配置源 githubAddSpeed → 硬编码 github.360967.xyz → Gitee 镜像
  * - cnMd5/enMd5 内容指纹比对，决定重下
  * - 批量预下载（线路包用）
+ * - 【统一配置状态机】拉取触发、重试、回调统一收敛在本类，UI 只需注册状态监听
+ *   ConfigStateListener，按状态（LOADING/READY/FAILED）刷新界面，不再各自管理重试计数与轮询。
  *
  * 文件缺失或配置未就绪时，调用方应回退 TTS。
  */
@@ -46,7 +51,9 @@ public class VoicePackManager {
     private static final String CONFIG_FILENAME = "cn_to_en.json";
     /** 硬编码兜底加速源（末尾含 /） */
     private static final String HARDCODED_FALLBACK = "https://github.360967.xyz/";
-
+    /** Gitee 镜像兜底根 URL（末尾含 /），作为最终备用源 */
+    private static final String GITEE_BASE_URL =
+            "https://gitee.com/fangguihua1995/zhujibus/raw/master/app/voicepack/";
     private static VoicePackManager instance;
 
     private final Context context;
@@ -65,6 +72,22 @@ public class VoicePackManager {
 
     private final AtomicBoolean configLoaded = new AtomicBoolean(false);
     private final AtomicBoolean configFetching = new AtomicBoolean(false);
+    /** 配置拉取期间有新的拉取请求被吞掉时置 true，拉取结束后据此补拉一次 */
+    private volatile boolean needRefetch = false;
+
+    // ===== 统一配置状态机 =====
+    /** 配置最大重试次数（每次失败间隔 CONFIG_RETRY_DELAY_MS 后自动重拉，耗尽才判失败） */
+    private static final int CONFIG_MAX_RETRY = 8;
+    /** 配置重试间隔（毫秒） */
+    private static final long CONFIG_RETRY_DELAY_MS = 2000L;
+    /** 当前配置加载状态，UI 依据它展示加载中/就绪/失败 */
+    private volatile ConfigState configState = ConfigState.LOADING;
+    /** 当前重试计数，达到 CONFIG_MAX_RETRY 后进入 FAILED */
+    private volatile int configRetryCount = 0;
+    /** 用于定时重试配置拉取的调度器 */
+    private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+    /** 配置状态监听器集合。任何一次状态变更（LOADING/READY/FAILED）都会通知，供 UI 统一刷新 */
+    private final List<ConfigStateListener> stateListeners = new ArrayList<>();
 
     /** 最近一次自动清理的过时文件数（含 wav 与 md5 sidecar）；0 表示未发生过清理 */
     private volatile int lastCleanupCount = 0;
@@ -74,13 +97,26 @@ public class VoicePackManager {
     /** 从 RemoteConfig 解析得到的 githubAddSpeed（已去掉末尾 /）；空串表示未配置 */
     private volatile String configAccelUrl = "";
 
+    /** 最近一次成功命中的源序号（对应降级链下标），用于后续请求优先尝试该源，跳过已确认不可用的前置源 */
+    private volatile int preferredSource = 0;
+
     private VoicePackManager(Context context) {
         this.context = context.getApplicationContext();
         this.cacheDir = new File(this.context.getFilesDir(), "voicepack");
         if (!cacheDir.exists()) cacheDir.mkdirs();
-        this.http = new OkHttpClient();
+        // 配置短超时：任一源连接/响应超时后快速失败，立即切到下一源。
+        // 若用默认超时（connect/read 均 10s），原始源挂起时 4 源串行可能卡很久，表现为"一直不切源"。
+        this.http = new OkHttpClient.Builder()
+                .connectTimeout(5, TimeUnit.SECONDS)
+                .readTimeout(8, TimeUnit.SECONDS)
+                .writeTimeout(8, TimeUnit.SECONDS)
+                .build();
         this.executor = Executors.newSingleThreadExecutor();
-        initAsync();
+        // 立即拉取语音包配置，确保首页/详情页不依赖 loadRemoteConfig 的时序。
+        // 加速源（githubAddSpeed）在 loadRemoteConfig 完成后由 setConfigAccelUrl 推送，
+        // 届时会触发一次"用新加速源的重拉"，从而切换降级链第 2 级。
+        // 初始状态为 LOADING，构造后立即启动首轮拉取。
+        startFetchCycle();
     }
 
     public static synchronized VoicePackManager getInstance(Context context) {
@@ -90,35 +126,189 @@ public class VoicePackManager {
         return instance;
     }
 
-    /** 后台拉取并解析 cn_to_en.json，建立 stationName → entry 索引 */
-    public void initAsync() {
+    /**
+     * 配置加载状态。UI 依据它统一展示"加载中/就绪/失败"，
+     * 不需要自己轮询或管理重试计数。
+     */
+    public enum ConfigState {
+        /** 配置拉取中（含源遍历中、重试等待中）：UI 应显示加载中，绝不判失败 */
+        LOADING,
+        /** 配置已成功就绪：UI 可进行统计/下载 */
+        READY,
+        /** 所有源遍历完且重试已耗尽，拉取失败：UI 显示失败 */
+        FAILED
+    }
+
+    /** 配置状态监听器。注册后立即收到当前状态一次，之后每次状态变更都会收到。回调在后台线程，UI 需自行 runOnUiThread。 */
+    public interface ConfigStateListener {
+        void onConfigStateChanged(ConfigState state);
+    }
+
+    /** 查询当前配置加载状态 */
+    public ConfigState getConfigState() {
+        return configState;
+    }
+
+    /**
+     * 注册配置状态监听器（统一回调入口）。
+     * 注册后立即用当前状态回调一次（去重，若与上次相同则不重复回调），
+     * 之后每次状态变更（LOADING/READY/FAILED）都会回调。UI 无需再自己轮询/重试。
+     */
+    public void addConfigStateListener(ConfigStateListener l) {
+        if (l == null) return;
+        boolean added;
+        synchronized (stateListeners) {
+            added = stateListeners.add(l);
+        }
+        if (added) {
+            // 立即通知一次当前状态，避免 UI 注册前已完成的拉取造成漏通知
+            notifyStateListener(l, configState);
+        }
+    }
+
+    /** 移除配置状态监听器 */
+    public void removeConfigStateListener(ConfigStateListener l) {
+        if (l == null) return;
+        synchronized (stateListeners) {
+            stateListeners.remove(l);
+        }
+    }
+
+    /** 状态变更并通知所有监听器（在状态实际变化时调用） */
+    private void setConfigState(ConfigState state) {
+        if (configState == state) return;
+        configState = state;
+        notifyConfigState(state);
+    }
+
+    /** 向单个监听器通知状态（去重：同一状态不重复回调同一监听器） */
+    private void notifyStateListener(ConfigStateListener l, ConfigState state) {
+        try {
+            l.onConfigStateChanged(state);
+        } catch (Exception e) {
+            Log.w(TAG, "配置状态回调异常: " + e.getMessage());
+        }
+    }
+
+    /** 向所有监听器广播状态 */
+    private void notifyConfigState(ConfigState state) {
+        final List<ConfigStateListener> snapshot;
+        synchronized (stateListeners) {
+            snapshot = new ArrayList<>(stateListeners);
+        }
+        for (ConfigStateListener l : snapshot) {
+            notifyStateListener(l, state);
+        }
+    }
+
+    /**
+     * 后台拉取并解析 cn_to_en.json，建立 stationName → entry 索引。
+     * 即使本地已有缓存也会拉取远程，以保证拿到最新配置。
+     *
+     * 【统一入口】这是唯一触发拉取的入口。内部管理重试：失败时自动按 CONFIG_RETRY_DELAY_MS
+     * 间隔重拉，直到 CONFIG_MAX_RETRY 次耗尽才置 FAILED。UI 不再负责重试。
+     */
+    public void startFetchCycle() {
+        // 若配置已就绪，无需再拉（切源重拉由 setConfigAccelUrl 负责）
         if (configLoaded.get()) return;
-        if (!configFetching.compareAndSet(false, true)) return;
-        executor.execute(() -> {
-            try {
-                fetchConfig();
-            } catch (Exception e) {
-                Log.w(TAG, "initAsync 失败: " + e.getMessage());
-            } finally {
-                configFetching.set(false);
-            }
-        });
+        // 防重入：正在拉取中则标记补拉；否则立即执行一轮拉取
+        if (!configFetching.compareAndSet(false, true)) {
+            needRefetch = true;
+            return;
+        }
+        executor.execute(this::runFetchAndResolveState);
+    }
+
+    /** 执行一轮拉取并在结束后解析最终状态（成功→READY；失败→重试或 FAILED） */
+    private void runFetchAndResolveState() {
+        try {
+            fetchConfig();
+        } catch (Exception e) {
+            Log.w(TAG, "拉取配置异常: " + e.getMessage());
+        } finally {
+            configFetching.set(false);
+        }
+        // 结束后根据结果解析状态
+        resolveConfigState();
+        // 拉取期间有更新请求被吞掉（如加速源刚推送）→ 补拉一次
+        if (needRefetch) {
+            needRefetch = false;
+            startFetchCycle();
+        }
+    }
+
+    /** 解析当前配置状态：就绪→READY；失败且重试未耗尽→调度重拉（保持 LOADING）；耗尽→FAILED */
+    private void resolveConfigState() {
+        if (configLoaded.get()) {
+            configRetryCount = 0;
+            setConfigState(ConfigState.READY);
+            return;
+        }
+        if (configRetryCount < CONFIG_MAX_RETRY) {
+            configRetryCount++;
+            setConfigState(ConfigState.LOADING);
+            // 调度延迟重拉，保持"加载中"直到重试耗尽
+            scheduler.schedule(this::startFetchCycle, CONFIG_RETRY_DELAY_MS, TimeUnit.MILLISECONDS);
+        } else {
+            setConfigState(ConfigState.FAILED);
+        }
+    }
+
+    /**
+     * 确保语音包配置正在拉取（首页/详情页状态刷新时调用）。
+     * 配置尚未就绪（LOADING/FAILED）时触发一轮拉取；已就绪则跳过。
+     * 若处于 FAILED，此方法会重置重试计数并重新发起，给用户手动重试的机会。
+     */
+    public void ensureConfigLoading() {
+        if (configLoaded.get()) return;
+        // FAILED 状态下用户主动触发：重置重试计数重新来过
+        if (configState == ConfigState.FAILED) {
+            configRetryCount = 0;
+            setConfigState(ConfigState.LOADING);
+        }
+        startFetchCycle();
     }
 
     /**
      * 从 RemoteConfig 推入 githubAddSpeed（可空）。
-     * 配置变化后重新触发配置拉取，以便尽快切源。
+     * loadRemoteConfig 完成后 MainActivity 调用它。当加速源变更时，
+     * 触发一次"用新加速源的重拉"，使降级链第 2 级（githubAddSpeed）尽快生效。
      */
     public void setConfigAccelUrl(String url) {
         if (url == null) url = "";
         url = url.trim();
         while (url.endsWith("/")) url = url.substring(0, url.length() - 1);
-        if (!url.equals(configAccelUrl)) {
-            configAccelUrl = url;
-            // 配置源变更，清空 miss 缓存让后续查询重新评估
+        boolean changed = !url.equals(configAccelUrl);
+        configAccelUrl = url;
+        if (changed) {
+            // 配置源变更，清空 miss 缓存让后续查询重新评估，并强制用新加速源重拉配置
             fileMissCache.clear();
-            initAsync();
+            // 加速源变了，重置首选源，让降级链从新的配置源开始重新尝试
+            preferredSource = 0;
+            // 重置重试计数并回到 LOADING，强制用新加速源重拉，让切源尽快生效
+            configRetryCount = 0;
+            setConfigState(ConfigState.LOADING);
+            startFetchCycle();
+        } else {
+            // 加速源未变：仅确保配置在拉取（首页主动触发场景）
+            startFetchCycle();
         }
+    }
+
+    /**
+     * 兼容旧调用：loadRemoteConfig 失败时调用，确保配置拉取不被阻塞。
+     * 现在配置拉取无条件进行，此方法仅兜底触发一次拉取，无副作用。
+     */
+    public void unlockConfigFetch() {
+        startFetchCycle();
+    }
+
+    /**
+     * 是否正在拉取配置（fetchConfig 尚未结束，降级链源可能还在遍历中）。
+     * 保留此查询供 UI 在极端时序下辅助判断；常规场景直接用 getConfigState()。
+     */
+    public boolean isConfigFetching() {
+        return configFetching.get();
     }
 
     public boolean isConfigLoaded() {
@@ -149,7 +339,7 @@ public class VoicePackManager {
         if (entry == null) {
             // 配置未就绪，标记 miss 并触发配置加载
             fileMissCache.put(cacheKey, true);
-            initAsync();
+            startFetchCycle();
             return null;
         }
 
@@ -358,45 +548,96 @@ public class VoicePackManager {
     }
 
     /**
-     * 降级链下载：原始 raw → 配置源 githubAddSpeed → 硬编码 github.360967.xyz
+     * 降级链下载：原始 raw → 配置源 githubAddSpeed → 硬编码 github.360967.xyz → Gitee 镜像
      * 任一源成功即返回。返回的 Response 由调用方关闭。
+     *
+     * 【通道选择优化】配置已就绪时，preferredSource 即"当前正常拉取配置文件的通道"
+     * （最近一次成功拉取 cn_to_en.json 的源）。下载语音包时直接只认这个通道做一次尝试，
+     * 不再逐个源都试一遍（拉配置刚成功，该源必然可用，逐个试反而拖慢且浪费流量）。
+     * 仅当该通道此刻也失败（临时抖动）时，才回退走完整降级链兜底。
+     * 配置尚未就绪时无可用通道记忆，才从 preferredSource 起始环绕遍历全部源兜底。
+     *
+     * 【404 不降级】服务器明确返回 404（文件不存在）时视为终结性失败，直接返回该
+     * Response 停止降级。因各降级源都是同一份内容的镜像，文件在一个源 404，其他源
+     * 也必然 404，继续降级只会白白等待。只有网络级失败/超时/5xx（源本身问题）才降级。
      */
     private Response executeWithFallback(String filename) throws IOException {
         String originalUrl = BASE_RAW_URL + filename;
-
-        // 1. 原始地址
-        try {
-            Request req = new Request.Builder().url(originalUrl).build();
-            Response resp = http.newCall(req).execute();
-            if (resp.isSuccessful() && resp.body() != null) return resp;
-            resp.close();
-        } catch (IOException e) {
-            Log.d(TAG, "原始源失败 " + filename + ": " + e.getMessage());
-        }
-
-        // 2. 配置源 githubAddSpeed（拼接格式：<githubAddSpeed>/<原始URL>）
-        if (configAccelUrl != null && !configAccelUrl.isEmpty()) {
-            try {
-                Request req = new Request.Builder().url(configAccelUrl + "/" + originalUrl).build();
-                Response resp = http.newCall(req).execute();
-                if (resp.isSuccessful() && resp.body() != null) return resp;
-                resp.close();
-            } catch (IOException e) {
-                Log.d(TAG, "配置源失败 " + filename + ": " + e.getMessage());
+        if (configLoaded.get()) {
+            // 配置已就绪：认准当前正常通道，单次尝试即可
+            String url = buildSourceUrl(preferredSource, originalUrl, filename);
+            if (url != null) {
+                Response resp = trySource(preferredSource, url, filename);
+                // 成功或 404 终结都直接返回；null 表示该源不可用，回退完整降级链
+                if (resp != null) return resp;
             }
         }
-
-        // 3. 硬编码兜底
-        try {
-            Request req = new Request.Builder().url(HARDCODED_FALLBACK + originalUrl).build();
-            Response resp = http.newCall(req).execute();
-            if (resp.isSuccessful() && resp.body() != null) return resp;
-            resp.close();
-        } catch (IOException e) {
-            Log.d(TAG, "硬编码源失败 " + filename + ": " + e.getMessage());
+        // 配置未就绪，或首选通道已失效 → 走完整降级链（记忆成功源，环绕遍历兜底）
+        int start = preferredSource;
+        int size = 4;
+        for (int i = 0; i < size; i++) {
+            int idx = (start + i) % size;
+            String url = buildSourceUrl(idx, originalUrl, filename);
+            if (url == null) continue;
+            Response resp = trySource(idx, url, filename);
+            // 成功或 404 终结都直接返回；null 表示该源不可用，降级下一源
+            if (resp != null) return resp;
         }
-
         return null;
+    }
+
+    /**
+     * 尝试从指定源拉取。
+     *
+     * @return
+     *   - 成功的 Response（2xx，调用方关闭）
+     *   - 404 的 Response（文件不存在，终结性失败，不降级；调用方关闭）
+     *   - null（该源不可用：超时 / 5xx / 连接失败，应降级尝试下一源）
+     */
+    private Response trySource(int idx, String url, String filename) {
+        try {
+            Request req = new Request.Builder().url(url).build();
+            Response resp = http.newCall(req).execute();
+            int code = resp.code();
+            if (resp.isSuccessful() && resp.body() != null) {
+                // 记录成功源，后续请求优先从这里开始
+                preferredSource = idx;
+                return resp;
+            }
+            if (code == 404) {
+                // 文件确实不存在：降级源都是同一份内容的镜像，必然也 404，
+                // 继续降级只会白白等待，直接返回终结性 404 交由调用方判定失败。
+                Log.d(TAG, "源[" + idx + "]返回 404 " + filename + ": 文件不存在，不降级");
+                return resp;
+            }
+            resp.close();
+            Log.d(TAG, "源[" + idx + "]返回非成功 " + filename + ": HTTP " + code + ", 降级下一源");
+            return null;
+        } catch (IOException e) {
+            Log.d(TAG, "源[" + idx + "]失败 " + filename + ": " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * 根据源序号拼接 URL。
+     * @param idx 0=原始 raw，1=配置源 githubAddSpeed，2=硬编码 github.360967.xyz，3=Gitee 镜像
+     */
+    private String buildSourceUrl(int idx, String originalUrl, String filename) {
+        switch (idx) {
+            case 0:
+                return originalUrl;
+            case 1:
+                return (configAccelUrl != null && !configAccelUrl.isEmpty())
+                        ? configAccelUrl + "/" + originalUrl : null;
+            case 2:
+                return HARDCODED_FALLBACK + originalUrl;
+            case 3:
+                // Gitee 的文件名需直接拼到镜像根 URL 后
+                return GITEE_BASE_URL + filename;
+            default:
+                return null;
+        }
     }
 
     private void fetchConfig() throws IOException {
@@ -425,6 +666,8 @@ public class VoicePackManager {
             }
         }
         configLoaded.set(parsedLocal || !stationIndex.isEmpty());
+        // 拉取结束（成功或失败）时的状态统一由 runFetchAndResolveState 的 resolveConfigState 处理，
+        // 在此不再单独通知监听器，避免与状态机重复广播。
     }
 
     private boolean parseConfig(File file) {

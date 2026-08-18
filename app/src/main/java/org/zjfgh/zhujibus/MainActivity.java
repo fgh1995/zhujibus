@@ -96,7 +96,8 @@ public class MainActivity extends AppCompatActivity {
     private ProgressBar pbVoicepack;
     private TextView tvVoicepackProgress;
     private volatile boolean voicepackDownloading = false;
-    private int voicepackStatusRetryCount = 0;
+    /** 配置状态监听器：统一由 VoicePackManager 推送 LOADING/READY/FAILED，避免本页面自行轮询/重试 */
+    private VoicePackManager.ConfigStateListener voicepackConfigListener = null;
     // 过时文件清理通知
     private LinearLayout llVoicepackCleanup;
     private TextView tvVoicepackCleanupText;
@@ -199,6 +200,11 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        // 反注册语音包配置状态监听，避免 Activity 泄漏
+        if (voicepackConfigListener != null) {
+            VoicePackManager.getInstance(this).removeConfigStateListener(voicepackConfigListener);
+            voicepackConfigListener = null;
+        }
         GpsWarmingUp.removeListener(gpsListener);
         // 关闭 WebSocket 连接
         if (webSocketManager != null) {
@@ -407,23 +413,64 @@ public class MainActivity extends AppCompatActivity {
 
     /**
      * 刷新首页语音包状态文字，含配置读取状态。
+     * 统一由 VoicePackManager 的配置状态机驱动：注册一次状态监听，
+     * 收到 LOADING/READY/FAILED 即刷新 UI，不再本页面自行轮询/重试。
      * classifyMissing 涉及磁盘 md5 校验，放后台线程；UI 更新走 runOnUiThread。
-     * 配置未就绪时延迟重试最多 5 次（每次 2 秒）。
      */
     private void refreshVoicepackStatus() {
         if (tvVoicepackStatus == null) return;
         VoicePackManager vpm = VoicePackManager.getInstance(this);
-        if (!vpm.isConfigLoaded()) {
-            tvVoicepackStatus.setText("🔊 语音包配置加载中...");
-            if (voicepackStatusRetryCount < 5) {
-                voicepackStatusRetryCount++;
-                tvVoicepackStatus.postDelayed(this::refreshVoicepackStatus, 2000);
-            } else {
-                tvVoicepackStatus.setText("⚠️ 语音包配置加载失败");
-            }
-            return;
+        // 注册统一状态监听（幂等）。注册后立即收到一次当前状态，之后每次状态变更都会刷新。
+        ensureVoicepackConfigListener(vpm);
+        // 主动触发一轮拉取（若尚未就绪）；状态机的重试/失败判定会在后续事件中驱动刷新
+        vpm.ensureConfigLoading();
+    }
+
+    /**
+     * 注册配置状态监听（幂等）。统一入口：所有状态（LOADING/READY/FAILED）都在此刷新，
+     * 覆盖"源遍历中不判失败、成功后即时刷新、重试耗尽才判失败"的全部逻辑。
+     */
+    private void ensureVoicepackConfigListener(VoicePackManager vpm) {
+        if (voicepackConfigListener != null) return;
+        voicepackConfigListener = state -> {
+            // 回调在后台线程（executor/scheduler/注册线程），切回主线程
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                switch (state) {
+                    case LOADING:
+                        // 源遍历中/重试等待中：绝不显示失败，一直保持"加载中"
+                        if (tvVoicepackStatus != null) {
+                            tvVoicepackStatus.setText("🔊 语音包配置加载中...");
+                        }
+                        break;
+                    case READY:
+                        // 配置就绪：反注册一次性监听（统计完成后不再需要），走正常统计
+                        unregisterVoicepackConfigListener(vpm);
+                        renderVoicepackReadyStats(vpm);
+                        break;
+                    case FAILED:
+                        // 所有源遍历完且重试已耗尽：显示失败
+                        if (tvVoicepackStatus != null) {
+                            tvVoicepackStatus.setText("⚠️ 语音包配置加载失败");
+                        }
+                        break;
+                }
+            });
+        };
+        vpm.addConfigStateListener(voicepackConfigListener);
+    }
+
+    /** 反注册配置状态监听 */
+    private void unregisterVoicepackConfigListener(VoicePackManager vpm) {
+        if (voicepackConfigListener != null) {
+            vpm.removeConfigStateListener(voicepackConfigListener);
+            voicepackConfigListener = null;
         }
-        voicepackStatusRetryCount = 0;
+    }
+
+    /** 配置就绪后渲染语音包统计（后台线程做磁盘 md5 校验） */
+    private void renderVoicepackReadyStats(VoicePackManager vpm) {
+        if (tvVoicepackStatus == null) return;
         tvVoicepackStatus.setText("🔊 语音包：统计中...");
         final List<String> allNames = vpm.getAllStationNames();
         new Thread(() -> {
@@ -595,12 +642,16 @@ public class MainActivity extends AppCompatActivity {
                 try (Response resp = http.newCall(req).execute()) {
                     if (!resp.isSuccessful() || resp.body() == null) {
                         Log.w(TAG, "拉取远程配置失败：http " + resp.code());
+                        // 失败也解锁语音包配置拉取，避免其永久依赖本处成功
+                        VoicePackManager.getInstance(MainActivity.this).unlockConfigFetch();
                         return;
                     }
                     String text = resp.body().string();
                     RemoteConfig cfg = parseRemoteConfig(text);
                     if (cfg == null) {
                         Log.w(TAG, "远程配置解析失败");
+                        // 同上，失败路径解锁，避免语音包配置获取被阻塞
+                        VoicePackManager.getInstance(MainActivity.this).unlockConfigFetch();
                         return;
                     }
                     remoteConfig = cfg;
@@ -608,6 +659,8 @@ public class MainActivity extends AppCompatActivity {
                 }
             } catch (IOException e) {
                 Log.w(TAG, "拉取远程配置异常：" + e.getMessage());
+                // 同上，异常路径解锁
+                VoicePackManager.getInstance(MainActivity.this).unlockConfigFetch();
             }
         }).start();
     }

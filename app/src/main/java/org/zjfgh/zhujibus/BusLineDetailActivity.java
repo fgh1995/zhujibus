@@ -94,7 +94,8 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private ProgressBar pbVoicepackLine;
     private volatile boolean voicepackDownloadingLine = false;
     private List<String> voicepackStationNames = new ArrayList<>();
-    private int voicepackRetryCount = 0;
+    /** 配置状态监听器：统一由 VoicePackManager 推送 LOADING/READY/FAILED，避免本页面自行轮询/重试 */
+    private VoicePackManager.ConfigStateListener voicepackConfigListener = null;
     private int lastMissingCount = 0;
     private VoicePackManager.MissingStat lastMissingStat = null;
     /** 本页面已展示过的清理事件时间戳，避免同一事件重复提示 */
@@ -2467,23 +2468,74 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         tvVoicepackStatus.setText("🔊 检查语音包中...");
         tvVoicepackStatus.setOnClickListener(null);
 
+        // 注册统一状态监听（幂等）+ 主动触发拉取。状态机的重试/失败判定在事件回调中驱动刷新，
+        // 覆盖"源遍历中不判失败、成功后即时统计、重试耗尽才判失败"。
+        VoicePackManager vpm = VoicePackManager.getInstance(this);
+        ensureVoicepackConfigListener(vpm);
+        vpm.ensureConfigLoading();
+    }
+
+    /**
+     * 注册配置状态监听（幂等）。统一入口：所有状态（LOADING/READY/FAILED）都在此刷新，
+     * 由 VoicePackManager 状态机驱动，本页面不再自行轮询/重试。
+     */
+    private void ensureVoicepackConfigListener(VoicePackManager vpm) {
+        if (voicepackConfigListener != null) return;
+        voicepackConfigListener = state -> {
+            // 回调在后台线程（executor/scheduler/注册线程），切回主线程
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                switch (state) {
+                    case LOADING:
+                        // 源遍历中/重试等待中：绝不显示失败，一直保持"加载中"
+                        if (tvVoicepackStatus != null) {
+                            tvVoicepackStatus.setText("🔊 语音包配置加载中...");
+                        }
+                        break;
+                    case READY:
+                        // 配置就绪：反注册一次性监听，走正常统计
+                        unregisterVoicepackConfigListener(vpm);
+                        renderLineVoicepackReady(vpm);
+                        break;
+                    case FAILED:
+                        // 所有源遍历完且重试已耗尽：显示失败
+                        if (tvVoicepackStatus != null) {
+                            tvVoicepackStatus.setText("⚠️ 语音包配置加载失败");
+                        }
+                        break;
+                }
+            });
+        };
+        vpm.addConfigStateListener(voicepackConfigListener);
+    }
+
+    /** 反注册配置状态监听 */
+    private void unregisterVoicepackConfigListener(VoicePackManager vpm) {
+        if (voicepackConfigListener != null) {
+            vpm.removeConfigStateListener(voicepackConfigListener);
+            voicepackConfigListener = null;
+        }
+    }
+
+    /** 配置就绪后渲染线路语音包统计（后台线程做磁盘 md5 校验） */
+    private void renderLineVoicepackReady(VoicePackManager vpm) {
+        final List<String> names = voicepackStationNames;
+        if (names == null || names.isEmpty()) {
+            if (tvVoicepackStatus != null) {
+                tvVoicepackStatus.setText("🔊 线路暂无站点");
+            }
+            return;
+        }
         new Thread(() -> {
-            VoicePackManager vpm = VoicePackManager.getInstance(this);
             VoicePackManager.MissingStat stat = vpm.classifyMissing(names);
             runOnUiThread(() -> {
                 if (isFinishing() || isDestroyed()) return;
                 if (stat == null) {
-                    // 配置未就绪，延迟重试（最多 5 次，每次 2 秒）
-                    tvVoicepackStatus.setText("🔊 语音包配置加载中...");
-                    if (voicepackRetryCount < 5) {
-                        voicepackRetryCount++;
-                        handler.postDelayed(this::checkLineVoicepackStatus, 2000);
-                    } else {
-                        tvVoicepackStatus.setText("⚠️ 语音包配置加载失败");
+                    if (tvVoicepackStatus != null) {
+                        tvVoicepackStatus.setText("⚠️ 语音包配置未就绪");
                     }
                     return;
                 }
-                voicepackRetryCount = 0;
                 lastMissingStat = stat;
                 int missing = stat.notInRemote.size() + stat.notDownloaded.size() + stat.needUpdate.size();
                 lastMissingCount = missing;
@@ -3330,6 +3382,11 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        // 反注册语音包配置状态监听，避免 Activity 泄漏
+        if (voicepackConfigListener != null) {
+            VoicePackManager.getInstance(this).removeConfigStateListener(voicepackConfigListener);
+            voicepackConfigListener = null;
+        }
         // 停掉网络模式刷新倒计时，防止 Handler 引用泄漏
         stopNetworkRefreshCountdown();
         if (errorBlinkAnimator != null) {
