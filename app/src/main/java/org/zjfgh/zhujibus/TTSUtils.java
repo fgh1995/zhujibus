@@ -16,7 +16,6 @@ import android.util.Log;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -25,7 +24,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 public class TTSUtils implements TextToSpeech.OnInitListener {
     private static final String TAG = "TTSUtils";
@@ -47,6 +48,10 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
     private boolean isPlaying = false;
     private String currentUtteranceId;
     private List<QueuedAnnouncement> pendingAnnouncements = new ArrayList<>();
+
+    // 合成完成闩：utteranceId -> 闩，用于 synthesizeToFile 后精确等待落盘，
+    // 避免固定 500ms 盲等读到"半截文件"（WAV 头/数据不完整 → 解析出错误采样率 → 重采样后变快/变调）。
+    private final Map<String, CountDownLatch> pendingSynthLatches = new ConcurrentHashMap<>();
 
     private AudioManager audioManager;
     private AudioFocusRequest audioFocusRequest;
@@ -215,7 +220,7 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
                 R.raw.cn_num_90, R.raw.cn_num_91, R.raw.cn_num_92, R.raw.cn_num_93, R.raw.cn_num_94,
                 R.raw.cn_num_95, R.raw.cn_num_96, R.raw.cn_num_97, R.raw.cn_num_98, R.raw.cn_num_99,
                 R.raw.cn_num_100, R.raw.cn_num_yao, R.raw.cn_route,
-                R.raw.cn_00_welcom_zhuji, R.raw.cn_00_bus, R.raw.cn_01_this_bus_is_from,R.raw.cn_this_is_a_driver_only_bus,
+                R.raw.cn_00_welcom_zhuji, R.raw.cn_00_bus, R.raw.cn_01_this_bus_is_from,R.raw.cn_this_bus_has_no_conductor,
                 R.raw.cn_01_zhuji_bus_reminder, R.raw.cn_02_heading_to, R.raw.cn_03_direction,
                 R.raw.cn_03_starting_stop_departing, R.raw.cn_04_arriving, R.raw.cn_04_the_bus_is_moving_tips,
                 R.raw.cn_05_next_station, R.raw.cn_06_press_the_bell_to_get_off_tips, R.raw.cn_66_press_the_bell_to_get_off,
@@ -250,7 +255,7 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
                 R.raw.en_num_85, R.raw.en_num_86, R.raw.en_num_87, R.raw.en_num_88, R.raw.en_num_89,
                 R.raw.en_num_90, R.raw.en_num_91, R.raw.en_num_92, R.raw.en_num_93, R.raw.en_num_94,
                 R.raw.en_num_95, R.raw.en_num_96, R.raw.en_num_97, R.raw.en_num_98, R.raw.en_num_99,
-                R.raw.en_route, R.raw.en_031_starting_stop_departing,R.raw.en_this_is_a_driver_only_bus
+                R.raw.en_route, R.raw.en_031_starting_stop_departing,R.raw.en_this_bus_has_no_conductor
         };
         for (int resId : cnNumRes) {
             int soundId = soundPool.load(context, resId, 1);
@@ -267,17 +272,21 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
         tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
             @Override
             public void onStart(String utteranceId) {
-                Log.d(TAG, "TTS开始播放: " + utteranceId);
+                Log.d(TAG, "TTS开始: " + utteranceId);
             }
 
             @Override
             public void onDone(String utteranceId) {
-                Log.d(TAG, "TTS播放完成: " + utteranceId);
+                Log.d(TAG, "TTS完成: " + utteranceId);
+                CountDownLatch latch = pendingSynthLatches.get(utteranceId);
+                if (latch != null) latch.countDown();
             }
 
             @Override
             public void onError(String utteranceId) {
-                Log.e(TAG, "TTS播放出错: " + utteranceId);
+                Log.e(TAG, "TTS出错: " + utteranceId);
+                CountDownLatch latch = pendingSynthLatches.get(utteranceId);
+                if (latch != null) latch.countDown();
             }
         });
     }
@@ -363,11 +372,8 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
         addCnLineNumber(items, lineName);
         items.add(new PlaybackItem(R.raw.cn_04_arriving));
         addCnStationName(items, nextStationName);
-        String lineNameEn = lineName.replace("路", "");
         items.add(new PlaybackItem(R.raw.en_01_zhuji_bus_reminder));
-        addEnLineNumber(items, lineNameEn);
-        items.add(new PlaybackItem(R.raw.en_02_bound_for));
-        addEnStationName(items, endStation);
+        addEnLineNumber(items, lineName);
         items.add(new PlaybackItem(R.raw.en_03_is_arriving_at));
         addEnStationName(items, nextStationName);
     }
@@ -379,9 +385,8 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
         items.add(new PlaybackItem(R.raw.cn_04_arriving));
         addCnStationName(items, nextStationName);
 
-        String lineNameEn = lineName.replace("路", "");
         items.add(new PlaybackItem(R.raw.en_01_zhuji_bus_reminder));
-        addEnLineNumber(items, lineNameEn);
+        addEnLineNumber(items, lineName);
         items.add(new PlaybackItem(R.raw.en_03_is_arriving_at));
         addEnStationName(items, nextStationName);
     }
@@ -409,7 +414,7 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
             items.add(new PlaybackItem(R.raw.en_01_zhuji_bus_reminder));
             for (int i = 1; i < pendingAnnouncements.size(); i++) {
                 QueuedAnnouncement qa = pendingAnnouncements.get(i);
-                addEnLineNumber(items, qa.lineName.replace("路", ""));
+                addEnLineNumber(items, qa.lineName);
             }
             items.add(new PlaybackItem(R.raw.en_03_is_arriving_at));
             addEnStationName(items, firstNextStation);
@@ -432,9 +437,8 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
             items.add(new PlaybackItem(R.raw.cn_04_arriving));
             addCnStationName(items, nextStationName);
 
-            String lineNameEn = lineName.replace("路", "");
             items.add(new PlaybackItem(R.raw.en_01_zhuji_bus_reminder));
-            addEnLineNumber(items, lineNameEn);
+            addEnLineNumber(items, lineName);
             items.add(new PlaybackItem(R.raw.en_02_bound_for));
             addEnStationName(items, endStation);
             items.add(new PlaybackItem(R.raw.en_03_is_arriving_at));
@@ -450,7 +454,7 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
             List<PlaybackItem> items = new ArrayList<>();
             items.add(new PlaybackItem(R.raw.cn_00_welcom_zhuji));
             addCnLineNumber(items, lineName);
-            items.add(new PlaybackItem(R.raw.cn_this_is_a_driver_only_bus));
+            items.add(new PlaybackItem(R.raw.cn_this_bus_has_no_conductor));
             items.add(new PlaybackItem(R.raw.cn_01_this_bus_is_from));
             addCnStationName(items, startStation);
             items.add(new PlaybackItem(R.raw.cn_02_heading_to));
@@ -459,10 +463,9 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
             items.add(new PlaybackItem(R.raw.cn_05_next_station));
             addCnStationName(items, nextStation);
             items.add(new PlaybackItem(R.raw.cn_66_press_the_bell_to_get_off));
-            String lineNameEn = lineName.replace("路", "");
             items.add(new PlaybackItem(R.raw.en_00_welcome_aboard_the_zhuji));
-            addEnLineNumber(items, lineNameEn);
-            items.add(new PlaybackItem(R.raw.en_this_is_a_driver_only_bus));
+            addEnLineNumber(items, lineName);
+            items.add(new PlaybackItem(R.raw.en_this_bus_has_no_conductor));
             items.add(new PlaybackItem(R.raw.en_01_this_bus_is_from));
             addEnStationName(items, startStation);
             items.add(new PlaybackItem(R.raw.en_02_to));
@@ -603,7 +606,11 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
             int targetChannels = 1;
             int targetBitsPerSample = 16;
 
-            for (int i = 1; i < wavInfos.size(); i++) {
+            // 注意：必须从 i=0 开始。首段若未对齐目标格式（典型是 TTS 引擎合成的 WAV
+            // 采样率非 22050，如 16000Hz），会被原样拼进合并流，而合并头却声明 22050，
+            // 导致 MediaPlayer 以 22050 播放其原始 PCM —— 速度变快（22050/16000≈1.38×）。
+            // 故所有段落（含首段）统一重采样到目标格式，保证整条合并音频速度一致。
+            for (int i = 0; i < wavInfos.size(); i++) {
                 WavInfo info = wavInfos.get(i);
                 if (info.sampleRate != targetSampleRate || info.channels != targetChannels || info.bitsPerSample != targetBitsPerSample) {
                     Log.w(TAG, "WAV格式不一致，需要重采样: " + info.sampleRate + "Hz/" + info.channels + "ch/" + info.bitsPerSample + "bit -> " + targetSampleRate + "Hz/" + targetChannels + "ch/" + targetBitsPerSample + "bit");
@@ -690,40 +697,41 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
             return null;
         }
 
-        final WavInfo[] result = new WavInfo[1];
-        final CountDownLatch latch = new CountDownLatch(1);
-
-        File tempFile = new File(context.getCacheDir(), "tts_temp_" + System.currentTimeMillis() + ".wav");
+        File tempFile = new File(context.getCacheDir(), "tts_temp_" + System.nanoTime() + ".wav");
 
         tts.setLanguage(locale);
         tts.setSpeechRate(speechRate);
         tts.setPitch(pitch);
 
-        int status = tts.synthesizeToFile(text, null, tempFile, "tts_synth_" + System.currentTimeMillis());
-        if (status != TextToSpeech.SUCCESS) {
-            return null;
-        }
+        final String uttId = "tts_synth_" + System.nanoTime();
+        CountDownLatch latch = new CountDownLatch(1);
+        pendingSynthLatches.put(uttId, latch);
 
-        mainHandler.postDelayed(() -> {
-            try {
-                if (tempFile.exists() && tempFile.length() > 0) {
-                    result[0] = readWavFile(tempFile);
-                }
-            } catch (Exception e) {
-                Log.e(TAG, "读取TTS合成文件失败", e);
-            } finally {
-                latch.countDown();
-            }
-        }, 500);
-
+        WavInfo result = null;
         try {
-            latch.await();
+            int status = tts.synthesizeToFile(text, null, tempFile, uttId);
+            if (status != TextToSpeech.SUCCESS) {
+                Log.e(TAG, "TTS合成请求失败: " + status);
+                return null;
+            }
+            // 精确等待本次合成真正落盘，而非固定 500ms 盲等。盲等可能在合成未完成时读到
+            // "半截文件"，其 WAV 头/数据不完整，parseWav 解析出错误采样率，重采样后整段
+            // 变快/变调（且因系统负载不同而时好时坏，表现为偶发）。
+            boolean done = latch.await(8, TimeUnit.SECONDS);
+            if (!done) {
+                Log.e(TAG, "TTS合成超时(8s): " + uttId);
+                return null;
+            }
+            if (tempFile.exists() && tempFile.length() > 0) {
+                result = readWavFile(tempFile);
+            }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+        } finally {
+            pendingSynthLatches.remove(uttId);
+            tempFile.delete();
         }
-
-        tempFile.delete();
-        return result[0];
+        return result;
     }
 
     private WavInfo readRawWav(int rawResId) {
@@ -933,14 +941,26 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
 
             if (bitsPerSample == 16) {
                 short sample1 = (short) ((pcmData[srcIdx * bytesPerSample + 1] << 8) | (pcmData[srcIdx * bytesPerSample] & 0xFF));
-                short sample2 = (short) ((pcmData[(srcIdx + 1) * bytesPerSample + 1] << 8) | (pcmData[(srcIdx + 1) * bytesPerSample] & 0xFF));
-                short interpolated = (short) (sample1 + (sample2 - sample1) * frac);
+                short interpolated;
+                if (frac > 0) {
+                    // 仅在需要插值时访问下一位；当 srcIdx 已是末位采样（被 clamp 后 frac=0），
+                    // 若仍读 srcIdx+1 会越界（length-1 之后的位置）。frac=0 时结果即 sample1。
+                    short sample2 = (short) ((pcmData[(srcIdx + 1) * bytesPerSample + 1] << 8) | (pcmData[(srcIdx + 1) * bytesPerSample] & 0xFF));
+                    interpolated = (short) (sample1 + (sample2 - sample1) * frac);
+                } else {
+                    interpolated = sample1;
+                }
                 resampled[i * bytesPerSample] = (byte) (interpolated & 0xFF);
                 resampled[i * bytesPerSample + 1] = (byte) ((interpolated >> 8) & 0xFF);
             } else if (bitsPerSample == 8) {
                 int sample1 = pcmData[srcIdx * bytesPerSample] & 0xFF;
-                int sample2 = pcmData[(srcIdx + 1) * bytesPerSample] & 0xFF;
-                int interpolated = (int) (sample1 + (sample2 - sample1) * frac);
+                int interpolated;
+                if (frac > 0) {
+                    int sample2 = pcmData[(srcIdx + 1) * bytesPerSample] & 0xFF;
+                    interpolated = (int) (sample1 + (sample2 - sample1) * frac);
+                } else {
+                    interpolated = sample1;
+                }
                 resampled[i * bytesPerSample] = (byte) interpolated;
             }
         }
@@ -1043,65 +1063,191 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
         R.raw.en_num_80, R.raw.en_num_81, R.raw.en_num_82, R.raw.en_num_83, R.raw.en_num_84,
         R.raw.en_num_85, R.raw.en_num_86, R.raw.en_num_87, R.raw.en_num_88, R.raw.en_num_89,
         R.raw.en_num_90, R.raw.en_num_91, R.raw.en_num_92, R.raw.en_num_93, R.raw.en_num_94,
-        R.raw.en_num_95, R.raw.en_num_96, R.raw.en_num_97, R.raw.en_num_98, R.raw.en_num_99
+        R.raw.en_num_95, R.raw.en_num_96,         R.raw.en_num_97, R.raw.en_num_98, R.raw.en_num_99
     };
 
-    private void addCnLineNumber(List<PlaybackItem> items, String lineName) {
-        String numStr = lineName.replace("路", " ").trim();
-        String[] parts = numStr.split("\\s+", 2);
-        String numberPart = parts[0];
-        String suffix = parts.length > 1 ? parts[1].trim() : "";
-        try {
-            int num = Integer.parseInt(numberPart);
-            if (num >= 1 && num <= 100) {
-                items.add(new PlaybackItem(CN_NUM_RES[num]));
-            } else if (num > 100) {
-                String digits = String.valueOf(num);
-                for (char c : digits.toCharArray()) {
-                    int d = c - '0';
-                    if (d == 1) {
-                        items.add(new PlaybackItem(R.raw.cn_num_yao));
-                    } else {
-                        items.add(new PlaybackItem(CN_NUM_RES[d]));
-                    }
+    /** 单字母预制音频（中文）：a~z → R.raw.cn_a .. R.raw.cn_z */
+    private static final int[] CN_LETTER_RES = {
+        R.raw.cn_a, R.raw.cn_b, R.raw.cn_c, R.raw.cn_d, R.raw.cn_e, R.raw.cn_f, R.raw.cn_g,
+        R.raw.cn_h, R.raw.cn_i, R.raw.cn_j, R.raw.cn_k, R.raw.cn_l, R.raw.cn_m, R.raw.cn_n,
+        R.raw.cn_o, R.raw.cn_p, R.raw.cn_q, R.raw.cn_r, R.raw.cn_s, R.raw.cn_t, R.raw.cn_u,
+        R.raw.cn_v, R.raw.cn_w, R.raw.cn_x, R.raw.cn_y, R.raw.cn_z
+    };
+
+    /** 单字母预制音频（英文）：a~z → R.raw.en_a .. R.raw.en_z */
+    private static final int[] EN_LETTER_RES = {
+        R.raw.en_a, R.raw.en_b, R.raw.en_c, R.raw.en_d, R.raw.en_e, R.raw.en_f, R.raw.en_g,
+        R.raw.en_h, R.raw.en_i, R.raw.en_j, R.raw.en_k, R.raw.en_l, R.raw.en_m, R.raw.en_n,
+        R.raw.en_o, R.raw.en_p, R.raw.en_q, R.raw.en_r, R.raw.en_s, R.raw.en_t, R.raw.en_u,
+        R.raw.en_v, R.raw.en_w, R.raw.en_x, R.raw.en_y, R.raw.en_z
+    };
+
+    private static boolean isLatinLetter(char c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+    }
+
+    /** 字母 → 中文预制音频资源；非拉丁字母返回 0 */
+    private static int cnLetterRes(char c) {
+        if (c >= 'a' && c <= 'z') return CN_LETTER_RES[c - 'a'];
+        if (c >= 'A' && c <= 'Z') return CN_LETTER_RES[c - 'A'];
+        return 0;
+    }
+
+    /** 字母 → 英文预制音频资源；非拉丁字母返回 0 */
+    private static int enLetterRes(char c) {
+        if (c >= 'a' && c <= 'z') return EN_LETTER_RES[c - 'a'];
+        if (c >= 'A' && c <= 'Z') return EN_LETTER_RES[c - 'A'];
+        return 0;
+    }
+
+    /** 线路名 token：连续数字段 / 单字母 / "路"标记 */
+    private static class LineToken {
+        enum Kind { NUMBER, LETTER, ROUTE }
+        Kind kind;
+        int number;  // NUMBER
+        char letter; // LETTER
+    }
+
+    /**
+     * 按原始字符顺序拆解线路名为 token 序列：连续数字合并为 NUMBER，单字母为 LETTER，
+     * "路"为 ROUTE。遇中文等不可拆解字符返回 null（交由整条 TTS 兜底）。
+     * 例：
+     *   9路A  → [NUMBER 9][ROUTE][LETTER A]
+     *   Y1A路 → [LETTER Y][NUMBER 1][LETTER A][ROUTE]
+     *   108A  → [NUMBER 108][LETTER A]
+     */
+    private static List<LineToken> tokenizeLineName(String lineName) {
+        List<LineToken> tokens = new ArrayList<>();
+        int i = 0, n = lineName.length();
+        while (i < n) {
+            char c = lineName.charAt(i);
+            if (c == '路') {
+                LineToken t = new LineToken();
+                t.kind = LineToken.Kind.ROUTE;
+                tokens.add(t);
+                i++;
+                continue;
+            }
+            if (isLatinLetter(c)) {
+                LineToken t = new LineToken();
+                t.kind = LineToken.Kind.LETTER;
+                t.letter = c;
+                tokens.add(t);
+                i++;
+                continue;
+            }
+            if (Character.isDigit(c)) {
+                StringBuilder dig = new StringBuilder();
+                while (i < n && Character.isDigit(lineName.charAt(i))) dig.append(lineName.charAt(i++));
+                LineToken t = new LineToken();
+                t.kind = LineToken.Kind.NUMBER;
+                t.number = Integer.parseInt(dig.toString());
+                tokens.add(t);
+                continue;
+            }
+            // 含中文/其它不可拆解字符：整条 TTS 兜底
+            return null;
+        }
+        return tokens;
+    }
+
+    /** 中文数字段：≤100 整读，>100 逐字读（"1"读"幺"） */
+    private void addCnNumber(List<PlaybackItem> items, int num) {
+        if (num >= 1 && num <= 100) {
+            items.add(new PlaybackItem(CN_NUM_RES[num]));
+        } else {
+            String digits = String.valueOf(num);
+            for (char c : digits.toCharArray()) {
+                int d = c - '0';
+                if (d == 1) {
+                    items.add(new PlaybackItem(R.raw.cn_num_yao));
+                } else {
+                    items.add(new PlaybackItem(CN_NUM_RES[d]));
                 }
             }
-            items.add(new PlaybackItem(R.raw.cn_route));
-            if (!suffix.isEmpty()) {
-                items.add(new PlaybackItem(suffix, PlaybackItem.Type.TTS_CN));
-            }
-        } catch (NumberFormatException e) {
-            items.add(new PlaybackItem(lineName, PlaybackItem.Type.TTS_CN));
         }
     }
 
-    private void addEnLineNumber(List<PlaybackItem> items, String lineNameEn) {
-        addEnLineNumber(items, lineNameEn, true);
-    }
-
-    private void addEnLineNumber(List<PlaybackItem> items, String lineNameEn, boolean withRoute) {
-        String numStr = lineNameEn.trim();
-        try {
-            int num = Integer.parseInt(numStr);
-            if (withRoute) {
-                items.add(new PlaybackItem(R.raw.en_route));
-            }
-            if (num >= 0 && num <= 99) {
-                items.add(new PlaybackItem(EN_NUM_RES[num]));
-            } else if (num >= 100) {
-                String digits = String.valueOf(num);
-                for (char c : digits.toCharArray()) {
-                    int d = c - '0';
-                    if (d >= 0 && d <= 9) {
-                        items.add(new PlaybackItem(EN_NUM_RES[d]));
-                    }
+    /** 英文数字段：≤99 整读，≥100 逐字读 */
+    private void addEnNumber(List<PlaybackItem> items, int num) {
+        if (num >= 0 && num <= 99) {
+            items.add(new PlaybackItem(EN_NUM_RES[num]));
+        } else {
+            String digits = String.valueOf(num);
+            for (char c : digits.toCharArray()) {
+                int d = c - '0';
+                if (d >= 0 && d <= 9) {
+                    items.add(new PlaybackItem(EN_NUM_RES[d]));
                 }
             }
-        } catch (NumberFormatException e) {
-            if (withRoute) {
-                items.add(new PlaybackItem(R.raw.en_route));
+        }
+    }
+
+    /**
+     * 中文线路名拆解：严格按原始字符顺序拼预制音频，使"路"出现在它本来的位置
+     * （例：9路A → 九 + 路 + A，而非九 + A + 路）。
+     * 含中文等不可拆解字符时，整条走 TTS（保留旧行为）。
+     * 例：
+     *   9路A  → 九 + 路 + A
+     *   108A  → 一零八 + A（无"路"）
+     *   105L  → 一零伍 + L（无"路"）
+     *   Y1A路 → Y + 一 + A + 路
+     */
+    private void addCnLineNumber(List<PlaybackItem> items, String lineName) {
+        if (lineName == null || lineName.isEmpty()) return;
+        List<LineToken> tokens = tokenizeLineName(lineName);
+        if (tokens == null) {
+            items.add(new PlaybackItem(lineName, PlaybackItem.Type.TTS_CN));
+            return;
+        }
+        for (LineToken t : tokens) {
+            switch (t.kind) {
+                case NUMBER:
+                    addCnNumber(items, t.number);
+                    break;
+                case LETTER:
+                    int cres = cnLetterRes(t.letter);
+                    if (cres != 0) items.add(new PlaybackItem(cres));
+                    else items.add(new PlaybackItem(String.valueOf(t.letter), PlaybackItem.Type.TTS_CN));
+                    break;
+                case ROUTE:
+                    items.add(new PlaybackItem(R.raw.cn_route));
+                    break;
             }
-            items.add(new PlaybackItem(lineNameEn, PlaybackItem.Type.TTS_EN));
+        }
+    }
+
+    /**
+     * 英文线路名拆解：英文习惯把 "route" 放在线路号最前面，因此若线路名含"路"，
+     * 先播 route，再按原始顺序播字母/数字。
+     * 例：
+     *   9路A  → route + nine + A
+     *   Y1A路 → route + Y + one + A
+     *   108A  → one zero eight + A（无 route）
+     * 含中文等不可拆解字符时，整条走 TTS（英文）。
+     */
+    private void addEnLineNumber(List<PlaybackItem> items, String lineName) {
+        if (lineName == null || lineName.isEmpty()) return;
+        List<LineToken> tokens = tokenizeLineName(lineName);
+        if (tokens == null) {
+            items.add(new PlaybackItem(lineName, PlaybackItem.Type.TTS_EN));
+            return;
+        }
+        boolean hasRoute = false;
+        for (LineToken t : tokens) if (t.kind == LineToken.Kind.ROUTE) hasRoute = true;
+        if (hasRoute) items.add(new PlaybackItem(R.raw.en_route)); // 英文：route 前置
+        for (LineToken t : tokens) {
+            if (t.kind == LineToken.Kind.ROUTE) continue; // route 已前置，跳过
+            switch (t.kind) {
+                case NUMBER:
+                    addEnNumber(items, t.number);
+                    break;
+                case LETTER:
+                    int eres = enLetterRes(t.letter);
+                    if (eres != 0) items.add(new PlaybackItem(eres));
+                    else items.add(new PlaybackItem(String.valueOf(t.letter), PlaybackItem.Type.TTS_EN));
+                    break;
+            }
         }
     }
 

@@ -164,16 +164,16 @@ public class BusRouteSearchActivity extends AppCompatActivity {
                     TTSUtils tts = TTSUtils.getInstance(this);
                     switch (which) {
                         case 0:
-                            tts.playArrivalAnnouncement("1路", "上海城", "小商品市场", "白门下村");
+                            tts.playArrivalAnnouncement("高湖旅游专线", "上海城", "小商品市场", "白门下村");
                             break;
                         case 1:
-                            tts.playArrivalAnnouncement("1路", "上海城", "小商品市场", "白门下村");
+                            tts.playArrivalAnnouncement("通勤2号A线", "上海城", "小商品市场", "白门下村");
                             tts.queueArrivalAnnouncement("2路", "跨湖新村", "小商品市场", "白门下村");
                             break;
                         case 2:
-                            tts.playArrivalAnnouncement("1路", "跨湖新村", "小商品市场", "白门下村");
-                            tts.queueArrivalAnnouncement("2路", "八方热电厂", "小商品市场", "白门下村");
-                            tts.queueArrivalAnnouncement("3路", "跨湖新村", "小商品市场", "白门下村");
+                            tts.playArrivalAnnouncement("9路A", "跨湖新村", "小商品市场", "白门下村");
+                            tts.queueArrivalAnnouncement("Y1A路", "八方热电厂", "小商品市场", "白门下村");
+                            tts.queueArrivalAnnouncement("108A路", "跨湖新村", "小商品市场", "白门下村");
                             break;
                         case 3:
                             tts.playLineDetailAnnouncement("1路", "小商品市场", "跨湖新村", "白门下村");
