@@ -1,71 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- 按下状态 -->
+    <!-- 按下状态：细描边亮绿，背景镂空透明 -->
     <item android:state_pressed="true">
-        <layer-list>
-            <!-- 外层点阵边框 - 1dp 点 -->
-            <item>
-                <shape android:shape="rectangle">
-                    <solid android:color="#80FF00" />
-                    <corners android:radius="2dp" />
-                </shape>
-            </item>
-            <!-- 内层点阵 - 亮色 -->
-            <item
-                android:left="3dp"
-                android:top="3dp"
-                android:right="3dp"
-                android:bottom="3dp">
-                <shape android:shape="rectangle">
-                    <solid android:color="#33FF00" />
-                    <corners android:radius="1dp" />
-                </shape>
-            </item>
-            <!-- 主体背景 -->
-            <item
-                android:left="4dp"
-                android:top="4dp"
-                android:right="4dp"
-                android:bottom="4dp">
-                <shape android:shape="rectangle">
-                    <solid android:color="#1A1A1A" />
-                    <corners android:radius="1dp" />
-                </shape>
-            </item>
-        </layer-list>
+        <shape android:shape="rectangle">
+            <stroke
+                android:width="1dp"
+                android:color="#80FF00" />
+            <corners android:radius="2dp" />
+        </shape>
     </item>
-    <!-- 默认状态 -->
+    <!-- 默认状态：细描边 LED 绿，背景完全透明 -->
     <item>
-        <layer-list>
-            <!-- 外层点阵边框 -->
-            <item>
-                <shape android:shape="rectangle">
-                    <solid android:color="#1AFF00" />
-                    <corners android:radius="2dp" />
-                </shape>
-            </item>
-            <!-- 内层点阵 - 暗绿 -->
-            <item
-                android:left="3dp"
-                android:top="3dp"
-                android:right="3dp"
-                android:bottom="3dp">
-                <shape android:shape="rectangle">
-                    <solid android:color="#1A33FF00" />
-                    <corners android:radius="1dp" />
-                </shape>
-            </item>
-            <!-- 主体背景 -->
-            <item
-                android:left="4dp"
-                android:top="4dp"
-                android:right="4dp"
-                android:bottom="4dp">
-                <shape android:shape="rectangle">
-                    <solid android:color="#1A1A1A" />
-                    <corners android:radius="1dp" />
-                </shape>
-            </item>
-        </layer-list>
+        <shape android:shape="rectangle">
+            <stroke
+                android:width="1dp"
+                android:color="#1AFF00" />
+            <corners android:radius="2dp" />
+        </shape>
     </item>
 </selector>

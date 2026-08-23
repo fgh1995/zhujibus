@@ -31,6 +31,13 @@
         </attr>
         <attr name="hsTurnPauseDuration" format="integer" />
         <attr name="hsCharPerSecond" format="float" />
+
+        <!-- 多行（`\n` 换行）时各行水平对齐方式，独立于单行 hsGravity；默认 center -->
+        <attr name="hsLineGravity" format="enum">
+            <enum name="left" value="0" />
+            <enum name="center" value="1" />
+            <enum name="right" value="2" />
+        </attr>
     </declare-styleable>
     <declare-styleable name="BorderLabel">
         <attr name="labelText" format="string" />

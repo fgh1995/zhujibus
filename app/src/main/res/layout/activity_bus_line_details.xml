@@ -142,49 +142,91 @@
                         app:dotMatrixPattern="accessibility"
                         app:dotMatrixColor="#FFFFFF"
                         android:layout_marginRight="10dp"/>
-                    <org.zjfgh.zhujibus.HorizontalScrollTextView
-                        android:id="@+id/route_number"
-                        android:layout_width="120dp"
+                    <LinearLayout
+                        android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:gravity="center"
-                        android:text="00"
-                        android:textSize="30sp"
-                        android:textColor="#00FF00"
-                        android:textStyle="bold"
-                        app:hsTextGap="20dp"
-                        android:layout_marginRight="10dp"/>
+                        android:layout_marginEnd="10dp"
+                        android:orientation="vertical">
+                        <org.zjfgh.zhujibus.HorizontalScrollTextView
+                            android:id="@+id/route_number"
+                            android:layout_width="150dp"
+                            android:layout_height="wrap_content"
+                            android:gravity="center"
+                            android:text="00"
+                            app:hsTextSize="30sp"
+                            android:textColor="#00FF00"
+                            android:textStyle="bold"
+                            app:hsTextGap="20dp"
+                            />
+                        <org.zjfgh.zhujibus.HorizontalScrollTextView
+                            android:id="@+id/route_en_number"
+                            android:layout_width="150dp"
+                            android:layout_height="wrap_content"
+                            android:gravity="center"
+                            android:text="00"
+                            android:textColor="#00FF00"
+                            android:textStyle="bold"
+                            app:hsTextGap="20dp"
+                            app:hsTextSize="15sp" />
+                    </LinearLayout>
+
                     <org.zjfgh.zhujibus.DotMatrixView
                         android:layout_width="42dp"
                         android:layout_height="42dp"
                         app:dotMatrixPattern="right_arrow"
                         app:dotMatrixColor="#FF0000"/>
-                    <org.zjfgh.zhujibus.HorizontalScrollTextView
-                        android:id="@+id/end_station_name"
-                        android:layout_width="match_parent"
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_weight="1"
                         android:layout_height="wrap_content"
-                        android:layout_marginStart="8dp"
-                        android:textColor="#FF0000"
-                        android:textSize="30sp"
-                        app:hsTextGap="20dp"
-                        android:text="终点站名" />
+                        android:orientation="vertical">
+                        <org.zjfgh.zhujibus.HorizontalScrollTextView
+                            android:id="@+id/end_station_name"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="8dp"
+                            android:textColor="#FF0000"
+                            app:hsTextSize="30sp"
+                            app:hsTextGap="20dp"
+                            android:text="终点站名" />
+                        <org.zjfgh.zhujibus.HorizontalScrollTextView
+                            android:id="@+id/end_station_en_name"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="8dp"
+                            android:textColor="#FF0000"
+                            app:hsTextSize="15sp"
+                            app:hsTextGap="20dp"
+                            android:text="end_station_en_name" />
+                    </LinearLayout>
                 </LinearLayout>
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
+                    android:orientation="vertical"
                     android:layout_marginTop="5dp"
                     android:gravity="center_horizontal">
                     <org.zjfgh.zhujibus.HorizontalScrollTextView
                         android:id="@+id/tips"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:textSize="30sp"
+                        app:hsTextSize="15sp"
                         android:textColor="#FFFF00"
-                        android:text="文明排队   上下有序"/>
+                        app:hsText="文明排队   上下有序"/>
+                    <org.zjfgh.zhujibus.HorizontalScrollTextView
+                        android:id="@+id/en_tips"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        app:hsTextSize="15sp"
+                        android:textColor="#FFFF00"
+                        app:hsText="Queue in Order Board in Turn" />
                 </LinearLayout>
             </org.zjfgh.zhujibus.view.DotMatrixLinearLayout>
 
         </LinearLayout>
+
         <LinearLayout
+            android:id="@+id/station_mode_section"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
@@ -196,87 +238,84 @@
                 android:layout_weight="1"
                 android:background="@drawable/led_dark_bg_rounded"
                 android:gravity="center_vertical"
-                android:orientation="vertical"
+                android:orientation="horizontal"
                 android:padding="10dp">
+                <!-- LED横屏滚动 + 模式切换 -->
                 <org.zjfgh.zhujibus.view.DotMatrixLinearLayout
-                    android:layout_width="match_parent"
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:orientation="vertical"
+                    android:layout_weight="1"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
                     app:dmlDotColor="#3D1515"
                     app:dmlBgColor="#090303">
                     <org.zjfgh.zhujibus.HorizontalScrollTextView
                         android:id="@+id/next_station_info"
-                        android:layout_width="wrap_content"
+                        android:layout_width="0dp"
                         android:layout_height="wrap_content"
+                        android:layout_weight="1"
                         app:hsGravity="center"
                         app:hsTextColor="#FF0000"
                         app:hsTextGap="90dp"
                         app:hsTextSize="30sp" />
-                </org.zjfgh.zhujibus.view.DotMatrixLinearLayout>
-
-            </LinearLayout>
-            <LinearLayout
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
-                android:padding="10dp"
-                android:gravity="center_vertical"
-                android:background="@drawable/led_dark_bg_rounded">
-                <org.zjfgh.zhujibus.view.DotMatrixLinearLayout
-                    android:id="@+id/mode_switch"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="2dp"
-                    app:dmlDotColor="#3D1515"
-                    app:dmlBgColor="#090303">
-                    <TextView
-                        android:id="@+id/mode_tips"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="切换模式"
-                        android:layout_gravity="center_horizontal"
-                        android:textColor="#00FF00"/>
                     <LinearLayout
+                        android:id="@+id/mode_switch"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:gravity="center_vertical">
+                        android:layout_marginStart="5dp"
+                        android:layout_marginEnd="5dp"
+                        android:layout_marginTop="4dp"
+                        android:layout_marginBottom="4dp"
+                        android:layout_gravity="center_vertical"
+                        android:orientation="vertical"
+                        android:background="@drawable/led_button_green_selector"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:paddingStart="4dp"
+                        android:paddingEnd="4dp"
+                        android:paddingTop="4dp"
+                        android:paddingBottom="4dp">
                         <TextView
-                            android:id="@+id/network_status_indicator"
+                            android:id="@+id/mode_tips"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="●"
-                            android:textColor="#00FF00"
-                            android:textSize="10sp" />
-                        <TextView
-                            android:id="@+id/mode_text"
+                            android:text="切换模式"
+                            android:layout_gravity="center_horizontal"
+                            android:textColor="#1AFF00"
+                            android:textSize="11sp"/>
+                        <LinearLayout
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginStart="4dp"
-                            android:padding="2dp"
-                            android:textColor="#FF0000"
-                            android:textSize="14sp"
-                            android:text="网络"/>
+                            android:gravity="center_vertical">
+                            <TextView
+                                android:id="@+id/network_status_indicator"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="●"
+                                android:textColor="#00FF00"
+                                android:textSize="10sp" />
+                            <TextView
+                                android:id="@+id/mode_text"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginStart="4dp"
+                                android:padding="2dp"
+                                android:fontFeatureSettings="tnum"
+                                android:textColor="#FF0000"
+                                android:textSize="12sp"
+                                android:text="网络"/>
+                        </LinearLayout>
                     </LinearLayout>
                 </org.zjfgh.zhujibus.view.DotMatrixLinearLayout>
             </LinearLayout>
-        </LinearLayout>
-        <!-- 时刻信息 -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:gravity="center_vertical"
-            android:layout_gravity="center_vertical"
-            android:layout_marginTop="8dp">
-
         </LinearLayout>
         <!-- 导航模块 -->
         <include
             android:id="@+id/navigation_section"
             layout="@layout/activity_navigation"
-            android:layout_marginTop="2dp"
+            android:layout_marginTop="10dp"
             android:layout_width="match_parent"
-            android:layout_height="280dp" />
+            android:layout_height="350dp" />
 
         <!-- 标签容器 -->
         <LinearLayout

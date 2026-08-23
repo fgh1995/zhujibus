@@ -24,165 +24,196 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintBottom_toBottomOf="parent">
-
-        <!-- 拍POV -->
+        <!-- 隐藏/显示 切换按钮：常驻面板顶部，不受菜单隐藏影响 -->
         <LinearLayout
-            android:id="@+id/nav_icon_pov"
-            android:layout_width="match_parent"
+            android:id="@+id/hide_switch"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:gravity="center"
-            android:layout_marginBottom="5dp"
+            android:layout_gravity="center"
+            android:background="@drawable/led_button_green_selector"
             android:clickable="true"
             android:focusable="true"
-            android:background="?attr/selectableItemBackground">
-            <ImageView
-                android:layout_width="32dp"
-                android:layout_height="32dp"
-                android:src="@drawable/avatar" />
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:text="拍POV"
-                android:textColor="#FFFFFF"
-                android:textSize="11sp" />
-        </LinearLayout>
-
-        <!-- 地图(点击切换到/退出地图设置页) -->
-        <LinearLayout
-            android:id="@+id/nav_icon_map"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:gravity="center"
+            android:layout_marginTop="5dp"
             android:layout_marginBottom="5dp"
-            android:clickable="true"
-            android:focusable="true"
-            android:background="?attr/selectableItemBackground">
-            <ImageView
-                android:id="@+id/nav_icon_map_img"
-                android:layout_width="20dp"
-                android:layout_height="20dp"
-                android:src="@drawable/huibao"/>
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:paddingTop="2dp"
+            android:paddingBottom="2dp">
             <TextView
-                android:id="@+id/nav_icon_map_text"
+                android:id="@+id/hide_switch_text"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="3dp"
-                android:text="地图"
-                android:textColor="#FFFFFF"
-                android:textSize="11sp" />
+                android:text="隐藏"
+                android:layout_gravity="center_horizontal"
+                android:textColor="#1AFF00"
+                android:textSize="11sp"/>
         </LinearLayout>
-
-        <!-- 喊话 -->
         <LinearLayout
-            android:id="@+id/nav_icon_speak"
+            android:id="@+id/nav_icon_container"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:gravity="center"
-            android:layout_marginBottom="5dp">
-            <ImageView
-                android:id="@+id/nav_icon_speak_img"
-                android:layout_width="20dp"
-                android:layout_height="20dp"
-                android:src="@drawable/hanhua"
-                android:background="@drawable/nav_icon_speak" />
-            <TextView
-                android:id="@+id/nav_icon_speak_text"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="3dp"
-                android:text="报站"
-                android:textColor="#FFFFFF"
-                android:textSize="11sp" />
-        </LinearLayout>
-
-        <!-- 排班 -->
-        <LinearLayout
-            android:id="@+id/nav_icon_schedule"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:gravity="center"
-            android:layout_marginBottom="5dp"
-            android:clickable="true"
-            android:focusable="true"
-            android:background="?attr/selectableItemBackground">
-            <ImageView
-                android:id="@+id/nav_icon_schedule_img"
-                android:layout_width="20dp"
-                android:layout_height="20dp"
-                android:src="@drawable/paiban"
-                android:background="@drawable/nav_icon_speak" />
-            <TextView
-                android:id="@+id/nav_icon_schedule_text"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="3dp"
-                android:text="排班"
-                android:textColor="#FFFFFF"
-                android:textSize="11sp" />
-        </LinearLayout>
-
-        <!-- 消息(带红点) -->
-        <FrameLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content">
+            android:gravity="center_horizontal"
+            android:orientation="vertical">
+            <!-- 拍POV -->
             <LinearLayout
-                android:id="@+id/nav_icon_message"
+                android:id="@+id/nav_icon_pov"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:layout_marginBottom="5dp"
+                android:clickable="true"
+                android:focusable="true"
+                android:background="?attr/selectableItemBackground">
+                <ImageView
+                    android:layout_width="32dp"
+                    android:layout_height="32dp"
+                    android:src="@drawable/avatar" />
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="拍POV"
+                    android:textColor="#FFFFFF"
+                    android:textSize="11sp" />
+            </LinearLayout>
+
+            <!-- 地图(点击切换到/退出地图设置页) -->
+            <LinearLayout
+                android:id="@+id/nav_icon_map"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:layout_marginBottom="5dp"
+                android:clickable="true"
+                android:focusable="true"
+                android:background="?attr/selectableItemBackground">
+                <ImageView
+                    android:id="@+id/nav_icon_map_img"
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:src="@drawable/huibao"/>
+                <TextView
+                    android:id="@+id/nav_icon_map_text"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="3dp"
+                    android:text="地图"
+                    android:textColor="#FFFFFF"
+                    android:textSize="11sp" />
+            </LinearLayout>
+
+            <!-- 喊话 -->
+            <LinearLayout
+                android:id="@+id/nav_icon_speak"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
                 android:gravity="center"
                 android:layout_marginBottom="5dp">
                 <ImageView
-                    android:id="@+id/nav_icon_message_img"
+                    android:id="@+id/nav_icon_speak_img"
                     android:layout_width="20dp"
                     android:layout_height="20dp"
-                    android:src="@drawable/xiaoxi"
+                    android:src="@drawable/hanhua"
                     android:background="@drawable/nav_icon_speak" />
                 <TextView
-                    android:id="@+id/nav_icon_message_text"
+                    android:id="@+id/nav_icon_speak_text"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="3dp"
-                    android:text="消息"
+                    android:text="报站"
                     android:textColor="#FFFFFF"
                     android:textSize="11sp" />
             </LinearLayout>
-            <TextView
-                android:id="@+id/nav_has_notification"
-                android:layout_width="13dp"
-                android:layout_height="13dp"
-                android:layout_gravity="top|end"
-                android:gravity="center"
-                android:text="-1"
-                android:padding="2dp"
-                android:textColor="#FFFFFF"
-                android:textSize="6sp"
-                android:layout_marginEnd="2dp"
-                android:background="@drawable/nav_badge_bg" />
-        </FrameLayout>
 
-        <!-- 更多应用 -->
-        <LinearLayout
-            android:id="@+id/nav_icon_more"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:gravity="center"
-            android:clickable="true"
-            android:focusable="true"
-            android:background="?attr/selectableItemBackground">
-            <ImageView
-                android:id="@+id/nav_icon_more_img"
-                android:layout_width="20dp"
-                android:layout_height="20dp"
-                android:src="@drawable/yingyong"
-                android:background="@drawable/nav_icon_speak" />
+            <!-- 排班 -->
+            <LinearLayout
+                android:id="@+id/nav_icon_schedule"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:layout_marginBottom="5dp"
+                android:clickable="true"
+                android:focusable="true"
+                android:background="?attr/selectableItemBackground">
+                <ImageView
+                    android:id="@+id/nav_icon_schedule_img"
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:src="@drawable/paiban"
+                    android:background="@drawable/nav_icon_speak" />
+                <TextView
+                    android:id="@+id/nav_icon_schedule_text"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="3dp"
+                    android:text="排班"
+                    android:textColor="#FFFFFF"
+                    android:textSize="11sp" />
+            </LinearLayout>
+
+            <!-- 消息(带红点) -->
+            <FrameLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+                <LinearLayout
+                    android:id="@+id/nav_icon_message"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:gravity="center"
+                    android:layout_marginBottom="5dp">
+                    <ImageView
+                        android:id="@+id/nav_icon_message_img"
+                        android:layout_width="20dp"
+                        android:layout_height="20dp"
+                        android:src="@drawable/xiaoxi"
+                        android:background="@drawable/nav_icon_speak" />
+                    <TextView
+                        android:id="@+id/nav_icon_message_text"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="3dp"
+                        android:text="消息"
+                        android:textColor="#FFFFFF"
+                        android:textSize="11sp" />
+                </LinearLayout>
+                <TextView
+                    android:id="@+id/nav_has_notification"
+                    android:layout_width="13dp"
+                    android:layout_height="13dp"
+                    android:layout_gravity="top|end"
+                    android:gravity="center"
+                    android:text="-1"
+                    android:padding="2dp"
+                    android:textColor="#FFFFFF"
+                    android:textSize="6sp"
+                    android:layout_marginEnd="2dp"
+                    android:background="@drawable/nav_badge_bg" />
+            </FrameLayout>
+
+            <!-- 更多应用 -->
+            <LinearLayout
+                android:id="@+id/nav_icon_more"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:clickable="true"
+                android:focusable="true"
+                android:background="?attr/selectableItemBackground">
+                <ImageView
+                    android:id="@+id/nav_icon_more_img"
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:src="@drawable/yingyong"
+                    android:background="@drawable/nav_icon_speak" />
+            </LinearLayout>
         </LinearLayout>
+
     </LinearLayout>
 
     <!-- ========== 内容容器(由 Fragment 切换:主页 / 地图设置) ========== -->

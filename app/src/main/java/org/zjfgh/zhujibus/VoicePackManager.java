@@ -6,6 +6,13 @@ import android.util.Log;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import net.sourceforge.pinyin4j.PinyinHelper;
+import net.sourceforge.pinyin4j.format.HanyuPinyinCaseType;
+import net.sourceforge.pinyin4j.format.HanyuPinyinOutputFormat;
+import net.sourceforge.pinyin4j.format.HanyuPinyinToneType;
+import net.sourceforge.pinyin4j.format.HanyuPinyinVCharType;
+import net.sourceforge.pinyin4j.format.exception.BadHanyuPinyinOutputFormatCombination;
+
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -789,6 +796,70 @@ public class VoicePackManager {
         } catch (IOException e) {
             Log.w(TAG, "写 md5 sidecar 失败: " + e.getMessage());
         }
+    }
+
+    /**
+     * 获取站点的英文展示文本（详情页列表在站名下方显示，供后续扩展调用）。
+     *
+     * 规则：
+     *  - 配置已加载且 stationName 命中索引 → 优先返回其 en 字段（如 "Dingyanwang Residential Area"）。
+     *  - en 字段为空/缺失 → 回退为拼音，且每个音节首字母大写（如 "丁严王小区" → "Ding Yan Wang Xiao Qu"）。
+     *
+     * @param stationName 中文站名
+     * @return 英文或拼音文本；stationName 为空时返回 null。配置未加载且拼音为空等极端情况返回空串。
+     */
+    public String getStationEnglish(String stationName) {
+        if (stationName == null || stationName.isEmpty()) return null;
+        Entry e = stationIndex.get(stationName);
+        if (e != null && e.en != null && !e.en.isEmpty()) {
+            return e.en;
+        }
+        // 回退：拼音（每个音节首字母大写）
+        return toPinyinTitleCase(stationName);
+    }
+
+    /**
+     * 将文本转为拼音，每个音节首字母大写，音节之间以空格分隔。
+     * 汉字 → 拼音；非汉字（字母/数字/标点）原样保留并与相邻非汉字合并为同一段。
+     * 例："丁严王小区" → "Ding Yan Wang Xiao Qu"；"9路B" → "9 Lu B"。
+     */
+    static String toPinyinTitleCase(String text) {
+        if (text == null || text.isEmpty()) return "";
+        HanyuPinyinOutputFormat format = new HanyuPinyinOutputFormat();
+        format.setToneType(HanyuPinyinToneType.WITHOUT_TONE);
+        format.setCaseType(HanyuPinyinCaseType.LOWERCASE);
+        // ü 用 v 表示（WITH_V），避免默认 WITH_U_AND_COLON 产生的冒号（如"旅"→"lu:"）
+        format.setVCharType(HanyuPinyinVCharType.WITH_V);
+        List<String> tokens = new ArrayList<>();
+        StringBuilder nonHan = new StringBuilder();
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c >= 0x4E00 && c <= 0x9FA5) { // 汉字
+                if (nonHan.length() > 0) {
+                    tokens.add(nonHan.toString());
+                    nonHan.setLength(0);
+                }
+                try {
+                    String[] pinyins = PinyinHelper.toHanyuPinyinStringArray(c, format);
+                    String py = (pinyins != null && pinyins.length > 0) ? pinyins[0] : String.valueOf(c);
+                    if (!py.isEmpty()) {
+                        py = Character.toUpperCase(py.charAt(0)) + py.substring(1);
+                    }
+                    tokens.add(py);
+                } catch (BadHanyuPinyinOutputFormatCombination ex) {
+                    tokens.add(String.valueOf(c));
+                }
+            } else {
+                nonHan.append(c); // 非汉字累积，作为同一段
+            }
+        }
+        if (nonHan.length() > 0) tokens.add(nonHan.toString());
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < tokens.size(); i++) {
+            if (i > 0) sb.append(' ');
+            sb.append(tokens.get(i));
+        }
+        return sb.toString();
     }
 
     static class Entry {

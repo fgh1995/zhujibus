@@ -1251,6 +1251,28 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
         }
     }
 
+    /**
+     * 生成线路英文名（文本），规则与语音报站英文线路拆解 {@link #addEnLineNumber} 完全一致：
+     * 含"路"时 "Route" 前置，数字与字母按原始顺序拼接；数字以阿拉伯数字呈现。
+     * 无法拆解（含中文等非数字/字母/"路"字符，{@code tokenizeLineName} 返回 null）或仅含"路"等无效组合时，
+     * 回退为全拼音（与站点英文 {@code VoicePackManager.getStationEnglish} 的拼音回退一致），不再返回 null。
+     * 例：9路A → "Route 9A"；108A → "108A"；Y1A路 → "Route Y1A"；纯中文"诸暨公交" → "Zhu Ji Gong Jiao"
+     */
+    public static String getEnLineName(String lineName) {
+        if (lineName == null || lineName.isEmpty()) return null;
+        List<LineToken> tokens = tokenizeLineName(lineName);
+        if (tokens == null) return VoicePackManager.toPinyinTitleCase(lineName);
+        boolean hasRoute = false;
+        StringBuilder body = new StringBuilder();
+        for (LineToken t : tokens) {
+            if (t.kind == LineToken.Kind.ROUTE) { hasRoute = true; continue; }
+            if (t.kind == LineToken.Kind.NUMBER) body.append(String.valueOf(t.number));
+            else if (t.kind == LineToken.Kind.LETTER) body.append(t.letter);
+        }
+        if (body.length() == 0) return VoicePackManager.toPinyinTitleCase(lineName); // 仅含"路"等无效组合，回退拼音
+        return hasRoute ? "Route " + body : body.toString();
+    }
+
     private void addCnStationName(List<PlaybackItem> items, String stationName) {
         File file = VoicePackManager.getInstance(context).getStationFile(stationName, true);
         if (file != null) {

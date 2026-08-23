@@ -127,8 +127,10 @@
         </LinearLayout>
     </LinearLayout>
 
+
     <!-- ========== 右侧信息栏：外层约束布局，时间卡片、速度卡片同层级可互相引用id ========== -->
     <androidx.constraintlayout.widget.ConstraintLayout
+        android:id="@+id/right_info_panel"
         android:layout_width="wrap_content"
         android:layout_height="match_parent"
         android:layout_marginStart="6dp">
@@ -351,4 +353,5 @@
             </LinearLayout>
         </androidx.constraintlayout.widget.ConstraintLayout>
     </androidx.constraintlayout.widget.ConstraintLayout>
+
 </LinearLayout>

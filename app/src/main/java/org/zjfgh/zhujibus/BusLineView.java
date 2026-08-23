@@ -19,6 +19,8 @@ import java.util.List;
 
 public class BusLineView extends View {
     private List<BusApiClient.BusLineStation> stations;
+    // 与 stations 一一对应的英文/拼音标签（站名下方展示，单独一行，非换行拼接）
+    private List<String> stationEnglish = new ArrayList<>();
     private int selectedPosition = -1;
     private Paint linePaint;
     private Paint selectedLinePaint;
@@ -27,6 +29,7 @@ public class BusLineView extends View {
     private Paint textPaint;
     private Paint busIconPaint;
     private Paint plateTextPaint;
+    private Paint enLabelPaint;
     private Bitmap busIconBitmap;
     private float animationProgress = 0f;
     private ValueAnimator arrowAnimator;
@@ -45,6 +48,11 @@ public class BusLineView extends View {
     private boolean isGpsArriving = false;
     private int gpsLeavingStationIndex = -1;
     private Bitmap busRedIconBitmap;
+
+    // ⭐ 英文/拼音标签：文本放不下时，仿 HorizontalScrollTextView 做左右往返滚动
+    private static final float EN_LABEL_SCROLL_SPEED = 60f;   // 滚动速度 px/s（对应 hsScrollSpeed="60"）
+    private static final long EN_LABEL_TURN_PAUSE = 1500L;     // 转向停顿 ms（对应 hsTurnPauseDuration="1500"）
+    private static final float EN_LABEL_RIGHT_PADDING = 10f;   // 标签右侧留白，避免贴边
 
     public interface OnStationClickListener {
         void onStationClick(BusApiClient.BusLineStation station, int position);
@@ -105,6 +113,11 @@ public class BusLineView extends View {
         plateTextPaint.setTextSize(20f);
         plateTextPaint.setTextAlign(Paint.Align.CENTER);
 
+        enLabelPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        enLabelPaint.setColor(0xFF666666);
+        enLabelPaint.setTextSize(38f);
+        enLabelPaint.setTextAlign(Paint.Align.LEFT);
+
         busIconBitmap = BitmapFactory.decodeResource(getResources(), R.drawable.bus_icon);
         busRedIconBitmap = BitmapFactory.decodeResource(getResources(), R.drawable.bus_red_icon);
 
@@ -114,6 +127,29 @@ public class BusLineView extends View {
 
     public void setStations(List<BusApiClient.BusLineStation> stations) {
         this.stations = stations;
+        rebuildEnglishLabels();
+        invalidate();
+    }
+
+    /**
+     * 重新计算站名对应的英文/拼音标签（en 字段优先，缺失则拼音）。
+     * 缓存到 stationEnglish，避免 onDraw 每帧重复做拼音转换。
+     * 配置就绪后（en 字段可用）可再次调用本方法刷新。
+     */
+    private void rebuildEnglishLabels() {
+        stationEnglish.clear();
+        if (stations == null) return;
+        VoicePackManager vpm = VoicePackManager.getInstance(getContext());
+        for (BusApiClient.BusLineStation station : stations) {
+            String en = (station != null && station.stationName != null)
+                    ? vpm.getStationEnglish(station.stationName) : null;
+            stationEnglish.add(en);
+        }
+    }
+
+    /** 供外部在配置加载完成后刷新英文标签（例如 VoicePackManager 状态 READY 时） */
+    public void refreshEnglishLabels() {
+        rebuildEnglishLabels();
         invalidate();
     }
 
@@ -352,7 +388,18 @@ public class BusLineView extends View {
                 namePaint.setTextAlign(Paint.Align.LEFT);
                 float nameWidth = namePaint.measureText(station.stationName);
                 stationNameWidth = Math.max(stationNameWidth, nameWidth);
-                
+
+                // 英文/拼音标签宽度也要计入，避免被裁切
+                if (station.stationName != null) {
+                    String en = VoicePackManager.getInstance(getContext()).getStationEnglish(station.stationName);
+                    if (en != null && !en.isEmpty()) {
+                        Paint enPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+                        enPaint.setTextSize(38f);
+                        enPaint.setTextAlign(Paint.Align.LEFT);
+                        stationNameWidth = Math.max(stationNameWidth, enPaint.measureText(en));
+                    }
+                }
+
                 if (station.status != null && station.plateNumber != null && !station.plateNumber.isEmpty()) {
                     float plateWidth = plateTextPaint.measureText(station.plateNumber) + 16f;
                     busAreaWidth = Math.max(busAreaWidth, Math.max(iconSize, plateWidth));
@@ -572,6 +619,55 @@ public class BusLineView extends View {
         }
 
         canvas.drawText(station.stationName, nameX, nameY, namePaintToUse);
+
+        // ⭐ 站名下方单独一行显示英文/拼音（独立 drawText，非换行拼接 stationName）
+        //    文本宽度超出可用区域时，仿 HorizontalScrollTextView 做左右往返滚动（bounce + 转向停顿）
+        String enText = (index >= 0 && index < stationEnglish.size()) ? stationEnglish.get(index) : null;
+        if (enText != null && !enText.isEmpty()) {
+            Paint enToUse = new Paint(enLabelPaint);
+            if (shouldDim && !shouldHighlightRed) {
+                enToUse.setAlpha(100);
+            }
+            float enY = nameY + 46f;
+            float enTextWidth = enToUse.measureText(enText);
+            float availableWidth = getWidth() - nameX - EN_LABEL_RIGHT_PADDING;
+            if (enTextWidth > availableWidth && availableWidth > 0f) {
+                // 溢出：向左滚到 maxOffset → 停顿 → 滚回 0 → 停顿，循环。
+                // 用 clipRect 把英文限制在 [nameX, nameX+availableWidth] 内，不侵入左侧圆圈/车辆区。
+                float maxOffset = enTextWidth - availableWidth;
+                float offset = computeEnBounceOffset(System.currentTimeMillis(), maxOffset, index);
+                canvas.save();
+                canvas.clipRect(nameX, enY - 50f, nameX + availableWidth, enY + 15f);
+                canvas.drawText(enText, nameX - offset, enY, enToUse);
+                canvas.restore();
+            } else {
+                canvas.drawText(enText, nameX, enY, enToUse);
+            }
+        }
+    }
+
+    /**
+     * 计算英文标签的往返滚动偏移量（与 HorizontalScrollTextView 的 bounce 模式一致）。
+     * 一个完整周期 = 向左滚动 + 停顿 + 向右滚动 + 停顿。
+     * @param elapsedMs   当前时间（ms），用于驱动动画
+     * @param maxOffset   最大偏移量 = 文本宽度 - 可用宽度
+     * @param index       站点序号，用于错开各站滚动相位，避免整齐划一
+     */
+    private float computeEnBounceOffset(long elapsedMs, float maxOffset, int index) {
+        if (maxOffset <= 0f) return 0f;
+        float scrollDur = maxOffset / EN_LABEL_SCROLL_SPEED * 1000f; // 单向滚动耗时(ms)
+        long seg = (long) scrollDur + EN_LABEL_TURN_PAUSE;           // 单向滚动 + 转向停顿
+        long total = seg * 2;                                         // 完整往返周期
+        long phase = (elapsedMs + (long) index * 2200L) % total;
+        if (phase < scrollDur) {
+            return phase / scrollDur * maxOffset;                    // 向左滚动 0 → max
+        } else if (phase < seg) {
+            return maxOffset;                                        // 左侧停顿
+        } else if (phase < seg + scrollDur) {
+            return maxOffset * (1f - (phase - seg) / scrollDur);     // 向右滚动 max → 0
+        } else {
+            return 0f;                                               // 右侧停顿
+        }
     }
 
     private void drawBusIcon(Canvas canvas, float x, float y, BusApiClient.BusLineStation station) {

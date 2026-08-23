@@ -213,10 +213,12 @@ public class NavigationMainFragment extends Fragment {
                 });
             }
 
+
         } catch (Exception e) {
             Log.e(TAG, "onViewCreated 失败", e);
         }
     }
+
 
     private void initMapWhenReady(Bundle savedInstanceState) {
         if (naviMapView == null) {

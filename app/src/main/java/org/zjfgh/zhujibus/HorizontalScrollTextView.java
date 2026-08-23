@@ -17,6 +17,14 @@ public class HorizontalScrollTextView extends View {
 
     private Paint textPaint;
     private String text = "";
+
+    // ⭐ 多行（按 '\n' 换行）支持：独立于下方单行绘制逻辑，单行文本不受影响
+    private boolean isMultiline = false;
+    private String[] lines = null;
+    private int lineCount = 1;
+    private float lineHeight = 0f;
+    private int lineGravity = 1; // 多行各行对齐：0=left 1=center 2=right，默认居中
+
     private float textWidth = 0f;
     private float textGap = 0f;
     private float singleUnitWidth = 0f;
@@ -75,6 +83,8 @@ public class HorizontalScrollTextView extends View {
             // 新增属性
             animationMode = a.getInt(R.styleable.HorizontalScrollTextView_hsAnimationMode, 0);
             turnPauseDuration = a.getInt(R.styleable.HorizontalScrollTextView_hsTurnPauseDuration, 1500);
+            // 多行各行对齐（独立于单行 hsGravity），默认居中
+            lineGravity = a.getInt(R.styleable.HorizontalScrollTextView_hsLineGravity, 1);
 
             if (xmlText != null) {
                 text = xmlText;
@@ -97,6 +107,7 @@ public class HorizontalScrollTextView extends View {
         this.text = text;
         resetScroll();
         updateTextWidth();
+        requestLayout(); // 行数可能变化，重新测量高度，避免多行被裁切
         invalidate();
         if (getWidth() > 0) {
             updateScrollState();
@@ -118,7 +129,23 @@ public class HorizontalScrollTextView extends View {
     }
 
     private void updateTextWidth() {
-        textWidth = textPaint.measureText(text);
+        // ⭐ 多行检测：含 '\n' 则进入多行模式（拆分、按最宽行算 textWidth），否则保持单行
+        if (text.indexOf('\n') >= 0) {
+            lines = text.split("\n", -1);
+            lineCount = lines.length;
+            isMultiline = true;
+            float maxW = 0f;
+            for (String ln : lines) {
+                maxW = Math.max(maxW, textPaint.measureText(ln));
+            }
+            textWidth = maxW;
+        } else {
+            isMultiline = false;
+            lines = null;
+            lineCount = 1;
+            textWidth = textPaint.measureText(text);
+        }
+
         singleUnitWidth = textWidth + textGap;
 
         int viewWidth = getWidth();
@@ -169,7 +196,7 @@ public class HorizontalScrollTextView extends View {
     }
 
     public float getTextWidth() {
-        return textPaint.measureText(text);
+        return textWidth; // 单行=measureText(text)，多行=最宽行（已缓存）
     }
 
     public void setTypeface(Typeface tf) {
@@ -231,10 +258,26 @@ public class HorizontalScrollTextView extends View {
 
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-        int width = MeasureSpec.getSize(widthMeasureSpec);
+        int widthMode = MeasureSpec.getMode(widthMeasureSpec);
+        int widthSize = MeasureSpec.getSize(widthMeasureSpec);
         Paint.FontMetrics fm = textPaint.getFontMetrics();
-        float textHeight = fm.bottom - fm.top;
-        int height = (int) Math.ceil(textHeight);
+        lineHeight = fm.bottom - fm.top;
+        // ⭐ 多行时高度按行数翻倍；单行仍为原高度
+        int count = isMultiline ? Math.max(1, lineCount) : 1;
+        int height = (int) Math.ceil(lineHeight * count);
+
+        // ⭐ 关键修复：wrap_content 必须返回内容宽度，而不是父给的可用宽度。
+        // 否则在 horizontal LinearLayout 中会被当作"撑满父宽"吃掉兄弟控件的空间
+        // （这也是 mode_switch 排不到 next_station_info 右边、被挤出屏幕的根因）。
+        int contentWidth = (int) Math.ceil(textWidth);
+        int width;
+        if (widthMode == MeasureSpec.EXACTLY) {
+            width = widthSize;
+        } else if (widthMode == MeasureSpec.AT_MOST) {
+            width = Math.min(contentWidth, widthSize);
+        } else { // UNSPECIFIED
+            width = contentWidth;
+        }
         setMeasuredDimension(width, height);
     }
 
@@ -433,6 +476,12 @@ public class HorizontalScrollTextView extends View {
             return;
         }
 
+        // ⭐ 多行模式：走独立绘制路径，完全不经过下方单行逻辑
+        if (isMultiline) {
+            drawMultiline(canvas);
+            return;
+        }
+
         int availableWidth = getWidth();
 
         // 不需要滚动时，按对齐方式绘制
@@ -473,6 +522,69 @@ public class HorizontalScrollTextView extends View {
         }
 
         canvas.restore();
+    }
+
+    /**
+     * ⭐ 多行绘制（仅当文本含 '\n' 时调用）：与单行逻辑完全独立。
+     * 逐行绘制，各行按 {@link #lineGravity} 对齐（默认居中）；水平滚动时整块一起左右移。
+     */
+    private void drawMultiline(Canvas canvas) {
+        if (lines == null || lineCount <= 0) return;
+
+        int availableWidth = getWidth();
+        Paint.FontMetrics fm = textPaint.getFontMetrics();
+        float lh = (lineHeight > 0f) ? lineHeight : (fm.bottom - fm.top);
+
+        // 单行内某行的水平起点：受 lineGravity 控制（0=左 1=居中 2=右）
+        // 滚动模式下整块从 -offset 开始，lineGravity 仅作用于静态显示
+        if (!needScroll) {
+            for (int i = 0; i < lineCount; i++) {
+                float tw = textPaint.measureText(lines[i]);
+                float x;
+                if (lineGravity == 0) {
+                    x = 0;
+                } else if (lineGravity == 1) {
+                    x = (availableWidth - tw) / 2f;
+                } else {
+                    x = availableWidth - tw;
+                }
+                canvas.drawText(lines[i], x, i * lh - fm.top, textPaint);
+            }
+            return;
+        }
+
+        canvas.save();
+        canvas.clipRect(0, 0, availableWidth, getHeight());
+
+        if (animationMode == 0) {
+            float originX = availableWidth;
+            int maxIndex = (int) Math.ceil((availableWidth + scrollOffset - originX) / singleUnitWidth);
+            for (int i = 0; i <= maxIndex; i++) {
+                float x = originX + i * singleUnitWidth - scrollOffset;
+                if (x + textWidth > 0 && x < availableWidth + textWidth) {
+                    for (int l = 0; l < lineCount; l++) {
+                        canvas.drawText(lines[l], x, l * lh - fm.top, textPaint);
+                    }
+                }
+            }
+        } else {
+            float drawX = -bounceOffset;
+            for (int l = 0; l < lineCount; l++) {
+                canvas.drawText(lines[l], drawX, l * lh - fm.top, textPaint);
+            }
+        }
+
+        canvas.restore();
+    }
+
+    /** 设置多行各行水平对齐方式（0=左，1=居中，2=右），仅对含 '\n' 的多行文本生效 */
+    public void setLineGravity(int gravity) {
+        this.lineGravity = gravity;
+        invalidate();
+    }
+
+    public int getLineGravity() {
+        return lineGravity;
     }
 
     @Override

@@ -12,6 +12,7 @@ import android.location.LocationManager;
 import android.os.Bundle;
 
 import androidx.annotation.NonNull;
+import androidx.constraintlayout.widget.ConstraintLayout;
 import androidx.fragment.app.Fragment;
 import androidx.fragment.app.FragmentManager;
 import androidx.fragment.app.FragmentTransaction;
@@ -53,7 +54,6 @@ import java.util.Locale;
 
 import android.graphics.Color;
 
-import org.zjfgh.zhujibus.view.DotMatrixLinearLayout;
 
 import io.sgr.geometry.utils.GeometryUtils;
 
@@ -63,13 +63,16 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private String startStation;
     private String endStation;
     private HorizontalScrollTextView endStationNameView;  // ⭐ 保存终点站View引用，供POV面板读取
+    private HorizontalScrollTextView endStationEnNameView; // ⭐ 终点站英文名视图
     private BusApiClient busApiClient;
     private HorizontalScrollTextView routeNumber;
+    private HorizontalScrollTextView routeEnNumber;
     private TextView navHasNotification;
     private TextView noticeText;
     private DotMatrixView accessibilityIcon;
     private HorizontalScrollTextView nextStationInfo;
     private HorizontalScrollTextView tips;
+    private HorizontalScrollTextView enTips;
     private ImageView navIconMessageImg;
     private TextView navIconMessageText;
     // 当前显示的方向 (1:上行, 2:下行)
@@ -85,7 +88,9 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private final List<BusEtaItem> etaItems = new ArrayList<>();
     private BusEtaAdapter busEtaAdapter;
     private static final String TAG = "BusLineDetailActivity";
-
+    boolean isNavHidden;
+    /** 隐藏前导航区的真实运行高度（运行时动态赋值，隐藏时快照，显示时恢复） */
+    int navRootSavedHeight = ViewGroup.LayoutParams.WRAP_CONTENT;
     // ===== 语音包状态条 =====
     private LinearLayout llVoicepackStatus;
     private TextView tvVoicepackStatus;
@@ -140,7 +145,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     TextView errorIndicator;
     TextView networkModeText;
     TextView modeTips;
-    DotMatrixLinearLayout modeSwitch;
+    LinearLayout modeSwitch;
     TextView networkStatusIndicator;
     private ValueAnimator errorBlinkAnimator;
     private ValueAnimator gpsBlinkAnimator;
@@ -383,12 +388,14 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
 
     private static final int TIPS_INTERVAL = 3000;
     private static final String[] TIPS_TEXT_BASE = {"文明排队   上下有序", "严禁携带危险物品上车"};
+    private static final String[] TIPS_EN_TEXT_BASE = {"Queue in order, board in turn", "Dangerous items strictly prohibited"};
     private static final int[] TIPS_COLOR_BASE = {0xFFFFFF00, 0xFF00FFFF};
     private static final int TIPS_COLOR_PURPLE = 0xFFAA00FF;
     // GPS 模式报站文案：中英双语"扫码评价"提示
     private static final String QR_HINT_CN = "        欢迎扫车内二维码对本次乘车服务进行评价。";
     private static final String QR_HINT_EN = "    Scan the QR code on board to rate your ride. Thank you!";
     private String[] currentTipsText = TIPS_TEXT_BASE;
+    private String[] currentTipsEnText = TIPS_EN_TEXT_BASE;
     private int[] currentTipsColor = TIPS_COLOR_BASE;
     private Handler tipsHandler = new Handler();
     private int tipsAnimationIndex = 0;
@@ -411,6 +418,10 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             tipsAnimationIndex = (tipsAnimationIndex + 1) % currentTipsText.length;
             tips.setText(currentTipsText[tipsAnimationIndex]);
             tips.setTextColor(currentTipsColor[tipsAnimationIndex]);
+            if (enTips != null) {
+                enTips.setText(currentTipsEnText[tipsAnimationIndex]);
+                enTips.setTextColor(currentTipsColor[tipsAnimationIndex]);
+            }
             tipsHandler.postDelayed(this, TIPS_INTERVAL);
         }
     };
@@ -420,6 +431,10 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         tipsAnimationIndex = 0;
         tips.setText(currentTipsText[0]);
         tips.setTextColor(currentTipsColor[0]);
+        if (enTips != null) {
+            enTips.setText(currentTipsEnText[0]);
+            enTips.setTextColor(currentTipsColor[0]);
+        }
         tipsHandler.postDelayed(tipsRunnable, TIPS_INTERVAL);
     }
 
@@ -624,7 +639,8 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             int used = GpsWarmingUp.getSatelliteCount();
             int total = GpsWarmingUp.getTotalSatelliteCount();
             if (networkModeText != null) {
-                networkModeText.setText("GPS " + used + "/" + total);
+                networkModeText.setText("GPS " + String.format(Locale.getDefault(), "%02d", used)
+                        + "/" + String.format(Locale.getDefault(), "%02d", total));
                 networkModeText.setTextColor(0xFFFF0000);
             }
             // GPS 模式默认认为信号正常（GPS 未启动时 updateNetworkStatusIndicator 会置灰）
@@ -679,7 +695,8 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         runOnUiThread(() -> {
             // GPS 模式：显示卫星数
             if (currentAnnounceMode == AnnounceMode.GPS && networkModeText != null) {
-                networkModeText.setText("GPS " + usedCount + "/" + totalCount);
+                networkModeText.setText("GPS " + String.format(Locale.getDefault(), "%02d", usedCount)
+                        + "/" + String.format(Locale.getDefault(), "%02d", totalCount));
             }
         });
     };
@@ -1275,7 +1292,6 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         boolean isTerminalStation = stationIndex == totalStations - 1;
 
         if (isStartStation) {
-
             String nextStationName = "";
             if (stationIndex + 1 < totalStations) {
                 List<BusApiClient.BusLineStation> stations = realTimeManager.getStationList();
@@ -1285,10 +1301,10 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             setNextStationInfoText(nextStationName);
         } else if (isTerminalStation) {
             tts.playGpsTerminalStationAnnouncement(stationName);
-            nextStationInfo.setText(stationName + " 到了！  We are now at " + stationName + " !");
+            nextStationInfo.setText(stationName + " 到了！  We are now at " + VoicePackManager.getInstance(this).getStationEnglish(stationName) + " !");
         } else {
             tts.playGpsMiddleStationAnnouncement(stationName);
-            nextStationInfo.setText(stationName + " 到了！  We are now at " + stationName + " !");
+            nextStationInfo.setText(stationName + " 到了！  We are now at " + VoicePackManager.getInstance(this).getStationEnglish(stationName) + " !");
         }
     }
 
@@ -1310,9 +1326,9 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
      */
     private void setNextStationInfoText(String stationName) {
         if (currentAnnounceMode == AnnounceMode.GPS) {
-            nextStationInfo.setText("下一站：" + stationName + QR_HINT_CN + "    Next Station:" + stationName + QR_HINT_EN);
+            nextStationInfo.setText("下一站：" + stationName + QR_HINT_CN + "    Next Station:" + VoicePackManager.getInstance(this).getStationEnglish(stationName) + QR_HINT_EN);
         } else {
-            nextStationInfo.setText("下一站：" + stationName + "    Next Station:" + stationName);
+            nextStationInfo.setText("下一站：" + stationName + "    Next Station:" + VoicePackManager.getInstance(this).getStationEnglish(stationName));
         }
         if (navigationMainFragment != null && stationName != null) {
             navigationMainFragment.updateNextStation(stationName);
@@ -1321,6 +1337,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
 
     private void updatePriceTips(BusApiClient.BusLineDirection lineDirection) {
         String[] priceTips = buildPriceTips(lineDirection);
+        String[] priceTipsEn = buildPriceTipsEn(lineDirection);
         if (priceTips != null) {
             int[] priceColors = new int[priceTips.length];
             for (int i = 0; i < priceTips.length; i++) {
@@ -1329,13 +1346,17 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             int baseCount = TIPS_TEXT_BASE.length;
             currentTipsText = new String[priceTips.length + baseCount];
             currentTipsColor = new int[currentTipsText.length];
+            currentTipsEnText = new String[priceTips.length + baseCount];
             System.arraycopy(priceTips, 0, currentTipsText, 0, priceTips.length);
             System.arraycopy(priceColors, 0, currentTipsColor, 0, priceColors.length);
             System.arraycopy(TIPS_TEXT_BASE, 0, currentTipsText, priceTips.length, baseCount);
             System.arraycopy(TIPS_COLOR_BASE, 0, currentTipsColor, priceTips.length, baseCount);
+            System.arraycopy(priceTipsEn, 0, currentTipsEnText, 0, priceTipsEn.length);
+            System.arraycopy(TIPS_EN_TEXT_BASE, 0, currentTipsEnText, priceTipsEn.length, baseCount);
         } else {
             currentTipsText = TIPS_TEXT_BASE;
             currentTipsColor = TIPS_COLOR_BASE;
+            currentTipsEnText = TIPS_EN_TEXT_BASE;
         }
     }
 
@@ -1377,6 +1398,36 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             return new String[]{"多票制二~" + toChineseNumber(price) + "元", "上下车均需刷卡扫码"};
         } else if (price == 1.0) {
             return new String[]{"无人售票   票价一元"};
+        }
+
+        return null;
+    }
+
+    /** 与 buildPriceTips 平行：返回价格提示的英文翻译，索引与中文一一对应 */
+    private String[] buildPriceTipsEn(BusApiClient.BusLineDirection lineDirection) {
+        double price = lineDirection.totalPrice;
+        int lineType = lineDirection.lineType;
+        String lineTypeName = lineDirection.lineTypeName;
+
+        boolean isCityBus = (lineType == 1 || "城市".equals(lineTypeName));
+        boolean isIntercityBus = (lineTypeName != null && lineTypeName.contains("城乡"));
+
+        if (!isCityBus && !isIntercityBus && price > 0) {
+            if (price == 1.0) {
+                isCityBus = true;
+            } else if (price >= 2.0) {
+                isIntercityBus = true;
+            }
+        }
+
+        if (isCityBus && price == 1.0) {
+            return new String[]{"No conductor. Fare: 1 yuan"};
+        } else if (isIntercityBus && price == 2.0) {
+            return new String[]{"No conductor. Fare: 2 yuan"};
+        } else if (isIntercityBus && price > 0) {
+            return new String[]{"Multi-fare system Fare: 2~" + formatPrice(price) + " yuan", "Tap or scan on both entry and exit"};
+        } else if (price == 1.0) {
+            return new String[]{"No conductor. Fare: 1 yuan"};
         }
 
         return null;
@@ -1460,12 +1511,21 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         routeNumber.setScrollSpeed(180f);
         Typeface dottedSongti = Typeface.createFromAsset(getAssets(), "fonts/ZiTiGuanJiaBoDian-2.ttf");
         routeNumber.setTypeface(dottedSongti);
-        int maxWidth = (int) (120 * getResources().getDisplayMetrics().density);
+        int maxWidth = (int) (150 * getResources().getDisplayMetrics().density);
         int textWidth = (int) routeNumber.getTextWidth();
         if (textWidth > 0 && textWidth < maxWidth) {
-            routeNumber.getLayoutParams().width = textWidth;
+            routeNumber.getLayoutParams().width = textWidth + 10;
         }
-
+        routeEnNumber = findViewById(R.id.route_en_number);
+        routeEnNumber.setText(TTSUtils.getEnLineName(lineName));
+        routeEnNumber.setTextColor(0xFF00FF00);
+        routeEnNumber.setGravity(0);
+        routeEnNumber.setScrollSpeed(150f);
+        routeEnNumber.setTypeface(dottedSongti);
+        textWidth = (int) routeEnNumber.getTextWidth();
+        if (textWidth > 0 && textWidth < maxWidth) {
+            routeEnNumber.getLayoutParams().width = textWidth + 20;
+        }
         LinearLayout noticeBar = findViewById(R.id.notice_bar);
         navHasNotification = findViewById(R.id.nav_has_notification);
         navHasNotification.setText("0");
@@ -1477,15 +1537,26 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         endStationNameView.setText(endStation);
         endStationNameView.setTypeface(dottedSongti);
         endStationNameView.setScrollSpeed(180f);
+        // 终点站英文名：通过语音包获取，站名为空时返回 null，兜底显示空串
+        endStationEnNameView = findViewById(R.id.end_station_en_name);
+        if (endStationEnNameView != null) {
+            endStationEnNameView.setGravity(2);
+            endStationEnNameView.setTypeface(dottedSongti);
+            String enName = VoicePackManager.getInstance(this).getStationEnglish(endStation);
+            endStationEnNameView.setText(enName != null ? enName : "");
+        }
         tips = findViewById(R.id.tips);
         tips.setTypeface(dottedSongti);
         tips.setGravity(1);
+        enTips = findViewById(R.id.en_tips);
+        enTips.setTypeface(dottedSongti);
+        enTips.setGravity(1);
         startTipsAnimation();
         nextStationInfo = findViewById(R.id.next_station_info);
         nextStationInfo.setTypeface(dottedSongti);
         nextStationInfo.setTextColor(0xFFFF0000);
         nextStationInfo.setTextSize(30f);
-        nextStationInfo.setText("欢迎乘坐 " + lineName + " 公交车" + "    " + "Welcome aboard the No." + formatLineNameForEnglish(lineName) +  " bus.");
+        nextStationInfo.setText("欢迎乘坐 " + lineName + " 公交车" + "    " + "Welcome aboard the " + TTSUtils.getEnLineName(lineName));
         nextStationInfo.setScrollSpeed(180f);
         accessibilityIcon = findViewById(R.id.accessibility_icon);
         accessibilityIcon.setVisibility(View.GONE);
@@ -1500,16 +1571,16 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         errorIndicator.setOnClickListener(v -> {
             if (lastErrorDetail != null && !lastErrorDetail.isEmpty()) {
                 new AlertDialog.Builder(BusLineDetailActivity.this)
-                    .setTitle("错误详情")
-                    .setMessage(lastErrorDetail)
-                    .setPositiveButton("确定", null)
-                    .show();
+                        .setTitle("错误详情")
+                        .setMessage(lastErrorDetail)
+                        .setPositiveButton("确定", null)
+                        .show();
             } else if (lastErrorMessage != null && !lastErrorMessage.isEmpty()) {
                 new AlertDialog.Builder(BusLineDetailActivity.this)
-                    .setTitle("错误详情")
-                    .setMessage(lastErrorMessage)
-                    .setPositiveButton("确定", null)
-                    .show();
+                        .setTitle("错误详情")
+                        .setMessage(lastErrorMessage)
+                        .setPositiveButton("确定", null)
+                        .show();
             }
         });
 
@@ -1529,6 +1600,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         modeSwitch.setOnClickListener(modeSwitchListener);
         updateAnnounceModeDisplay();
         modeTips.setTypeface(dottedSongti);
+        // mode_text 仍使用点阵字体（数字不等宽），通过固定宽度避免内容变化时整体跳动
         networkModeText.setTypeface(dottedSongti);
         // ⭐ gpsSpeedText 已迁移到 NavigationMainFragment，字体设置在 fragment.onViewCreated() 中完成
 
@@ -1633,11 +1705,52 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         }
 
         // 7. 绑定左侧"更多应用"图标点击
-                View navIconMoreView = findViewById(R.id.nav_icon_more);
-                if (navIconMoreView != null) {
-                    navIconMoreImg = navIconMoreView.findViewById(R.id.nav_icon_more_img);
-                    navIconMoreView.setOnClickListener(v -> toggleMorePage());
-                }
+        View navIconMoreView = findViewById(R.id.nav_icon_more);
+        if (navIconMoreView != null) {
+            navIconMoreImg = navIconMoreView.findViewById(R.id.nav_icon_more_img);
+            navIconMoreView.setOnClickListener(v -> toggleMorePage());
+        }
+        View hideSwitch = findViewById(R.id.hide_switch);
+        TextView hideSwitchText = findViewById(R.id.hide_switch_text);
+        View navIconContainer = findViewById(R.id.nav_icon_container);
+        View navContentContainer = findViewById(R.id.nav_content_container);
+        View navIconBar = findViewById(R.id.nav_icon_bar);
+        // 注意：activity_navigation 是通过 <include android:id="@+id/navigation_section"> 嵌入的，
+        // include 会覆盖根节点 id，因此根布局实际 id 是 navigation_section 而非 navigation_root
+        View navRoot = findViewById(R.id.navigation_section);
+        // 隐藏/显示：收起左侧菜单栏与右侧内容，root 收缩为只包住“显示”按钮（钉在顶部）
+        hideSwitch.setOnClickListener(v -> {
+            ConstraintLayout.LayoutParams barLp =
+                    (ConstraintLayout.LayoutParams) navIconBar.getLayoutParams();
+            ViewGroup.LayoutParams rootLp = navRoot.getLayoutParams();
+            if (!isNavHidden) {
+                // 收起：先快照当前（运行时动态赋值的）真实高度，再隐藏菜单与地图内容
+                navRootSavedHeight = navRoot.getLayoutParams().height;
+                navIconContainer.setVisibility(View.GONE);
+                navContentContainer.setVisibility(View.GONE);
+                // 侧栏高度收缩为只包住“显示”按钮，并钉在顶部（去掉底部约束 + wrap_content）
+                barLp.height = ConstraintLayout.LayoutParams.WRAP_CONTENT;
+                barLp.bottomToBottom = ConstraintLayout.LayoutParams.UNSET;
+                navIconBar.setLayoutParams(barLp);
+                // root 同时收缩，使整体高度变小（不再铺满全屏）
+                rootLp.height = ViewGroup.LayoutParams.WRAP_CONTENT;
+                navRoot.setLayoutParams(rootLp);
+                if (hideSwitchText != null) hideSwitchText.setText("显示");
+                isNavHidden = true;
+            } else {
+                // 恢复：菜单图标 + 地图内容重新显示
+                navIconContainer.setVisibility(View.VISIBLE);
+                navContentContainer.setVisibility(View.VISIBLE);
+                barLp.height = 0;
+                barLp.bottomToBottom = ConstraintLayout.LayoutParams.PARENT_ID;
+                navIconBar.setLayoutParams(barLp);
+                // root 恢复为隐藏前快照的真实运行高度（不要用 MATCH_PARENT，以免被 LinearLayout 压成 0）
+                rootLp.height = navRootSavedHeight;
+                navRoot.setLayoutParams(rootLp);
+                if (hideSwitchText != null) hideSwitchText.setText("隐藏");
+                isNavHidden = false;
+            }
+        });
     }
 
     /**
@@ -2110,6 +2223,11 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             runOnUiThread(() -> {
                 if (endStationNameView != null) {
                     endStationNameView.setText(lineDirection.endStation);
+                }
+                if (endStationEnNameView != null) {
+                    String enName = VoicePackManager.getInstance(this)
+                            .getStationEnglish(lineDirection.endStation);
+                    endStationEnNameView.setText(enName != null ? enName : "");
                 }
                 startStation = lineDirection.startStation;
                 endStation = lineDirection.endStation;
@@ -2607,9 +2725,9 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         }
 
         sb.append("\n\n说明：\n")
-          .append("· 未下载：远程有但本地没有，可点击下载补齐\n")
-          .append("· 有更新：本地已下载但 md5 不匹配，可点击下载更新\n")
-          .append("· 远程不存在：配置文件中无此站，需更新配置");
+                .append("· 未下载：远程有但本地没有，可点击下载补齐\n")
+                .append("· 有更新：本地已下载但 md5 不匹配，可点击下载更新\n")
+                .append("· 远程不存在：配置文件中无此站，需更新配置");
 
         new AlertDialog.Builder(this)
                 .setTitle("🔊 语音包详情")
@@ -2757,25 +2875,25 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                         int busTimeInMinutes = Integer.parseInt(parts[0]) * 60 + Integer.parseInt(parts[1]);
                         if (busTimeInMinutes < currentTimeInMinutes) {
                             spannableBuilder.setSpan(
-                                new ForegroundColorSpan(Color.GRAY),
-                                startIndex,
-                                spannableBuilder.length(),
-                                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+                                    new ForegroundColorSpan(Color.GRAY),
+                                    startIndex,
+                                    spannableBuilder.length(),
+                                    Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
                             );
                         } else if (!nextBusFound) {
                             nextBusFound = true;
                             nextBusIndex = i;
                             spannableBuilder.setSpan(
-                                new ForegroundColorSpan(Color.RED),
-                                startIndex,
-                                spannableBuilder.length(),
-                                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+                                    new ForegroundColorSpan(Color.RED),
+                                    startIndex,
+                                    spannableBuilder.length(),
+                                    Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
                             );
                             spannableBuilder.setSpan(
-                                new StyleSpan(Typeface.BOLD),
-                                startIndex,
-                                spannableBuilder.length(),
-                                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+                                    new StyleSpan(Typeface.BOLD),
+                                    startIndex,
+                                    spannableBuilder.length(),
+                                    Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
                             );
                         }
                     }
@@ -2991,9 +3109,9 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private void renderRefreshCountdownText() {
         if (networkModeText == null) return;
         if (networkRefreshFailed) {
-            networkModeText.setText("失败 " + String.format(Locale.getDefault(), "%d", refreshCountdownSec));
+            networkModeText.setText("失败 " + String.format(Locale.getDefault(), "%02d", refreshCountdownSec));
         } else {
-            networkModeText.setText("网络 " + String.format(Locale.getDefault(), "%d", refreshCountdownSec));
+            networkModeText.setText("网络 " + String.format(Locale.getDefault(), "%02d", refreshCountdownSec));
         }
     }
 
@@ -3062,6 +3180,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
 
                 TTSUtils tts = TTSUtils.getInstance(this);
                 tts.speak(skipStationCombined, "skip_announcement");
+                
             }
         }
 
@@ -3345,7 +3464,8 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             GpsWarmingUp.addSatelliteListener(satelliteCountListener);
             // GPS 模式：显示缓存的卫星数
             if (networkModeText != null) {
-                networkModeText.setText("GPS " + GpsWarmingUp.getSatelliteCount() + "/" + GpsWarmingUp.getTotalSatelliteCount());
+                networkModeText.setText("GPS " + String.format(Locale.getDefault(), "%02d", GpsWarmingUp.getSatelliteCount())
+                        + "/" + String.format(Locale.getDefault(), "%02d", GpsWarmingUp.getTotalSatelliteCount()));
             }
         }
     }
