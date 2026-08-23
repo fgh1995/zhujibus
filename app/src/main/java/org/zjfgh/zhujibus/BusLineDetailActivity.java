@@ -1421,13 +1421,13 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         }
 
         if (isCityBus && price == 1.0) {
-            return new String[]{"No conductor. Fare: 1 yuan"};
+            return new String[]{"No conductor    Fare: 1 yuan"};
         } else if (isIntercityBus && price == 2.0) {
-            return new String[]{"No conductor. Fare: 2 yuan"};
+            return new String[]{"No conductor    Fare: 2 yuan"};
         } else if (isIntercityBus && price > 0) {
             return new String[]{"Multi-fare system Fare: 2~" + formatPrice(price) + " yuan", "Tap or scan on both entry and exit"};
         } else if (price == 1.0) {
-            return new String[]{"No conductor. Fare: 1 yuan"};
+            return new String[]{"No conductor    Fare: 1 yuan"};
         }
 
         return null;

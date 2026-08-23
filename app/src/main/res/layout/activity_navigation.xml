@@ -30,7 +30,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_gravity="center"
-            android:background="@drawable/led_button_green_selector"
+            android:background="@drawable/led_button_blue_selector"
             android:clickable="true"
             android:focusable="true"
             android:layout_marginTop="5dp"
