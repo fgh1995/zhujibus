@@ -388,7 +388,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
 
     private static final int TIPS_INTERVAL = 3000;
     private static final String[] TIPS_TEXT_BASE = {"文明排队   上下有序", "严禁携带危险物品上车"};
-    private static final String[] TIPS_EN_TEXT_BASE = {"Queue in order, board in turn", "Dangerous items strictly prohibited"};
+    private static final String[] TIPS_EN_TEXT_BASE = {"Queue in order Board in turn", "Dangerous items strictly prohibited"};
     private static final int[] TIPS_COLOR_BASE = {0xFFFFFF00, 0xFF00FFFF};
     private static final int TIPS_COLOR_PURPLE = 0xFFAA00FF;
     // GPS 模式报站文案：中英双语"扫码评价"提示
