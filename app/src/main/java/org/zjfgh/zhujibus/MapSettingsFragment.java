@@ -280,6 +280,7 @@ public class MapSettingsFragment extends Fragment implements OfflineMapManager.O
                     || oldItem.phase == OfflineCityAdapter.PHASE_PAUSED) {
                 newItem.phase = oldItem.phase;
                 newItem.progress = oldItem.progress;
+                newItem.isExtracting = oldItem.isExtracting;
             }
         }
         oldList.clear();
@@ -537,6 +538,7 @@ public class MapSettingsFragment extends Fragment implements OfflineMapManager.O
                         mainHandler.post(() -> {
                             if (!isAdded()) return;
                             item.phase = OfflineCityAdapter.PHASE_WAITING;
+                            item.isExtracting = false;
                             if (adapter != null) adapter.notifyDataSetChanged();
                         });
                     } catch (Throwable t) {
@@ -557,6 +559,7 @@ public class MapSettingsFragment extends Fragment implements OfflineMapManager.O
                             if (!isAdded()) return;
                             item.phase = OfflineCityAdapter.PHASE_WAITING;
                             item.progress = 0;
+                            item.isExtracting = false;
                             if (adapter != null) adapter.notifyDataSetChanged();
                         });
                     } catch (Throwable t) {
@@ -591,6 +594,7 @@ public class MapSettingsFragment extends Fragment implements OfflineMapManager.O
                 it.localSize = 0;
                 it.phase = OfflineCityAdapter.PHASE_NOT_DOWNLOADED;
                 it.progress = 0;
+                it.isExtracting = false;
             }
         }
         refreshFlatRows();
@@ -703,33 +707,41 @@ public class MapSettingsFragment extends Fragment implements OfflineMapManager.O
 
     @Override
     public void onDownload(int status, int completeCode, String downName) {
-        Log.d(TAG, "onDownload: status=" + status + " code=" + completeCode + " name=" + downName);
-        // SDK 回调可能在非主线程，统一切回主线程更新 UI / 共享列表
+        // 高德官方语义：
+        //   status      —— 参照 OfflineMapStatus（LOADING/WAITING/SUCCESS/PAUSE/UNZIP/ERROR…）
+        //   completeCode —— 下载进度百分比(0~100)，下载完成后为解压进度；【不是城市编码】
+        //   downName     —— 当前所下载城市的【名称】(不是编码)，各状态都会回传
+        // 注意：SDK 回调可能在非主线程，统一切回主线程更新 UI / 共享列表。
+        Log.d(TAG, "onDownload: status=" + status + " progress=" + completeCode + " name=" + downName);
         mainHandler.post(() -> {
             if (!isAdded()) return;
 
             if (status == OfflineMapStatus.SUCCESS) {
-                Log.d(TAG, "下载完成: code=" + completeCode + " name=" + downName);
-                // 下载完成是状态变化，不节流，立即全量刷新
+                Log.d(TAG, "下载完成: name=" + downName);
+                // 下载完成是状态变化，不节流，立即全量刷新（含相位/进度=100）
                 refreshAllCityData();
             } else if (status == OfflineMapStatus.LOADING) {
-                // 进度更新：只改数据，UI 刷新走节流，避免高频回调卡 UI
-                updateItemPhase(completeCode, OfflineCityAdapter.PHASE_DOWNLOADING, completeCode, false);
+                // 进度更新：completeCode 即百分比。只改数据，UI 刷新走节流，避免高频回调卡 UI
+                updateItemByName(downName, OfflineCityAdapter.PHASE_DOWNLOADING, completeCode, false, false);
                 notifyProgressThrottled();
             } else if (status == OfflineMapStatus.WAITING) {
-                updateItemPhase(completeCode, OfflineCityAdapter.PHASE_WAITING, 0, false);
+                // WAITING 表示在下载队列中排队（尚未开始下载），显示"等待中"，但保留已有进度
+                updateItemByName(downName, OfflineCityAdapter.PHASE_WAITING, -1, true, false);
                 if (adapter != null) adapter.notifyDataSetChanged();
             } else if (status == OfflineMapStatus.PAUSE) {
-                updateItemPhaseByName(downName, OfflineCityAdapter.PHASE_PAUSED, -1, true);
+                // PAUSE 回传 name（城市名）
+                updateItemByName(downName, OfflineCityAdapter.PHASE_PAUSED, -1, true, false);
                 if (adapter != null) adapter.notifyDataSetChanged();
             } else if (status == OfflineMapStatus.UNZIP) {
-                updateItemPhase(completeCode, OfflineCityAdapter.PHASE_DOWNLOADING, 99, false);
+                // UNZIP：下载完成进入解压，completeCode 为解压进度(0~100)，归到进行中相位但标记为解压
+                updateItemByName(downName, OfflineCityAdapter.PHASE_DOWNLOADING, completeCode, false, true);
                 if (adapter != null) adapter.notifyDataSetChanged();
             } else if (status == OfflineMapStatus.ERROR || status < 0) {
-                updateItemPhase(completeCode, OfflineCityAdapter.PHASE_NOT_DOWNLOADED, 0, false);
+                updateItemByName(downName, OfflineCityAdapter.PHASE_NOT_DOWNLOADED, 0, false, false);
                 if (adapter != null) adapter.notifyDataSetChanged();
             } else {
-                updateItemPhase(completeCode, OfflineCityAdapter.PHASE_NOT_DOWNLOADED, 0, false);
+                // 未知状态：按"等待中"兜底并刷新，避免 UI 停滞看不到任何变化
+                updateItemByName(downName, OfflineCityAdapter.PHASE_WAITING, -1, true, false);
                 if (adapter != null) adapter.notifyDataSetChanged();
             }
         });
@@ -774,41 +786,37 @@ public class MapSettingsFragment extends Fragment implements OfflineMapManager.O
         });
     }
 
-    private void updateItemPhase(int code, int phase, int progress, boolean byName) {
-        String raw = String.valueOf(code);
-        String p3 = String.format("%03d", code);
-        String p4 = String.format("%04d", code);
-        String p5 = String.format("%05d", code);
-        for (OfflineCityAdapter.CityItem item : allCityItems) {
-            if (item.cityCode == null) continue;
-            if (item.cityCode.equals(raw)
-                    || item.cityCode.equals(p3)
-                    || item.cityCode.equals(p4)
-                    || item.cityCode.equals(p5)) {
-                if (item.phase == OfflineCityAdapter.PHASE_DOWNLOADED
-                        && phase != OfflineCityAdapter.PHASE_DOWNLOADED) {
-                    return;
-                }
-                item.phase = phase;
-                if (progress >= 0) item.progress = progress;
-                return;
-            }
-        }
-    }
-
-    private void updateItemPhaseByName(String name, int phase, int progress, boolean keepProgress) {
+    /**
+     * 按【城市名】更新列表项的下载状态/进度。
+     * 高德 onDownload 的 name 参数即城市名，可稳定匹配；不依赖会被误用的 completeCode(进度) 或城市编码。
+     *
+     * @param name        城市名（高德回传）
+     * @param phase       目标相位（PHASE_*）
+     * @param progress    进度百分比(-1 表示不更新进度)；UNZIP 时传解压进度
+     * @param keepProgress 为 true 时保留原有进度值（用于 WAITING/PAUSE 状态切换）
+     * @param extracting  是否为"解压中"子状态（仅 DOWNLOADING 相位有效）
+     */
+    private void updateItemByName(String name, int phase, int progress, boolean keepProgress, boolean extracting) {
         if (name == null) return;
         for (OfflineCityAdapter.CityItem item : allCityItems) {
-            if (name.equals(item.name)) {
-                if (item.phase == OfflineCityAdapter.PHASE_DOWNLOADED
-                        && phase != OfflineCityAdapter.PHASE_DOWNLOADED) {
-                    return;
-                }
-                item.phase = phase;
-                if (!keepProgress && progress >= 0) item.progress = progress;
+            if (item.name == null) continue;
+            if (!name.equals(item.name)) continue;
+            // 已下载状态不被非完成状态覆盖（防止完成态抖动回退）
+            if (item.phase == OfflineCityAdapter.PHASE_DOWNLOADED
+                    && phase != OfflineCityAdapter.PHASE_DOWNLOADED) {
                 return;
             }
+            item.phase = phase;
+            item.isExtracting = extracting;
+            if (!keepProgress && progress >= 0) {
+                item.progress = Math.max(0, Math.min(100, progress));
+            }
+            return;
         }
+        // 列表里找不到该城市：可能 province 尚未补全或数据未加载完，
+        // 做一次兜底全量刷新，避免进度彻底丢失。
+        Log.w(TAG, "onDownload 命中不到城市(name=" + name + ")，兜底全量刷新");
+        refreshAllCityData();
     }
 
     // ============= lifecycle =============
@@ -889,6 +897,8 @@ public class MapSettingsFragment extends Fragment implements OfflineMapManager.O
             public int downloadedState;
             public int phase = PHASE_NOT_DOWNLOADED;
             public int progress;
+            /** 是否处于"解压中"子状态（仅 DOWNLOADING 相位下用于文案区分） */
+            public boolean isExtracting;
 
             public CityItem(String name, String cityCode, String province, double sizeMb, long localSize,
                             int downloadedState, int phase, int progress) {
@@ -974,7 +984,11 @@ public class MapSettingsFragment extends Fragment implements OfflineMapManager.O
                 }
                 case PHASE_DOWNLOADING: {
                     int p = Math.max(0, Math.min(100, item.progress));
-                    h.cityStatus.setText("下载中 " + p + "%");
+                    if (item.isExtracting) {
+                        h.cityStatus.setText("解压中 " + p + "%");
+                    } else {
+                        h.cityStatus.setText("下载中 " + p + "%");
+                    }
                     h.cityStatus.setTextColor(0xFF37D4F4);
                     h.progress.setVisibility(ProgressBar.VISIBLE);
                     h.progress.setProgress(p);

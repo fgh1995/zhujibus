@@ -2813,32 +2813,52 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         pbDownload.setVisibility(View.VISIBLE);
         pbDownload.setProgress(0);
 
-        VoicePackManager.getInstance(this).downloadBatchAsync(voicepackStationNames, new VoicePackManager.ProgressCallback() {
-            @Override
-            public void onProgress(int done, int total) {
-                runOnUiThread(() -> {
-                    if (isFinishing() || isDestroyed()) return;
-                    int p = total > 0 ? done * 100 / total : 0;
-                    pbDownload.setProgress(p);
-                    btnDownload.setText("下载中... " + p + "%");
-                });
-            }
+        VoicePackManager.getInstance(this).downloadBatchAsync(voicepackStationNames,
+                new VoicePackManager.BatchProgressCallback() {
+                    @Override
+                    public void onFileFailed(String stationName, boolean notFound) {
+                        runOnUiThread(() -> {
+                            if (isFinishing() || isDestroyed()) return;
+                            // 404（语音包不存在）已通过 confirmedNotInRemote 归入详情页「远程不存在」卡片展示，
+                            // 不再用 Toast 打扰。仅对网络/其他失败做短暂提示，便于排查。
+                            if (!notFound) {
+                                Toast.makeText(BusLineDetailActivity.this,
+                                        "下载失败：" + stationName, Toast.LENGTH_LONG).show();
+                            }
+                        });
+                    }
 
-            @Override
-            public void onComplete(boolean success) {
-                runOnUiThread(() -> {
-                    if (isFinishing() || isDestroyed()) return;
-                    voicepackDownloadingLine = false;
-                    pbDownload.setVisibility(View.GONE);
-                    Toast.makeText(BusLineDetailActivity.this,
-                            success ? "下载完成" : "下载结束（部分可能失败）",
-                            Toast.LENGTH_SHORT).show();
-                    if (dialog.isShowing()) dialog.dismiss();
-                    // 重新检查状态
-                    checkLineVoicepackStatus();
+                    @Override
+                    public void onProgress(int done, int total) {
+                        runOnUiThread(() -> {
+                            if (isFinishing() || isDestroyed()) return;
+                            int p = total > 0 ? done * 100 / total : 0;
+                            pbDownload.setProgress(p);
+                            btnDownload.setText("下载中... " + p + "%");
+                        });
+                    }
+
+                    @Override
+                    public void onComplete(boolean success) {
+                        runOnUiThread(() -> {
+                            // 关键：无论页面是否已销毁，都解锁下载标志，
+                            // 否则离开页面后 onComplete 被提前 return，标志永远停在 true，
+                            // 重新进入页面点「下载」会因 voicepackDownloadingLine 判断直接 return 而无反应。
+                            if (isFinishing() || isDestroyed()) {
+                                voicepackDownloadingLine = false;
+                                return;
+                            }
+                            voicepackDownloadingLine = false;
+                            pbDownload.setVisibility(View.GONE);
+                            Toast.makeText(BusLineDetailActivity.this,
+                                    success ? "下载完成" : "下载结束（部分可能失败）",
+                                    Toast.LENGTH_SHORT).show();
+                            if (dialog.isShowing()) dialog.dismiss();
+                            // 重新检查状态
+                            checkLineVoicepackStatus();
+                        });
+                    }
                 });
-            }
-        });
     }
 
     private void showFullNoticeDialog(String noticeContent) {
@@ -3577,6 +3597,8 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         if (busApiClient != null) {
             busApiClient.cancelAllRequests();
         }
+        // 页面销毁时强制解锁语音包下载标志，避免重建后点「下载」因标志残留而毫无反应
+        voicepackDownloadingLine = false;
         // ⭐ Fragment.onDestroyView() 会自动调用 tencentNavigation.onDestroy() 并清空实例引用
         navigationMainFragment = null;
         // ⭐ 清除静态引用

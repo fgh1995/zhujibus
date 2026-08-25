@@ -19,7 +19,9 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -61,6 +63,12 @@ public class VoicePackManager {
     /** Gitee 镜像兜底根 URL（末尾含 /），作为最终备用源 */
     private static final String GITEE_BASE_URL =
             "https://gitee.com/fangguihua1995/zhujibus/raw/master/app/voicepack/";
+
+    /** 下载结果码：成功 / 网络或其他失败 / 404 文件不存在 */
+    private static final int DL_OK = 0;
+    private static final int DL_FAIL = 1;
+    private static final int DL_NOT_FOUND = 2;
+
     private static VoicePackManager instance;
 
     private final Context context;
@@ -106,6 +114,11 @@ public class VoicePackManager {
 
     /** 最近一次成功命中的源序号（对应降级链下标），用于后续请求优先尝试该源，跳过已确认不可用的前置源 */
     private volatile int preferredSource = 0;
+
+    /** 已确认「远程不存在（404）」的站点名集合。下载时服务端明确返回 404 即加入，
+     *  用于 classifyMissing 将其归入 notInRemote（远程不存在），从而在 UI 上直接展示，
+     *  而不是靠 Toast 临时提示。仅内存态，进程重启后重新探测。 */
+    private final Set<String> confirmedNotInRemote = ConcurrentHashMap.newKeySet();
 
     private VoicePackManager(Context context) {
         this.context = context.getApplicationContext();
@@ -372,33 +385,58 @@ public class VoicePackManager {
 
     /**
      * 批量预下载（线路预下载用）。仅下载缺失/md5 不匹配文件，已就绪跳过。
+     * 支持 {@link BatchProgressCallback}：每个文件失败时回调（含 404 不存在标记），
+     * 整体成功 = 没有发生任何失败；便于 UI 明确提示「某语音包不存在」。
      */
     public void downloadBatchAsync(List<String> stationNames, ProgressCallback cb) {
+        boolean batch = cb instanceof BatchProgressCallback;
         if (stationNames == null || stationNames.isEmpty()) {
             if (cb != null) cb.onComplete(true);
             return;
         }
         executor.execute(() -> {
+            // 文件名 → 站点名（一个站点可能对应 cn/en 两个文件；找不到则回退用文件名提示）
+            Map<String, String> fnToStation = new HashMap<>();
             List<String> filenames = new ArrayList<>();
             for (String name : stationNames) {
                 Entry e = stationIndex.get(name);
                 if (e == null) continue;
-                if (e.cnFile != null && !e.cnFile.isEmpty()) filenames.add(e.cnFile);
-                if (e.enFile != null && !e.enFile.isEmpty()) filenames.add(e.enFile);
+                if (e.cnFile != null && !e.cnFile.isEmpty()) {
+                    filenames.add(e.cnFile);
+                    fnToStation.put(e.cnFile, name);
+                }
+                if (e.enFile != null && !e.enFile.isEmpty()) {
+                    filenames.add(e.enFile);
+                    fnToStation.put(e.enFile, name);
+                }
             }
             int total = filenames.size();
             int done = 0;
+            boolean allOk = true;
             for (String fn : filenames) {
                 // 用 md5 判断：已存在且 md5 匹配才跳过，否则重下（修复更新不重下 bug）
                 Entry e = findEntryByFilename(fn);
                 String expectedMd5 = e == null ? "" : (fn.startsWith("cn_") ? e.cnMd5 : e.enMd5);
                 if (!isFilePresent(fn, expectedMd5)) {
-                    downloadFile(fn);
+                    int r = downloadFile(fn);
+                    if (r != DL_OK) {
+                        allOk = false;
+                        if (batch) {
+                            String station = fnToStation.get(fn);
+                            String label = (station != null ? station : fn)
+                                    + (fn.startsWith("en_") ? "(英文)" : "(中文)");
+                            if (r == DL_NOT_FOUND && station != null) {
+                                // 记录到「远程不存在」集合，使后续分类统计在 UI 上展示
+                                confirmedNotInRemote.add(station);
+                            }
+                            ((BatchProgressCallback) cb).onFileFailed(label, r == DL_NOT_FOUND);
+                        }
+                    }
                 }
                 done++;
                 if (cb != null) cb.onProgress(done, total);
             }
-            if (cb != null) cb.onComplete(true);
+            if (cb != null) cb.onComplete(allOk);
         });
     }
 
@@ -431,7 +469,8 @@ public class VoicePackManager {
         for (String name : stationNames) {
             if (name == null || name.isEmpty()) continue;
             Entry e = stationIndex.get(name);
-            if (e == null) {
+            if (e == null || confirmedNotInRemote.contains(name)) {
+                // 配置无此站，或下载时已被服务端确认 404（远程不存在）→ 归入「远程不存在」
                 stat.notInRemote.add(name);
                 continue;
             }
@@ -519,14 +558,25 @@ public class VoicePackManager {
         });
     }
 
-    private boolean downloadFile(String filename) {
+    private int downloadFile(String filename) {
         try (Response resp = executeWithFallback(filename)) {
-            if (resp == null || !resp.isSuccessful() || resp.body() == null) {
-                Log.w(TAG, "下载失败: " + filename);
-                return false;
+            if (resp == null) {
+                // 所有源均不可用（超时/连接失败/5xx），非文件不存在
+                Log.w(TAG, "下载失败(所有源不可用): " + filename);
+                return DL_FAIL;
+            }
+            int code = resp.code();
+            if (code == 404) {
+                // 语音包确实不存在：明确告知，不降级、不卡住
+                Log.w(TAG, "下载失败(404 语音包不存在): " + filename);
+                return DL_NOT_FOUND;
+            }
+            if (!resp.isSuccessful() || resp.body() == null) {
+                Log.w(TAG, "下载失败(HTTP " + code + "): " + filename);
+                return DL_FAIL;
             }
             byte[] data = resp.body().bytes();
-            if (data.length == 0) return false;
+            if (data.length == 0) return DL_FAIL;
             File tmp = new File(cacheDir, filename + ".tmp");
             try (FileOutputStream fos = new FileOutputStream(tmp)) {
                 fos.write(data);
@@ -535,7 +585,7 @@ public class VoicePackManager {
             if (dest.exists()) dest.delete();
             if (!tmp.renameTo(dest)) {
                 tmp.delete();
-                return false;
+                return DL_FAIL;
             }
             // 写 md5 sidecar（取 entry 中对应字段）
             Entry entry = findEntryByFilename(filename);
@@ -547,10 +597,10 @@ public class VoicePackManager {
             }
             // 下载成功后清空 miss 缓存，让下次查询重新评估
             fileMissCache.clear();
-            return true;
+            return DL_OK;
         } catch (IOException e) {
             Log.w(TAG, "下载异常 " + filename + ": " + e.getMessage());
-            return false;
+            return DL_FAIL;
         }
     }
 
@@ -885,5 +935,19 @@ public class VoicePackManager {
     public interface ProgressCallback {
         void onProgress(int done, int total);
         void onComplete(boolean success);
+    }
+
+    /**
+     * 批量下载回调（扩展 ProgressCallback），额外回报每个文件的失败情况，
+     * 便于 UI 针对「语音包不存在（404）」给出明确提示，而不是卡在 0% 无反应。
+     */
+    public interface BatchProgressCallback extends ProgressCallback {
+        /**
+         * 单个文件下载失败。
+         * @param stationName 该文件对应的站点名（便于 UI 提示是哪个语音包）
+         * @param notFound    true=服务端明确返回 404（语音包不存在，终结性失败）；
+         *                    false=网络或其他原因失败（可重试）
+         */
+        void onFileFailed(String stationName, boolean notFound);
     }
 }
