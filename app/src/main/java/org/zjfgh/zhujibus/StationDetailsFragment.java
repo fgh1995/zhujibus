@@ -383,13 +383,16 @@ public class StationDetailsFragment extends DialogFragment {
                     @Override
                     public void onSuccess(BusApiClient.StationVehicleDynamicResponse response) {
                         if (response == null || response.data == null || response.data.isEmpty()) {
-                            requireActivity().runOnUiThread(() -> {
-                                fetchNextBusTimeForMarker(marker);
+                            runOnUiThreadSafe(() -> {
+                                if (isUiAlive()) {
+                                    fetchNextBusTimeForMarker(marker);
+                                }
                             });
                             return;
                         }
 
-                        requireActivity().runOnUiThread(() -> {
+                        runOnUiThreadSafe(() -> {
+                            if (!isUiAlive()) return;
                             Set<String> linesWithVehicle = new HashSet<>();
                             Set<String> linesWithPassedVehicle = new HashSet<>();
                             if (currentBusLineItems != null) {
@@ -413,11 +416,13 @@ public class StationDetailsFragment extends DialogFragment {
                                     linesWithVehicle.add(vehicleInfo.lineId);
                                     if (currentBusLineItems != null) {
                                         for (BusApiClient.StationLineInfo lineInfo : currentBusLineItems) {
-                                            if (lineInfo.up != null && lineInfo.up.lineId.equals(vehicleInfo.lineId)) {
+                                            if (lineInfo.up != null && lineInfo.up.lineId.equals(vehicleInfo.lineId)
+                                                    && lineInfo.up.stationId != null && lineInfo.up.stationId.equals(vehicleInfo.stationId)) {
                                                 lineInfo.up.vehicleInfo = vehicleInfo;
                                                 lineInfo.up.isPassed = false;
                                             }
-                                            if (lineInfo.down != null && lineInfo.down.lineId.equals(vehicleInfo.lineId)) {
+                                            if (lineInfo.down != null && lineInfo.down.lineId.equals(vehicleInfo.lineId)
+                                                    && lineInfo.down.stationId != null && lineInfo.down.stationId.equals(vehicleInfo.stationId)) {
                                                 lineInfo.down.vehicleInfo = vehicleInfo;
                                                 lineInfo.down.isPassed = false;
                                             }
@@ -425,6 +430,9 @@ public class StationDetailsFragment extends DialogFragment {
                                     }
                                 }
                             }
+
+                            // 调试：检测 lineId 匹配但 stationId 不匹配的错配数据（服务端可能把反向车辆标成本方向 lineId）
+                            reportMarkerMismatch(marker, response.data);
                             adapter.setData(currentBusLineItems);
 
                             List<String> linesWithoutVehicle = new ArrayList<>();
@@ -450,8 +458,9 @@ public class StationDetailsFragment extends DialogFragment {
 
                     @Override
                     public void onError(BusApiClient.BusApiException e) {
-                        requireActivity().runOnUiThread(() -> {
-                            Toast.makeText(requireContext(), "查询失败：" + e.getMessage(), Toast.LENGTH_SHORT).show();
+                        runOnUiThreadSafe(() -> {
+                            if (!isUiAlive()) return;
+                            Toast.makeText(getContext(), "查询失败：" + e.getMessage(), Toast.LENGTH_SHORT).show();
                             fetchNextBusTimeForMarker(marker);
                         });
                     }
@@ -465,7 +474,8 @@ public class StationDetailsFragment extends DialogFragment {
         busApiClient.queryBusVehiclePlan(lineIdsStr, new BusApiClient.ApiCallback<>() {
             @Override
             public void onSuccess(BusApiClient.BusVehiclePlanResponse response) {
-                requireActivity().runOnUiThread(() -> {
+                runOnUiThreadSafe(() -> {
+                    if (!isUiAlive()) return;
                     if (response != null && response.data != null) {
                         for (BusApiClient.BusPlanTime planTime : response.data) {
                             if (planTime == null) continue;
@@ -487,11 +497,41 @@ public class StationDetailsFragment extends DialogFragment {
 
             @Override
             public void onError(BusApiClient.BusApiException e) {
-                requireActivity().runOnUiThread(() -> {
+                runOnUiThreadSafe(() -> {
+                    if (!isUiAlive()) return;
                     adapter.setData(currentBusLineItems);
                 });
             }
         });
+    }
+
+    /**
+     * 调试辅助：在标记模式下检测返回的实时车辆是否存在 lineId 匹配但 stationId 不匹配的错配。
+     * 仅用于排查，不影响显示逻辑。
+     */
+    private void reportMarkerMismatch(DirectionMarker marker, List<BusApiClient.StationVehicleInfo> data) {
+        if (marker == null || data == null) return;
+        StringBuilder mismatchSb = new StringBuilder();
+        for (BusApiClient.StationVehicleInfo vi : data) {
+            if (vi == null) continue;
+            int idx = marker.lineIds.indexOf(vi.lineId);
+            if (idx >= 0 && idx < marker.stationIds.size()) {
+                String expected = marker.stationIds.get(idx);
+                if (!expected.equals(vi.stationId)) {
+                    mismatchSb.append(String.format(
+                            "[lineId=%s 期望station=%s 实际=%s dist=%d arrived=%d] ",
+                            vi.lineId, expected, vi.stationId, vi.distance, vi.isArriveStation));
+                }
+            }
+        }
+        if (mismatchSb.length() > 0) {
+            String msg = "方向标记错配(已忽略): " + mismatchSb.toString();
+            Log.e("-BusInfo-", msg);
+            android.content.Context ctx = getContext();
+            if (ctx != null) {
+                Toast.makeText(ctx, msg, Toast.LENGTH_LONG).show();
+            }
+        }
     }
 
     private void fetchNextBusTimeForMarker(DirectionMarker marker) {
@@ -575,6 +615,21 @@ public class StationDetailsFragment extends DialogFragment {
         fetchVehicleDynamicDataForMarker(marker);
     }
 
+    /**
+     * 判断 Fragment 是否仍“活着”且可安全操作 UI。
+     * 用于拦截已进入/已关闭（或被回收重建）的实例上仍在回调的网络请求，避免 requireActivity()/requireContext() 抛异常闪退。
+     */
+    private boolean isUiAlive() {
+        android.app.Activity a = getActivity();
+        return a != null && !a.isFinishing() && isAdded();
+    }
+
+    private void runOnUiThreadSafe(Runnable r) {
+        android.app.Activity a = getActivity();
+        if (a == null || a.isFinishing() || !isAdded()) return;
+        a.runOnUiThread(r);
+    }
+
     @Override
     public void onStart() {
         super.onStart();
@@ -600,6 +655,14 @@ public class StationDetailsFragment extends DialogFragment {
         refreshHandler.removeCallbacks(refreshRunnable);
     }
 
+    @Override
+    public void onDestroy() {
+        super.onDestroy();
+        if (refreshHandler != null) {
+            refreshHandler.removeCallbacks(refreshRunnable);
+        }
+    }
+
     public void loadStationData() {
         try {
             busApiClient.queryStationInfo(currentStationName, new BusApiClient.ApiCallback<>() {
@@ -610,6 +673,7 @@ public class StationDetailsFragment extends DialogFragment {
                             Log.e("-BusInfo-", "站点信息为空");
                             return;
                         }
+                        if (!isUiAlive()) return;
                         currentBusLineItems = response.data;
                         adapter.setData(currentBusLineItems);
 
@@ -664,31 +728,41 @@ public class StationDetailsFragment extends DialogFragment {
                     try {
                         if (response == null || response.data == null) {
                             Log.w("-BusInfo-", "车辆动态数据为空");
-                            fetchPlanTimeForEmptyLines(busLineItems);
+                            runOnUiThreadSafe(() -> {
+                                if (isUiAlive()) fetchPlanTimeForEmptyLines(busLineItems);
+                            });
                             return;
                         }
                         for (BusApiClient.StationVehicleInfo vehicleInfo : response.data) {
                             if (vehicleInfo == null) continue;
                             for (BusApiClient.StationLineInfo lineInfo : busLineItems) {
-                                if (lineInfo.up != null && lineInfo.up.lineId.equals(vehicleInfo.lineId)) {
+                                if (lineInfo.up != null && lineInfo.up.lineId.equals(vehicleInfo.lineId)
+                                        && lineInfo.up.stationId != null && lineInfo.up.stationId.equals(vehicleInfo.stationId)) {
                                     lineInfo.up.vehicleInfo = vehicleInfo;
                                 }
-                                if (lineInfo.down != null && lineInfo.down.lineId.equals(vehicleInfo.lineId)) {
+                                if (lineInfo.down != null && lineInfo.down.lineId.equals(vehicleInfo.lineId)
+                                        && lineInfo.down.stationId != null && lineInfo.down.stationId.equals(vehicleInfo.stationId)) {
                                     lineInfo.down.vehicleInfo = vehicleInfo;
                                 }
                             }
                         }
-                        fetchPlanTimeForEmptyLines(busLineItems);
+                        runOnUiThreadSafe(() -> {
+                            if (isUiAlive()) fetchPlanTimeForEmptyLines(busLineItems);
+                        });
                     } catch (Exception e) {
                         Log.e("-BusInfo-", "处理车辆动态数据失败", e);
-                        fetchPlanTimeForEmptyLines(busLineItems);
+                        runOnUiThreadSafe(() -> {
+                            if (isUiAlive()) fetchPlanTimeForEmptyLines(busLineItems);
+                        });
                     }
                 }
 
                 @Override
                 public void onError(BusApiClient.BusApiException e) {
                     Log.e("-BusInfo-", "获取车辆动态数据失败: " + e.getMessage(), e);
-                    fetchPlanTimeForEmptyLines(busLineItems);
+                    runOnUiThreadSafe(() -> {
+                        if (isUiAlive()) fetchPlanTimeForEmptyLines(busLineItems);
+                    });
                 }
             });
         } catch (Exception e) {
@@ -715,26 +789,29 @@ public class StationDetailsFragment extends DialogFragment {
                 busApiClient.queryBusVehiclePlan(lineIdsStr, new BusApiClient.ApiCallback<>() {
                     @Override
                     public void onSuccess(BusApiClient.BusVehiclePlanResponse response) {
-                        try {
-                            if (response == null || response.data == null) {
-                                Log.w("-BusInfo-", "计划发车时间数据为空");
-                                return;
-                            }
-                            for (BusApiClient.BusPlanTime planTime : response.data) {
-                                if (planTime == null) continue;
-                                for (BusApiClient.StationLineInfo lineInfo : busLineItems) {
-                                    if (lineInfo.up != null && lineInfo.up.lineId.equals(planTime.lineId)) {
-                                        lineInfo.up.planTime = planTime.startTime;
-                                    }
-                                    if (lineInfo.down != null && lineInfo.down.lineId.equals(planTime.lineId)) {
-                                        lineInfo.down.planTime = planTime.startTime;
+                        runOnUiThreadSafe(() -> {
+                            if (!isUiAlive()) return;
+                            try {
+                                if (response == null || response.data == null) {
+                                    Log.w("-BusInfo-", "计划发车时间数据为空");
+                                    return;
+                                }
+                                for (BusApiClient.BusPlanTime planTime : response.data) {
+                                    if (planTime == null) continue;
+                                    for (BusApiClient.StationLineInfo lineInfo : busLineItems) {
+                                        if (lineInfo.up != null && lineInfo.up.lineId.equals(planTime.lineId)) {
+                                            lineInfo.up.planTime = planTime.startTime;
+                                        }
+                                        if (lineInfo.down != null && lineInfo.down.lineId.equals(planTime.lineId)) {
+                                            lineInfo.down.planTime = planTime.startTime;
+                                        }
                                     }
                                 }
+                                adapter.setData(busLineItems);
+                            } catch (Exception e) {
+                                Log.e("-BusInfo-", "处理计划发车时间失败", e);
                             }
-                            adapter.setData(busLineItems);
-                        } catch (Exception e) {
-                            Log.e("-BusInfo-", "处理计划发车时间失败", e);
-                        }
+                        });
                     }
 
                     @Override
@@ -743,7 +820,10 @@ public class StationDetailsFragment extends DialogFragment {
                     }
                 });
             } else {
-                adapter.setData(busLineItems);
+                runOnUiThreadSafe(() -> {
+                    if (!isUiAlive()) return;
+                    adapter.setData(busLineItems);
+                });
             }
         } catch (Exception e) {
             Log.e("-BusInfo-", "查询计划发车时间异常", e);

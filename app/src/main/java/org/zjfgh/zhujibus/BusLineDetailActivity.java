@@ -5,6 +5,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.graphics.Rect;
 import android.graphics.Typeface;
+import android.graphics.Color;
 import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationProvider;
@@ -41,7 +42,13 @@ import android.widget.TextView;
 
 import android.widget.Toast;
 
+import androidx.core.content.ContextCompat;
 import androidx.recyclerview.widget.LinearLayoutManager;
+
+import com.google.android.material.bottomsheet.BottomSheetDialog;
+import com.google.android.material.button.MaterialButton;
+
+import android.widget.ImageButton;
 import androidx.recyclerview.widget.RecyclerView;
 
 import java.text.ParseException;
@@ -94,17 +101,13 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     // ===== 语音包状态条 =====
     private LinearLayout llVoicepackStatus;
     private TextView tvVoicepackStatus;
-    private Button btnVoicepackDownload;
     private Button btnVoicepackDetail;
-    private ProgressBar pbVoicepackLine;
     private volatile boolean voicepackDownloadingLine = false;
     private List<String> voicepackStationNames = new ArrayList<>();
     /** 配置状态监听器：统一由 VoicePackManager 推送 LOADING/READY/FAILED，避免本页面自行轮询/重试 */
     private VoicePackManager.ConfigStateListener voicepackConfigListener = null;
     private int lastMissingCount = 0;
     private VoicePackManager.MissingStat lastMissingStat = null;
-    /** 本页面已展示过的清理事件时间戳，避免同一事件重复提示 */
-    private long lastDisplayedCleanupTime = 0L;
 
     // ===== POV模式静态引用 =====
     /** ⭐ 当前 Activity 实例的静态引用（用于POV模式暂停/恢复业务） */
@@ -179,6 +182,9 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private volatile int lastInsideStationIndex = -1;
     private volatile boolean hasLeftTerminalStation = false;
     private volatile int gpsCurrentStationIndex = -1;
+    // ⭐ 已确认离开/到达的最远站点索引。离开某站时推进到该站索引，
+    //    用于抑制 GPS 坐标跳变导致的"回跳进站"重复报站（见 handleGpsLocation）。
+    private volatile int committedStationIndex = -1;
 
     private double currentGpsLat = 0;
     private double currentGpsLon = 0;
@@ -538,6 +544,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             lastInsideStationIndex = -1;
             hasLeftTerminalStation = false;
             gpsCurrentStationIndex = -1;
+            committedStationIndex = -1;
             synchronized (speedLock) {
                 lastLocationTimeForSpeed = 0;
                 lastLocationLat = 0;
@@ -589,6 +596,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             lastInsideStationIndex = -1;
             hasLeftTerminalStation = false;
             gpsCurrentStationIndex = -1;
+            committedStationIndex = -1;
             // ⭐ 网络模式：关闭地图罗盘模式，保持自由视角
             if (navigationMainFragment != null) {
                 navigationMainFragment.setGpsMode(false);
@@ -891,6 +899,9 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 return;
             }
             int totalStations = stations.size();
+            // ⭐ GPS 回跳抑制标记：当本帧"进站"是因坐标跳变回退到已离开的站点时置 true，
+            //    用于跳过重复报站与 View 跳变（见下方 finalIsInsideRadius 分支及 View 更新）。
+            boolean isBackwardJump = false;
 
             // ---- 状态变量更新 ----
             if (finalIsBeyondExitRadius && snapshotLastInside != -1) {
@@ -904,6 +915,8 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 isInsideStationRadius = false;
                 lastInsideStationIndex = -1;
                 gpsCurrentStationIndex = leavingIndex;
+                // ⭐ 已离开该站，推进 committed，后续回跳到该站或之前站点均视为跳变噪声
+                committedStationIndex = leavingIndex;
 
                 if (isStartStation) {
                     lastAnnouncedStationIndex = leavingIndex;
@@ -918,9 +931,18 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             } else if (finalIsInsideRadius) {
                 boolean isTerminalStation = finalCurrentInsideStationIndex >= totalStations - 1;
                 boolean isStartStation = finalCurrentInsideStationIndex == 0;
+                // ⭐ GPS 回跳抑制：一旦已离开某站（committedStationIndex 推进到该站），
+                //    回跳到该站或之前站点的"进站"事件视为 GPS 跳变噪声，直接忽略，避免重复报站。
+                //    说明：仅"已离开该站之后"才会触发忽略；同一站内停留仍由 isInsideStationRadius 守卫，
+                //    正常前向进站（索引 > committed）不受影响。代价：真实掉头/逆向行驶会被一并抑制。
+                isBackwardJump = finalCurrentInsideStationIndex <= committedStationIndex;
 
-                if (isTerminalStation && snapshotHasLeftTerminal) {
-                    // 忽略
+                if (isBackwardJump) {
+                    // 忽略 GPS 回跳/跳变：不报站、不更新进站状态，保持"途中"状态
+                    Log.d(TAG, "忽略GPS回跳进站(跳变噪声): " + stations.get(finalCurrentInsideStationIndex).stationName
+                            + " index=" + finalCurrentInsideStationIndex + " committed=" + committedStationIndex);
+                } else if (isTerminalStation && snapshotHasLeftTerminal) {
+                    // 已离开终点站后再次进入终点站：忽略
                 } else if (isStartStation) {
                     // ⭐ 起点站进站时不播报，等到"离开起点站"（在途中）时再播
                     // 避免用户在起点站等车时就听到"欢迎乘坐..."的播报
@@ -936,16 +958,17 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                         Log.d(TAG, "已触发报站: " + stations.get(finalCurrentInsideStationIndex).stationName);
                     }
                 }
-                if (finalCurrentInsideStationIndex >= 0 && !isTerminalStation) {
-                    hasLeftTerminalStation = false;
-                }
-                if (finalCurrentInsideStationIndex >= 0) {
-                    gpsCurrentStationIndex = finalCurrentInsideStationIndex;
-                }
-                if (isTerminalStation && snapshotHasLeftTerminal) {
-                    // already handled above
-                } else {
-                    lastInsideStationIndex = finalCurrentInsideStationIndex;
+                // 仅在有效进站（非回跳）时更新引用状态
+                if (!isBackwardJump) {
+                    if (finalCurrentInsideStationIndex >= 0 && !isTerminalStation) {
+                        hasLeftTerminalStation = false;
+                    }
+                    if (finalCurrentInsideStationIndex >= 0) {
+                        gpsCurrentStationIndex = finalCurrentInsideStationIndex;
+                    }
+                    if (!(isTerminalStation && snapshotHasLeftTerminal)) {
+                        lastInsideStationIndex = finalCurrentInsideStationIndex;
+                    }
                 }
             }
 
@@ -965,7 +988,8 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             if (busLineView != null) {
                 if (finalIsLeavingTerminal) {
                     busLineView.updateGpsPosition(-1, false);
-                } else if (finalIsInsideRadius && finalCurrentInsideStationIndex >= 0) {
+                } else if (finalIsInsideRadius && !isBackwardJump && finalCurrentInsideStationIndex >= 0) {
+                    // ⭐ 回跳跳变时不把标记吸附到站内，保持"途中"显示，避免反复横跳
                     busLineView.updateGpsPosition(finalCurrentInsideStationIndex, true);
                 } else if (!finalIsInsideRadius && finalLeavingStationFinal >= 0) {
                     busLineView.updateGpsPosition(finalLeavingStationFinal, false);
@@ -976,7 +1000,8 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             if (navigationMainFragment != null) {
                 if (finalIsLeavingTerminal) {
                     navigationMainFragment.updateGpsPosition(-1, false);
-                } else if (finalIsInsideRadius && finalCurrentInsideStationIndex >= 0) {
+                } else if (finalIsInsideRadius && !isBackwardJump && finalCurrentInsideStationIndex >= 0) {
+                    // ⭐ 回跳跳变时不把标记吸附到站内，保持"途中"显示，避免反复横跳
                     navigationMainFragment.updateGpsPosition(finalCurrentInsideStationIndex, true);
                 } else if (!finalIsInsideRadius && finalLeavingStationFinal >= 0) {
                     navigationMainFragment.updateGpsPosition(finalLeavingStationFinal, false);
@@ -986,11 +1011,11 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
 
             if (finalIsLeavingTerminal) {
                 // nothing
-            } else if (finalIsInsideRadius) {
+            } else if (finalIsInsideRadius && !isBackwardJump) {
                 if (!wasInsideStation) {
                     isInsideStationRadius = true;
                 }
-            } else {
+            } else if (!finalIsInsideRadius && !isBackwardJump) {
                 if (wasInsideStation) {
                     isInsideStationRadius = false;
                 }
@@ -1607,15 +1632,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         // 语音包状态条
         llVoicepackStatus = findViewById(R.id.ll_voicepack_status);
         tvVoicepackStatus = findViewById(R.id.tv_voicepack_status);
-        btnVoicepackDownload = findViewById(R.id.btn_voicepack_download);
         btnVoicepackDetail = findViewById(R.id.btn_voicepack_detail);
-        pbVoicepackLine = findViewById(R.id.pb_voicepack_line);
-        if (btnVoicepackDownload != null) {
-            btnVoicepackDownload.setOnClickListener(v -> {
-                if (voicepackDownloadingLine) return;
-                confirmAndDownloadLineVoicepack();
-            });
-        }
         if (btnVoicepackDetail != null) {
             btnVoicepackDetail.setOnClickListener(v -> showVoicepackDetailDialog());
         }
@@ -2201,6 +2218,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             isInsideStationRadius = false;
             lastInsideStationIndex = -1;
             gpsCurrentStationIndex = -1;
+            committedStationIndex = -1;
             realTimeManager.stopTracking();
             realTimeManager.startTracking(getCurrentDirectionId(), this);
             GpsWarmingUp.addListener(gpsActivityListener);
@@ -2580,9 +2598,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
 
         // 显示状态条：检查中
         llVoicepackStatus.setVisibility(View.VISIBLE);
-        if (btnVoicepackDownload != null) btnVoicepackDownload.setVisibility(View.GONE);
         if (btnVoicepackDetail != null) btnVoicepackDetail.setVisibility(View.GONE);
-        if (pbVoicepackLine != null) pbVoicepackLine.setVisibility(View.GONE);
         tvVoicepackStatus.setText("🔊 检查语音包中...");
         tvVoicepackStatus.setOnClickListener(null);
 
@@ -2657,83 +2673,117 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 lastMissingStat = stat;
                 int missing = stat.notInRemote.size() + stat.notDownloaded.size() + stat.needUpdate.size();
                 lastMissingCount = missing;
-                // 检查自动清理结果（仅在发生过清理且本页面未展示过时提示）
-                long[] cleanupResult = vpm.getLastCleanupResult();
-                int cleanupCount = (int) cleanupResult[0];
-                long cleanupTime = cleanupResult[1];
-                boolean hasNewCleanup = cleanupCount > 0 && cleanupTime > lastDisplayedCleanupTime;
-                if (hasNewCleanup) {
-                    lastDisplayedCleanupTime = cleanupTime;
-                }
-                if (missing == 0 && !hasNewCleanup) {
-                    // 已就绪且无清理通知：整个状态条隐藏
+                if (missing == 0) {
+                    // 已就绪：整个状态条隐藏
                     llVoicepackStatus.setVisibility(View.GONE);
                 } else {
-                    StringBuilder sb = new StringBuilder();
-                    if (missing > 0) {
-                        sb.append("⚠️ 缺少 ").append(missing).append(" 个语音包\n");
-                        sb.append("  · 未下载：").append(stat.notDownloaded.size()).append("\n");
-                        sb.append("  · 有更新：").append(stat.needUpdate.size()).append("\n");
-                        sb.append("  · 远程不存在：").append(stat.notInRemote.size());
+                    // 单行精简文案，详细分类放到"详情"对话框
+                    String summary;
+                    if (stat.notInRemote.size() > 0) {
+                        summary = "⚠️ 缺 " + missing + " 个语音包（含 " + stat.notInRemote.size() + " 个远程未收录）";
+                    } else {
+                        summary = "⚠️ 缺 " + missing + " 个语音包（未下载 " + stat.notDownloaded.size()
+                                + " · 需更新 " + stat.needUpdate.size() + "）";
                     }
-                    if (hasNewCleanup) {
-                        if (sb.length() > 0) sb.append("\n");
-                        sb.append("🧹 已自动清理 ").append(cleanupCount).append(" 个过时文件");
-                    }
-                    tvVoicepackStatus.setText(sb.toString());
+                    tvVoicepackStatus.setText(summary);
                     tvVoicepackStatus.setOnClickListener(null);
-                    // 仅在缺少语音包时显示下载/详情按钮
-                    int btnVisibility = missing > 0 ? View.VISIBLE : View.GONE;
-                    if (btnVoicepackDetail != null) btnVoicepackDetail.setVisibility(btnVisibility);
-                    if (btnVoicepackDownload != null) btnVoicepackDownload.setVisibility(btnVisibility);
+                    // 仅在缺少语音包时显示详情按钮（下载入口已移入详情弹窗）
+                    if (btnVoicepackDetail != null) btnVoicepackDetail.setVisibility(View.VISIBLE);
                 }
             });
         }).start();
     }
 
     /**
-     * 弹出语音包详情对话框，列出三分类下的具体站名。
-     * 用 AlertDialog.setMessage 拼接文本，自带滚动，不创建新 layout 文件。
+     * 弹出语音包详情（现代底部弹窗）。
+     * 顶部统计卡片 + 三分类明细 + 底部「下载全部缺失语音包」按钮（含进度条）。
+     * 下载按钮已从此前的状态条移入本弹窗。
      */
     private void showVoicepackDetailDialog() {
         if (lastMissingStat == null) {
             Toast.makeText(this, "暂无详情", Toast.LENGTH_SHORT).show();
             return;
         }
-        VoicePackManager.MissingStat stat = lastMissingStat;
-        int total = stat.notInRemote.size() + stat.notDownloaded.size() + stat.needUpdate.size();
+        final VoicePackManager.MissingStat stat = lastMissingStat;
+        final int total = stat.notInRemote.size() + stat.notDownloaded.size() + stat.needUpdate.size();
 
-        StringBuilder sb = new StringBuilder();
-        sb.append("本线路共缺少 ").append(total).append(" 个语音包。\n\n");
+        View dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_voicepack_detail, null);
+        BottomSheetDialog dialog = new BottomSheetDialog(this);
+        dialog.setContentView(dialogView);
 
-        sb.append("📥 未下载 (").append(stat.notDownloaded.size()).append(")\n");
-        sb.append(stat.notDownloaded.isEmpty() ? "无" : joinStationNames(stat.notDownloaded));
+        TextView tvTotal = dialogView.findViewById(R.id.tv_total_missing);
+        TextView tvNotDownloaded = dialogView.findViewById(R.id.tv_not_downloaded);
+        TextView tvNeedUpdate = dialogView.findViewById(R.id.tv_need_update);
+        LinearLayout llGroups = dialogView.findViewById(R.id.ll_detail_groups);
+        MaterialButton btnDownload = dialogView.findViewById(R.id.btn_download_all);
+        ProgressBar pbDownload = dialogView.findViewById(R.id.pb_download);
+        TextView tvHint = dialogView.findViewById(R.id.tv_download_hint);
+        ImageButton btnClose = dialogView.findViewById(R.id.iv_close);
 
-        sb.append("\n\n🔄 有更新 (").append(stat.needUpdate.size()).append(")\n");
-        sb.append(stat.needUpdate.isEmpty() ? "无" : joinStationNames(stat.needUpdate));
+        tvTotal.setText(String.valueOf(total));
+        tvNotDownloaded.setText(String.valueOf(stat.notDownloaded.size()));
+        tvNeedUpdate.setText(String.valueOf(stat.needUpdate.size()));
 
-        sb.append("\n\n❓ 远程不存在 (").append(stat.notInRemote.size()).append(")\n");
-        sb.append(stat.notInRemote.isEmpty() ? "无" : joinStationNames(stat.notInRemote));
+        // 三分类卡片：仅展示非空分类
+        addDetailGroup(llGroups, "未下载", stat.notDownloaded, "#1976D2");
+        addDetailGroup(llGroups, "有更新", stat.needUpdate, "#FB8C00");
+        addDetailGroup(llGroups, "远程不存在", stat.notInRemote, "#757575");
 
-        // 追加自动清理信息（若发生过清理则展示）
-        VoicePackManager vpm = VoicePackManager.getInstance(this);
-        long[] cleanupResult = vpm.getLastCleanupResult();
-        int cleanupCount = (int) cleanupResult[0];
-        if (cleanupCount > 0) {
-            sb.append("\n\n🧹 已清理过时文件 (").append(cleanupCount).append(")\n");
-            sb.append("配置更新后自动删除的本地冗余语音包");
+        // 含远程未收录项时，下载不可行，给出提示并禁用下载按钮
+        final boolean hasUnavailable = !stat.notInRemote.isEmpty();
+        if (hasUnavailable) {
+            tvHint.setVisibility(View.VISIBLE);
+            btnDownload.setText("无法下载（含远程未收录项）");
+            btnDownload.setEnabled(false);
         }
 
-        sb.append("\n\n说明：\n")
-                .append("· 未下载：远程有但本地没有，可点击下载补齐\n")
-                .append("· 有更新：本地已下载但 md5 不匹配，可点击下载更新\n")
-                .append("· 远程不存在：配置文件中无此站，需更新配置");
+        btnClose.setOnClickListener(v -> dialog.dismiss());
+        btnDownload.setOnClickListener(v -> {
+            if (voicepackDownloadingLine) return;
+            startDownloadLineVoicepack(dialog, pbDownload, btnDownload);
+        });
 
-        new AlertDialog.Builder(this)
-                .setTitle("🔊 语音包详情")
-                .setMessage(sb.toString())
-                .setPositiveButton("关闭", null)
-                .show();
+        dialog.show();
+    }
+
+    /** 在弹窗内追加一个分类卡片（标题 + 站名列表），分类为空则不添加 */
+    private void addDetailGroup(LinearLayout parent, String title, List<String> names,
+                                String titleColor) {
+        if (parent == null || names == null || names.isEmpty()) return;
+
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams cardLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        cardLp.setMargins(0, 0, 0, 10);
+        card.setLayoutParams(cardLp);
+        card.setPadding(dp(12), dp(10), dp(12), dp(10));
+        card.setBackgroundResource(R.drawable.bg_detail_group);
+
+        TextView tvTitle = new TextView(this);
+        tvTitle.setText(title + "（" + names.size() + "）");
+        tvTitle.setTextSize(14);
+        tvTitle.setTextColor(Color.parseColor(titleColor));
+        tvTitle.setTypeface(null, Typeface.BOLD);
+        card.addView(tvTitle);
+
+        TextView tvNames = new TextView(this);
+        tvNames.setText(joinStationNames(names));
+        tvNames.setTextSize(13);
+        tvNames.setTextColor(ContextCompat.getColor(this, R.color.text_secondary));
+        tvNames.setLineSpacing(dp(2), 1.0f);
+        LinearLayout.LayoutParams namesLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        namesLp.setMargins(0, dp(4), 0, 0);
+        tvNames.setLayoutParams(namesLp);
+        card.addView(tvNames);
+
+        parent.addView(card);
+    }
+
+    /** dp → px */
+    private int dp(int value) {
+        return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
     }
 
     /** 用顿号拼接站名列表 */
@@ -2747,30 +2797,21 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         return sb.toString();
     }
 
-    private void confirmAndDownloadLineVoicepack() {
+    /**
+     * 在详情弹窗内启动批量下载，进度回写弹窗里的 ProgressBar。
+     * 下载按钮已从此前的状态条移动至此。
+     */
+    private void startDownloadLineVoicepack(BottomSheetDialog dialog, ProgressBar pbDownload,
+                                            MaterialButton btnDownload) {
         if (voicepackStationNames.isEmpty()) {
             Toast.makeText(this, "未获取到站点信息", Toast.LENGTH_SHORT).show();
             return;
         }
-        int missing = lastMissingCount;
-        String msg = missing > 0
-                ? "是否在线下载缺少的 " + missing + " 个语音包？"
-                : "是否下载本线路语音包？";
-        new AlertDialog.Builder(this)
-                .setTitle("下载语音包")
-                .setMessage(msg)
-                .setPositiveButton("下载", (d, w) -> startDownloadLineVoicepack())
-                .setNegativeButton("取消", null)
-                .show();
-    }
-
-    private void startDownloadLineVoicepack() {
-        if (tvVoicepackStatus == null || btnVoicepackDownload == null || pbVoicepackLine == null) return;
         voicepackDownloadingLine = true;
-        btnVoicepackDownload.setVisibility(View.GONE);
-        pbVoicepackLine.setVisibility(View.VISIBLE);
-        pbVoicepackLine.setProgress(0);
-        tvVoicepackStatus.setText("下载中... 0%");
+        btnDownload.setEnabled(false);
+        btnDownload.setText("下载中... 0%");
+        pbDownload.setVisibility(View.VISIBLE);
+        pbDownload.setProgress(0);
 
         VoicePackManager.getInstance(this).downloadBatchAsync(voicepackStationNames, new VoicePackManager.ProgressCallback() {
             @Override
@@ -2778,8 +2819,8 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 runOnUiThread(() -> {
                     if (isFinishing() || isDestroyed()) return;
                     int p = total > 0 ? done * 100 / total : 0;
-                    pbVoicepackLine.setProgress(p);
-                    tvVoicepackStatus.setText("下载中... " + p + "%");
+                    pbDownload.setProgress(p);
+                    btnDownload.setText("下载中... " + p + "%");
                 });
             }
 
@@ -2788,10 +2829,11 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 runOnUiThread(() -> {
                     if (isFinishing() || isDestroyed()) return;
                     voicepackDownloadingLine = false;
-                    pbVoicepackLine.setVisibility(View.GONE);
+                    pbDownload.setVisibility(View.GONE);
                     Toast.makeText(BusLineDetailActivity.this,
                             success ? "下载完成" : "下载结束（部分可能失败）",
                             Toast.LENGTH_SHORT).show();
+                    if (dialog.isShowing()) dialog.dismiss();
                     // 重新检查状态
                     checkLineVoicepackStatus();
                 });

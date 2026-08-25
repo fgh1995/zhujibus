@@ -78,6 +78,7 @@ public class BusStationAdapter extends RecyclerView.Adapter<BusStationAdapter.Bu
     }
 
     public void switchToMatchingDirection(List<String> lineIds, List<String> stationIds) {
+        if (lineIds == null || stationIds == null) return;
         for (int i = 0; i < childAdapters.size(); i++) {
             DirectionPagerAdapter adapter = childAdapters.get(i);
             BusApiClient.StationLineInfo lineInfo = busLineItems.get(i);
@@ -85,7 +86,16 @@ public class BusStationAdapter extends RecyclerView.Adapter<BusStationAdapter.Bu
             for (int j = 0; j < lineInfo.getDirections().size(); j++) {
                 BusApiClient.LineDirection direction = lineInfo.getDirections().get(j);
                 if (direction == null) continue;
-                if (lineIds.contains(direction.lineId) && stationIds.contains(direction.stationId)) {
+                // 按 (lineId, stationId) 同索引成对匹配，避免同一 lineId 出现在多个方向时切错页
+                boolean matched = false;
+                for (int k = 0; k < lineIds.size() && k < stationIds.size(); k++) {
+                    if (lineIds.get(k).equals(direction.lineId)
+                            && stationIds.get(k).equals(direction.stationId)) {
+                        matched = true;
+                        break;
+                    }
+                }
+                if (matched) {
                     ViewPager2 viewPager = viewPagerMap.get(i);
                     if (viewPager != null && viewPager.getCurrentItem() != j) {
                         viewPager.setCurrentItem(j, true);

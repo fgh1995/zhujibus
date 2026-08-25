@@ -42,11 +42,11 @@
         android:layout_height="wrap_content"
         android:orientation="vertical"
         android:background="@drawable/bg_yellow_dash_8radius"
-        android:padding="10dp"
+        android:padding="6dp"
         android:layout_marginStart="8dp"
         android:layout_marginEnd="8dp"
-        android:layout_marginTop="6dp"
-        android:layout_marginBottom="6dp"
+        android:layout_marginTop="4dp"
+        android:layout_marginBottom="4dp"
         android:visibility="gone">
 
         <LinearLayout
@@ -61,8 +61,9 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:textColor="#B26A00"
-                android:textSize="13sp"
-                android:maxLines="3"
+                android:textSize="12sp"
+                android:maxLines="1"
+                android:singleLine="true"
                 android:ellipsize="end"
                 android:text="检查语音包中..." />
 
@@ -70,42 +71,19 @@
                 android:id="@+id/btn_voicepack_detail"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:minHeight="32dp"
-                android:minWidth="64dp"
+                android:minHeight="22dp"
+                android:minWidth="40dp"
                 android:layout_marginStart="6dp"
-                android:paddingStart="10dp"
-                android:paddingEnd="10dp"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:paddingTop="2dp"
+                android:paddingBottom="2dp"
                 android:background="@drawable/nav_btn_gray_bg"
                 android:textColor="#FFFFFF"
-                android:textSize="13sp"
+                android:textSize="11sp"
                 android:text="详情"
                 android:visibility="gone" />
-
-            <Button
-                android:id="@+id/btn_voicepack_download"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:minHeight="32dp"
-                android:minWidth="64dp"
-                android:layout_marginStart="6dp"
-                android:paddingStart="10dp"
-                android:paddingEnd="10dp"
-                android:background="@drawable/nav_btn_blue_bg"
-                android:textColor="#FFFFFF"
-                android:textSize="13sp"
-                android:text="下载"
-                android:visibility="gone" />
         </LinearLayout>
-
-        <ProgressBar
-            android:id="@+id/pb_voicepack_line"
-            style="?android:attr/progressBarStyleHorizontal"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:max="100"
-            android:progress="0"
-            android:visibility="gone" />
     </LinearLayout>
 
     <!-- 线路信息 -->

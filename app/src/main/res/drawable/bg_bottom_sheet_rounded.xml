@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 底部弹窗圆角白底（日间）；夜间由 night 版本覆盖 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@android:color/white" />
+    <corners
+        android:topLeftRadius="20dp"
+        android:topRightRadius="20dp" />
+</shape>
