@@ -40,6 +40,8 @@ public class StationDetailsFragment extends DialogFragment {
     private Handler refreshHandler;
     private Runnable refreshRunnable;
     private static final long REFRESH_INTERVAL = 10000;
+    // 报站距离阈值：车辆距本站 < 400m 才语音报站
+    private static final int ANNOUNCE_MAX_DISTANCE = 400;
     private DirectionMarkerDatabaseHelper dbHelper;
     private LinearLayout markersContainer;
     private LinearLayout markersScrollContent;
@@ -339,261 +341,20 @@ public class StationDetailsFragment extends DialogFragment {
         adapter.resetAllViewPagersToZero();
     }
 
+    /**
+     * 点击自定义标记后的取数逻辑。
+     * 旧逻辑会单独请求后端（按标记里保存的 lineId/stationId 取车辆动态），常因方向错配返回不准确的数据。
+     * 现改为：直接走原站点接口刷新双向数据（up/down 都包含，且由服务端正确关联本站），
+     * 刷新完成后按标记的方向（lineId + stationId 同索引成对）从双向数据里取对应方向的车辆信息即可，不再单独请求。
+     */
     private void queryWithMarker(DirectionMarker marker) {
         announcedVehicles.clear();
         if (marker.lineIds.isEmpty()) {
             Toast.makeText(requireContext(), "标记中没有线路", Toast.LENGTH_SHORT).show();
             return;
         }
-
-        currentBusLineItems = new java.util.ArrayList<>();
-
-        for (int i = 0; i < marker.lineIds.size(); i++) {
-            String lineId = marker.lineIds.get(i);
-            String stationId = marker.stationIds.get(i);
-
-            BusApiClient.LineDirection dir = new BusApiClient.LineDirection();
-            dir.lineId = lineId;
-            dir.lineName = marker.getLineName(i);
-            dir.startStation = marker.getStartStation(i);
-            dir.endStation = marker.getEndStation(i);
-            dir.stationId = stationId;
-            dir.lineTypeName = i < marker.lineTypes.size() ? marker.lineTypes.get(i) : "";
-            dir.departureTime = marker.getDepartureTime(i);
-            dir.collectTime = marker.getCollectTime(i);
-
-            BusApiClient.StationLineInfo lineInfo = new BusApiClient.StationLineInfo();
-            lineInfo.lineName = dir.lineName;
-            lineInfo.up = dir;
-
-            currentBusLineItems.add(lineInfo);
-        }
-
-        adapter.setData(currentBusLineItems);
-
-        fetchVehicleDynamicDataForMarker(marker);
-    }
-
-    private void fetchVehicleDynamicDataForMarker(DirectionMarker marker) {
-        String lineIdsStr = String.join(",", marker.lineIds);
-        String stationIdsStr = String.join(",", marker.stationIds);
-
-        busApiClient.queryStationVehicleDynamic(lineIdsStr, stationIdsStr,
-                new BusApiClient.ApiCallback<>() {
-                    @Override
-                    public void onSuccess(BusApiClient.StationVehicleDynamicResponse response) {
-                        if (response == null || response.data == null || response.data.isEmpty()) {
-                            runOnUiThreadSafe(() -> {
-                                if (isUiAlive()) {
-                                    fetchNextBusTimeForMarker(marker);
-                                }
-                            });
-                            return;
-                        }
-
-                        runOnUiThreadSafe(() -> {
-                            if (!isUiAlive()) return;
-                            Set<String> linesWithVehicle = new HashSet<>();
-                            Set<String> linesWithPassedVehicle = new HashSet<>();
-                            if (currentBusLineItems != null) {
-                                for (BusApiClient.StationLineInfo lineInfo : currentBusLineItems) {
-                                    if (lineInfo.up != null) {
-                                        lineInfo.up.vehicleInfo = null;
-                                        lineInfo.up.isPassed = true;
-                                    }
-                                    if (lineInfo.down != null) {
-                                        lineInfo.down.vehicleInfo = null;
-                                        lineInfo.down.isPassed = true;
-                                    }
-                                }
-                            }
-                            for (BusApiClient.StationVehicleInfo vehicleInfo : response.data) {
-                                if (vehicleInfo != null) {
-                                    if (vehicleInfo.distance == 0) {
-                                        linesWithPassedVehicle.add(vehicleInfo.lineId);
-                                        continue;
-                                    }
-                                    linesWithVehicle.add(vehicleInfo.lineId);
-                                    if (currentBusLineItems != null) {
-                                        for (BusApiClient.StationLineInfo lineInfo : currentBusLineItems) {
-                                            if (lineInfo.up != null && lineInfo.up.lineId.equals(vehicleInfo.lineId)
-                                                    && lineInfo.up.stationId != null && lineInfo.up.stationId.equals(vehicleInfo.stationId)) {
-                                                lineInfo.up.vehicleInfo = vehicleInfo;
-                                                lineInfo.up.isPassed = false;
-                                            }
-                                            if (lineInfo.down != null && lineInfo.down.lineId.equals(vehicleInfo.lineId)
-                                                    && lineInfo.down.stationId != null && lineInfo.down.stationId.equals(vehicleInfo.stationId)) {
-                                                lineInfo.down.vehicleInfo = vehicleInfo;
-                                                lineInfo.down.isPassed = false;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            // 调试：检测 lineId 匹配但 stationId 不匹配的错配数据（服务端可能把反向车辆标成本方向 lineId）
-                            reportMarkerMismatch(marker, response.data);
-                            adapter.setData(currentBusLineItems);
-
-                            List<String> linesWithoutVehicle = new ArrayList<>();
-                            for (String lineId : marker.lineIds) {
-                                if (!linesWithVehicle.contains(lineId) || linesWithPassedVehicle.contains(lineId)) {
-                                    linesWithoutVehicle.add(lineId);
-                                }
-                            }
-
-                            if (!linesWithoutVehicle.isEmpty()) {
-                                fetchPlanTimeForLines(linesWithoutVehicle);
-                            }
-
-                            List<BusApiClient.StationVehicleInfo> validVehicleInfos = new ArrayList<>();
-                            for (BusApiClient.StationVehicleInfo vi : response.data) {
-                                if (vi != null && vi.distance > 0 && vi.isArriveStation == 0) {
-                                    validVehicleInfos.add(vi);
-                                }
-                            }
-                            handleTTSAnnouncementForMarker(validVehicleInfos);
-                        });
-                    }
-
-                    @Override
-                    public void onError(BusApiClient.BusApiException e) {
-                        runOnUiThreadSafe(() -> {
-                            if (!isUiAlive()) return;
-                            Toast.makeText(getContext(), "查询失败：" + e.getMessage(), Toast.LENGTH_SHORT).show();
-                            fetchNextBusTimeForMarker(marker);
-                        });
-                    }
-                });
-    }
-
-    private void fetchPlanTimeForLines(List<String> lineIds) {
-        if (lineIds.isEmpty()) return;
-
-        String lineIdsStr = String.join(",", lineIds);
-        busApiClient.queryBusVehiclePlan(lineIdsStr, new BusApiClient.ApiCallback<>() {
-            @Override
-            public void onSuccess(BusApiClient.BusVehiclePlanResponse response) {
-                runOnUiThreadSafe(() -> {
-                    if (!isUiAlive()) return;
-                    if (response != null && response.data != null) {
-                        for (BusApiClient.BusPlanTime planTime : response.data) {
-                            if (planTime == null) continue;
-                            if (currentBusLineItems != null) {
-                                for (BusApiClient.StationLineInfo lineInfo : currentBusLineItems) {
-                                    if (lineInfo.up != null && lineInfo.up.lineId.equals(planTime.lineId)) {
-                                        lineInfo.up.planTime = planTime.startTime;
-                                    }
-                                    if (lineInfo.down != null && lineInfo.down.lineId.equals(planTime.lineId)) {
-                                        lineInfo.down.planTime = planTime.startTime;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    adapter.setData(currentBusLineItems);
-                });
-            }
-
-            @Override
-            public void onError(BusApiClient.BusApiException e) {
-                runOnUiThreadSafe(() -> {
-                    if (!isUiAlive()) return;
-                    adapter.setData(currentBusLineItems);
-                });
-            }
-        });
-    }
-
-    /**
-     * 调试辅助：在标记模式下检测返回的实时车辆是否存在 lineId 匹配但 stationId 不匹配的错配。
-     * 仅用于排查，不影响显示逻辑。
-     */
-    private void reportMarkerMismatch(DirectionMarker marker, List<BusApiClient.StationVehicleInfo> data) {
-        if (marker == null || data == null) return;
-        StringBuilder mismatchSb = new StringBuilder();
-        for (BusApiClient.StationVehicleInfo vi : data) {
-            if (vi == null) continue;
-            int idx = marker.lineIds.indexOf(vi.lineId);
-            if (idx >= 0 && idx < marker.stationIds.size()) {
-                String expected = marker.stationIds.get(idx);
-                if (!expected.equals(vi.stationId)) {
-                    mismatchSb.append(String.format(
-                            "[lineId=%s 期望station=%s 实际=%s dist=%d arrived=%d] ",
-                            vi.lineId, expected, vi.stationId, vi.distance, vi.isArriveStation));
-                }
-            }
-        }
-        if (mismatchSb.length() > 0) {
-            String msg = "方向标记错配(已忽略): " + mismatchSb.toString();
-            Log.e("-BusInfo-", msg);
-            android.content.Context ctx = getContext();
-            if (ctx != null) {
-                Toast.makeText(ctx, msg, Toast.LENGTH_LONG).show();
-            }
-        }
-    }
-
-    private void fetchNextBusTimeForMarker(DirectionMarker marker) {
-        if (marker.lineIds.isEmpty()) {
-            adapter.setData(currentBusLineItems);
-            return;
-        }
-        fetchPlanTimeForLines(marker.lineIds);
-    }
-
-    private void handleTTSAnnouncementForMarker(List<BusApiClient.StationVehicleInfo> vehicleInfos) {
-        Set<String> currentVehicleKeys = new HashSet<>();
-        boolean isFirstAnnouncement = true;
-        for (BusApiClient.StationVehicleInfo vi : vehicleInfos) {
-            if (vi != null && vi.nextNumber == 0) {
-                String vehicleKey = vi.lineId + "_" + vi.stationId;
-                currentVehicleKeys.add(vehicleKey);
-                if (!announcedVehicles.contains(vehicleKey)) {
-                    for (BusApiClient.StationLineInfo lineInfo : currentBusLineItems) {
-                        if (lineInfo.up != null && lineInfo.up.lineId.equals(vi.lineId)) {
-                            if (isFirstAnnouncement) {
-                                ttsUtils.playArrivalAnnouncement(
-                                        lineInfo.up.lineName,
-                                        lineInfo.up.startStation,
-                                        lineInfo.up.endStation,
-                                        currentStationName
-                                );
-                                isFirstAnnouncement = false;
-                            } else {
-                                ttsUtils.queueArrivalAnnouncement(
-                                        lineInfo.up.lineName,
-                                        lineInfo.up.startStation,
-                                        lineInfo.up.endStation,
-                                        currentStationName
-                                );
-                            }
-                            break;
-                        }
-                        if (lineInfo.down != null && lineInfo.down.lineId.equals(vi.lineId)) {
-                            if (isFirstAnnouncement) {
-                                ttsUtils.playArrivalAnnouncement(
-                                        lineInfo.down.lineName,
-                                        lineInfo.down.startStation,
-                                        lineInfo.down.endStation,
-                                        currentStationName
-                                );
-                                isFirstAnnouncement = false;
-                            } else {
-                                ttsUtils.queueArrivalAnnouncement(
-                                        lineInfo.down.lineName,
-                                        lineInfo.down.startStation,
-                                        lineInfo.down.endStation,
-                                        currentStationName
-                                );
-                            }
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-        announcedVehicles = currentVehicleKeys;
+        // 通过原接口刷新站点双向数据；标方向的取数 / 报站在刷新完成后从双向数据完成
+        loadStationData();
     }
 
     private void initRefreshHandler() {
@@ -611,8 +372,11 @@ public class StationDetailsFragment extends DialogFragment {
         };
     }
 
+    /**
+     * 标记选中时的刷新：同样走原站点接口，避免单独请求导致方向错配。
+     */
     private void refreshWithMarker(DirectionMarker marker) {
-        fetchVehicleDynamicDataForMarker(marker);
+        loadStationData();
     }
 
     /**
@@ -663,6 +427,10 @@ public class StationDetailsFragment extends DialogFragment {
         }
     }
 
+    /**
+     * 加载原站点接口数据（双向：up/down）。这是所有取数的唯一来源。
+     * 若当前已选中自定义标记，会在数据就绪后切到对应方向并触发按距离阈值的报站。
+     */
     public void loadStationData() {
         try {
             busApiClient.queryStationInfo(currentStationName, new BusApiClient.ApiCallback<>() {
@@ -675,10 +443,12 @@ public class StationDetailsFragment extends DialogFragment {
                         }
                         if (!isUiAlive()) return;
                         currentBusLineItems = response.data;
-                        adapter.setData(currentBusLineItems);
 
                         if (currentSelectedMarker != null) {
-                            adapter.switchToMatchingDirection(currentSelectedMarker.lineIds, currentSelectedMarker.stationIds);
+                            // 标记选中：从原接口的双向数据里只取标记方向（单向），不再单独请求后端
+                            buildMarkerFilteredList();
+                        } else {
+                            adapter.setData(currentBusLineItems);
                         }
 
                         StringBuilder lineIdsBuilder = new StringBuilder();
@@ -720,6 +490,10 @@ public class StationDetailsFragment extends DialogFragment {
         stationIds.append(stationId);
     }
 
+    /**
+     * 用站点接口返回的全部 lineId/stationId 拉取车辆动态，并合并进双向数据。
+     * 标记模式下不会单独请求，取数完全来自这里的双向数据。
+     */
     private void fetchVehicleDynamicData(String lineIds, String stationIds, List<BusApiClient.StationLineInfo> busLineItems) {
         try {
             busApiClient.queryStationVehicleDynamic(lineIds, stationIds, new BusApiClient.ApiCallback<>() {
@@ -808,6 +582,9 @@ public class StationDetailsFragment extends DialogFragment {
                                     }
                                 }
                                 adapter.setData(busLineItems);
+                                if (currentSelectedMarker != null) {
+                                    announceForMarker();
+                                }
                             } catch (Exception e) {
                                 Log.e("-BusInfo-", "处理计划发车时间失败", e);
                             }
@@ -823,10 +600,113 @@ public class StationDetailsFragment extends DialogFragment {
                 runOnUiThreadSafe(() -> {
                     if (!isUiAlive()) return;
                     adapter.setData(busLineItems);
+                    if (currentSelectedMarker != null) {
+                        announceForMarker();
+                    }
                 });
             }
         } catch (Exception e) {
             Log.e("-BusInfo-", "查询计划发车时间异常", e);
         }
+    }
+
+    /**
+     * 标记选中时，从原接口返回的双向数据（currentBusLineItems）里按标记方向逐条匹配，
+     * 只保留对应方向，构建“单向”展示列表。数据来自原接口刷新、不再单独请求；
+     * 标记是单向的，因此每个线路卡片只显示匹配到的那一个方向（up/down 只留其一）。
+     */
+    private void buildMarkerFilteredList() {
+        if (currentSelectedMarker == null || currentBusLineItems == null) return;
+        DirectionMarker marker = currentSelectedMarker;
+
+        List<BusApiClient.StationLineInfo> filtered = new ArrayList<>();
+        for (int i = 0; i < marker.lineIds.size() && i < marker.stationIds.size(); i++) {
+            String lineId = marker.lineIds.get(i);
+            String stationId = marker.stationIds.get(i);
+
+            BusApiClient.LineDirection matchedDir = null;
+            BusApiClient.StationLineInfo matchedFull = null;
+            for (BusApiClient.StationLineInfo fullItem : currentBusLineItems) {
+                if (fullItem.up != null && lineId.equals(fullItem.up.lineId)
+                        && stationId.equals(fullItem.up.stationId)) {
+                    matchedDir = fullItem.up;
+                    matchedFull = fullItem;
+                    break;
+                }
+                if (fullItem.down != null && lineId.equals(fullItem.down.lineId)
+                        && stationId.equals(fullItem.down.stationId)) {
+                    matchedDir = fullItem.down;
+                    matchedFull = fullItem;
+                    break;
+                }
+            }
+            if (matchedDir == null) continue;
+
+            // JSON 里 lineName 在 StationLineInfo 父级，up/down 子对象通常为空，需补上，否则卡片显示 null
+            String reliableName = (matchedFull != null && matchedFull.lineName != null)
+                    ? matchedFull.lineName : marker.getLineName(i);
+            matchedDir.lineName = reliableName;
+            if (matchedDir.startStation == null) matchedDir.startStation = marker.getStartStation(i);
+            if (matchedDir.endStation == null) matchedDir.endStation = marker.getEndStation(i);
+
+            BusApiClient.StationLineInfo filteredItem = new BusApiClient.StationLineInfo();
+            filteredItem.lineName = reliableName;
+            filteredItem.up = matchedDir; // 单向展示，down 留空
+            filtered.add(filteredItem);
+        }
+
+        if (filtered.isEmpty()) {
+            // 原接口双向数据里没匹配到该标记方向（多半是标记里存的 id 已失效），退回全量并提示
+            Toast.makeText(requireContext(), "原接口未找到该标记方向，已显示全部方向", Toast.LENGTH_SHORT).show();
+            adapter.setData(currentBusLineItems);
+            return;
+        }
+
+        currentBusLineItems = filtered;
+        adapter.setData(filtered);
+    }
+
+    /**
+     * 标记选中时按过滤后的单向列表报站：车辆距本站 < ANNOUNCE_MAX_DISTANCE(400m) 才播报，
+     * 方向匹配已精确到 (lineId, stationId)，避免同一 lineId 的反向车辆被误当成该方向。
+     */
+    private void announceForMarker() {
+        if (currentSelectedMarker == null || currentBusLineItems == null) return;
+
+        Set<String> currentVehicleKeys = new HashSet<>();
+        boolean isFirstAnnouncement = true;
+
+        for (BusApiClient.StationLineInfo lineInfo : currentBusLineItems) {
+            if (lineInfo.up == null) continue;
+            BusApiClient.LineDirection dir = lineInfo.up;
+            BusApiClient.StationVehicleInfo vi = dir.vehicleInfo;
+            if (vi == null) continue;
+            // 过滤：未过站、为下一班、且距离 < 400m 才报站
+            if (vi.nextNumber != 0) continue;
+            if (vi.distance <= 0 || vi.distance >= ANNOUNCE_MAX_DISTANCE) continue;
+            if (vi.isArriveStation != 0) continue;
+
+            String vehicleKey = dir.lineId + "_" + dir.stationId;
+            currentVehicleKeys.add(vehicleKey);
+            if (!announcedVehicles.contains(vehicleKey)) {
+                if (isFirstAnnouncement) {
+                    ttsUtils.playArrivalAnnouncement(
+                            dir.lineName,
+                            dir.startStation,
+                            dir.endStation,
+                            currentStationName
+                    );
+                    isFirstAnnouncement = false;
+                } else {
+                    ttsUtils.queueArrivalAnnouncement(
+                            dir.lineName,
+                            dir.startStation,
+                            dir.endStation,
+                            currentStationName
+                    );
+                }
+            }
+        }
+        announcedVehicles = currentVehicleKeys;
     }
 }
