@@ -10701,23 +10701,23 @@
   },
   {
     "stationName": "客运中心",
-    "en": "Bus Terminal",
-    "voice": "Bus Terminal",
+    "en": "Passenger Transport Center",
+    "voice": "Passenger Transport Center",
     "cnVoice": "客运中心",
     "cnFile": "cn_stations_dbd2180922daa035289b8b29d1049271.wav",
     "enFile": "en_stations_dbd2180922daa035289b8b29d1049271.wav",
     "cnMd5": "2fe703bc91df8c4e251738ca145ef0cd",
-    "enMd5": "968815c70dfd219051c8194282580c12"
+    "enMd5": "43ad25e191538bc2073d2e170741b456"
   },
   {
     "stationName": "客运中心（通勤班车）",
-    "en": "Bus Terminal（Commuter Bus）",
-    "voice": "Bus Terminal（Commuter Bus）",
+    "en": "Passenger Transport Center（Commuter Bus）",
+    "voice": "Passenger Transport Center（Commuter Bus）",
     "cnVoice": "客运中心（通勤班车）",
     "cnFile": "cn_stations_887964e7ed8ce9be4eb8e8a84e1d1036.wav",
     "enFile": "en_stations_887964e7ed8ce9be4eb8e8a84e1d1036.wav",
     "cnMd5": "1751b33c91a5a53c5f12f0a0d05a6a60",
-    "enMd5": "0dbcca7a0b534f50d2903b9db5cdbb0e"
+    "enMd5": "6549a875373deebecd5fd9dbb43aa38f"
   },
   {
     "stationName": "客运西站",
@@ -23931,13 +23931,13 @@
   },
   {
     "stationName": "耀江大酒店（客运中心）",
-    "en": "Yaojiang Hotel (Bus Center)",
-    "voice": "耀江 Hotel (Bus Center)",
+    "en": "Yaojiang Hotel (Passenger Transport Center)",
+    "voice": "耀江 Hotel (Passenger Transport Center)",
     "cnVoice": "耀江大酒店（客运中心）",
     "cnFile": "cn_stations_9a763e1aa1eef751e1495312894d08f7.wav",
     "enFile": "en_stations_9a763e1aa1eef751e1495312894d08f7.wav",
     "cnMd5": "dc605b837a854c2cae6eff442087c556",
-    "enMd5": "f1dfcdb1d1626a926b3714a47a1a5233"
+    "enMd5": "d2d8eb5276880ff5b594e6da55502eac"
   },
   {
     "stationName": "耀江时代广场",
