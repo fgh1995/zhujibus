@@ -26300,6 +26300,16 @@
     "enMd5": "af80a71a4e6238fb7261511adf173e9b"
   },
   {
+    "stationName": "财政大楼",
+    "en": "Financial Building",
+    "voice": "Financial Building",
+    "cnVoice": "财政大楼",
+    "cnFile": "cn_stations_572021c98611e3085b2e75a73504e679.wav",
+    "enFile": "en_stations_572021c98611e3085b2e75a73504e679.wav",
+    "cnMd5": "bc0d0d46e01b5fa342eebbd4f49947f2",
+    "enMd5": "04e73baf1be45f60f86bd0f7a4c32b3f"
+  },
+  {
     "stationName": "财税大楼",
     "en": "Finance and Tax Building",
     "voice": "Finance and Tax Building",

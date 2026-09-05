@@ -56,6 +56,8 @@ public class NavigationMainFragment extends Fragment {
 
     // ---- 地图导航管理 ----
     private AmapNavigationView navigation;
+    /** 延迟到布局完成后再初始化地图的监听器（onDestroyView 时需移除，防止残留回调） */
+    private ViewTreeObserver.OnGlobalLayoutListener mapInitLayoutListener;
 
     // ---- 时间更新 ----
     private Handler navigationTimeHandler;
@@ -226,33 +228,36 @@ public class NavigationMainFragment extends Fragment {
             return;
         }
         final Bundle finalSavedState = savedInstanceState;
-        naviMapView.getViewTreeObserver().addOnGlobalLayoutListener(
-                new ViewTreeObserver.OnGlobalLayoutListener() {
-                    @Override
-                    public void onGlobalLayout() {
-                        if (naviMapView.getWidth() <= 0 || naviMapView.getHeight() <= 0) {
-                            return;
+        mapInitLayoutListener = new ViewTreeObserver.OnGlobalLayoutListener() {
+            @Override
+            public void onGlobalLayout() {
+                if (naviMapView.getWidth() <= 0 || naviMapView.getHeight() <= 0) {
+                    return;
+                }
+                naviMapView.getViewTreeObserver().removeOnGlobalLayoutListener(this);
+                if (mapInitLayoutListener == this) {
+                    mapInitLayoutListener = null;
+                }
+                try {
+                    navigation = new AmapNavigationView(requireContext(), naviMapView);
+                    // 设置速度回调，网络模式下显示车辆移动速度
+                    navigation.setSpeedChangeListener(speedKmh -> {
+                        if (!isGpsMode) {
+                            updateSpeed(speedKmh);
                         }
-                        naviMapView.getViewTreeObserver().removeOnGlobalLayoutListener(this);
-                        try {
-                            navigation = new AmapNavigationView(requireContext(), naviMapView);
-                            // 设置速度回调，网络模式下显示车辆移动速度
-                            navigation.setSpeedChangeListener(speedKmh -> {
-                                if (!isGpsMode) {
-                                    updateSpeed(speedKmh);
-                                }
-                            });
-                            Log.d(TAG, "onGlobalLayout -> start onCreate (w=" +
-                                    naviMapView.getWidth() + ", h=" + naviMapView.getHeight() + ")");
-                            navigation.onCreate(finalSavedState);
-                            if (isHostResumed && navigation != null) {
-                                navigation.onResume();
-                            }
-                        } catch (Throwable t) {
-                            Log.e(TAG, "delayed onCreate failed: " + t.getMessage(), t);
-                        }
+                    });
+                    Log.d(TAG, "onGlobalLayout -> start onCreate (w=" +
+                            naviMapView.getWidth() + ", h=" + naviMapView.getHeight() + ")");
+                    navigation.onCreate(finalSavedState);
+                    if (isHostResumed && navigation != null) {
+                        navigation.onResume();
                     }
-                });
+                } catch (Throwable t) {
+                    Log.e(TAG, "delayed onCreate failed: " + t.getMessage(), t);
+                }
+            }
+        };
+        naviMapView.getViewTreeObserver().addOnGlobalLayoutListener(mapInitLayoutListener);
     }
 
     // ============================================================
@@ -730,7 +735,16 @@ public class NavigationMainFragment extends Fragment {
         if (navigation != null) {
             navigation.onDestroy();
             navigation = null;
+        } else if (naviMapView != null && mapInitLayoutListener != null) {
+            // 地图尚未初始化就被销毁（例如页面尺寸始终为 0）：移除残留监听，
+            // 避免视图销毁后回调再次触发、在失效的 mapView 上创建地图
+            try {
+                naviMapView.getViewTreeObserver().removeOnGlobalLayoutListener(mapInitLayoutListener);
+            } catch (Throwable t) {
+                Log.w(TAG, "removeOnGlobalLayoutListener failed: " + t.getMessage());
+            }
         }
+        mapInitLayoutListener = null;
 
         naviMapView = null;
         navTimeHM = null;

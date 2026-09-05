@@ -1965,6 +1965,20 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
             }
         }
 
+        // ⭐ 销毁地图引擎（TextureMapView.onDestroy() 是 SDK 生命周期必需调用）
+        //   此前这里只销毁了 AMapNavi/定位客户端，从未销毁 mapView，
+        //   反复进出“车机面板/地图”页面会不断泄漏 native 地图实例与 GL 渲染上下文；
+        //   泄漏到一定程度后，新进入页面的地图引擎无法正常渲染，
+        //   表现即：瓦片区域全黑，只剩 SDK 自绘在地图之上的 logo 与指南针。
+        if (mapView != null) {
+            try {
+                mapView.onDestroy();
+                Log.d(TAG, "[DESTROY] mapView.onDestroy() ok");
+            } catch (Throwable t) {
+                Log.e(TAG, "mapView.onDestroy failed: " + t.getMessage());
+            }
+        }
+
         aMap = null;
         uiSettings = null;
         locationListener = null;

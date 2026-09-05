@@ -1672,10 +1672,18 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
      */
     private void setupNavigationContent() {
         // 1. 一次性添加主页 fragment（用 add，常驻不销毁）
-        navigationMainFragment = NavigationMainFragment.newInstance(lineName, endStation);
-        getSupportFragmentManager().beginTransaction()
-                .add(R.id.nav_content_container, navigationMainFragment, "NAV_MAIN")
-                .commit();
+        //    ⚠️ 若 Activity 因旋转/系统重建已恢复了 FragmentManager，"NAV_MAIN" 会被自动还原，
+        //    这里不能再 add 一份，否则同一容器里会出现两个 NavigationMainFragment、
+        //    两个高德 TextureMapView —— 高德 SDK 同进程内不支持两个 MapView 同时存活，
+        //    新地图会渲染成黑屏（只显示 logo/指南针）。
+        navigationMainFragment = (NavigationMainFragment) getSupportFragmentManager()
+                .findFragmentByTag("NAV_MAIN");
+        if (navigationMainFragment == null) {
+            navigationMainFragment = NavigationMainFragment.newInstance(lineName, endStation);
+            getSupportFragmentManager().beginTransaction()
+                    .add(R.id.nav_content_container, navigationMainFragment, "NAV_MAIN")
+                    .commit();
+        }
 
         // 2. 绑定左侧"地图"图标点击
         View navIconMap = findViewById(R.id.nav_icon_map);
@@ -2210,7 +2218,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         updateStartEndStations();
         showDirection();
 
-        nextStationInfo.setText("欢迎乘坐 " + lineName + " 公交车" + "    " + "Welcome aboard the No." + formatLineNameForEnglish(lineName) +  " bus.");
+        nextStationInfo.setText("欢迎乘坐 " + lineName + " 公交车" + "    " + "Welcome aboard the " + TTSUtils.getEnLineName(lineName));
 
         if (currentAnnounceMode == AnnounceMode.GPS) {
             GpsWarmingUp.removeListener(gpsActivityListener);
