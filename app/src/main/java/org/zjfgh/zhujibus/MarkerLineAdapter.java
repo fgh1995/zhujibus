@@ -3,6 +3,7 @@ package org.zjfgh.zhujibus;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.ImageButton;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
@@ -50,29 +51,46 @@ public class MarkerLineAdapter extends RecyclerView.Adapter<MarkerLineAdapter.Li
         private TextView lineName;
         private TextView lineInfo;
         private TextView lineTime;
+        private TextView lineTypeBadge;
+        private ImageButton lineDelete;
 
         public LineViewHolder(@NonNull View itemView) {
             super(itemView);
             lineName = itemView.findViewById(R.id.line_name);
             lineInfo = itemView.findViewById(R.id.line_info);
             lineTime = itemView.findViewById(R.id.line_time);
+            lineTypeBadge = itemView.findViewById(R.id.line_type_badge);
+            lineDelete = itemView.findViewById(R.id.line_delete);
         }
 
         public void bind(DirectionMarker.LineInfo line, int position) {
             lineName.setText(line.lineName);
-            lineInfo.setText(String.format("%s | 起点：%s → 终点：%s",
-                    line.lineType, line.startStation, line.endStation));
+
+            if (line.lineType != null && !line.lineType.isEmpty()) {
+                lineTypeBadge.setText(line.lineType);
+                lineTypeBadge.setVisibility(View.VISIBLE);
+            } else {
+                lineTypeBadge.setVisibility(View.GONE);
+            }
+
+            lineInfo.setText(String.format("%s → %s", line.startStation, line.endStation));
 
             String timeInfo = "";
             if (line.departureTime != null && !line.departureTime.isEmpty() &&
                 line.collectTime != null && !line.collectTime.isEmpty()) {
-                timeInfo = String.format("首班：%s | 末班：%s", line.departureTime, line.collectTime);
+                timeInfo = String.format("首班 %s · 末班 %s", line.departureTime, line.collectTime);
             } else if (line.departureTime != null && !line.departureTime.isEmpty()) {
-                timeInfo = String.format("首班：%s", line.departureTime);
+                timeInfo = String.format("首班 %s", line.departureTime);
             } else if (line.collectTime != null && !line.collectTime.isEmpty()) {
-                timeInfo = String.format("末班：%s", line.collectTime);
+                timeInfo = String.format("末班 %s", line.collectTime);
             }
             lineTime.setText(timeInfo);
+
+            lineDelete.setOnClickListener(v -> {
+                if (deleteListener != null) {
+                    deleteListener.onLineDelete(position, line);
+                }
+            });
 
             itemView.setOnLongClickListener(v -> {
                 if (deleteListener != null) {

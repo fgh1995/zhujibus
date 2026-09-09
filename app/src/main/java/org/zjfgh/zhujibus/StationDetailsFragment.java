@@ -1,7 +1,9 @@
 package org.zjfgh.zhujibus;
 
-import android.app.AlertDialog;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import android.app.Dialog;
+import android.view.ViewGroup;
+import android.view.Window;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
@@ -155,7 +157,7 @@ public class StationDetailsFragment extends DialogFragment {
             loadDirectionMarkers();
         });
 
-        AlertDialog.Builder builder = new AlertDialog.Builder(requireContext())
+        MaterialAlertDialogBuilder builder = new MaterialAlertDialogBuilder(requireContext())
                 .setView(dialogView)
                 .setPositiveButton("创建新标记", (dialog, which) -> {
                     String markerName = markerNameInput.getText().toString().trim();
@@ -167,7 +169,17 @@ public class StationDetailsFragment extends DialogFragment {
                 })
                 .setNegativeButton("取消", null);
 
-        builder.create().show();
+        Dialog dialog = builder.create();
+        dialog.show();
+        setDialogFullWidth(dialog);
+    }
+
+    private void setDialogFullWidth(Dialog dialog) {
+        Window window = dialog.getWindow();
+        if (window != null) {
+            int width = (int) (getResources().getDisplayMetrics().widthPixels * 0.92);
+            window.setLayout(width, ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
     }
 
     private void saveDirectionMarker(String markerName, BusApiClient.LineDirection direction) {
@@ -252,7 +264,7 @@ public class StationDetailsFragment extends DialogFragment {
 
     private void showDeleteMarkerDialog(DirectionMarker marker) {
         String displayName = getSimplifiedMarkerName(marker);
-        new AlertDialog.Builder(requireContext())
+        new MaterialAlertDialogBuilder(requireContext())
                 .setTitle("删除标记")
                 .setMessage("确定删除方向标记 \"" + displayName + "\" 吗？")
                 .setPositiveButton("删除", (dialog, which) -> {
@@ -291,7 +303,7 @@ public class StationDetailsFragment extends DialogFragment {
             lineAdapter.setData(lines);
 
             lineAdapter.setOnLineDeleteListener((position, line) -> {
-                new AlertDialog.Builder(requireContext())
+                new MaterialAlertDialogBuilder(requireContext())
                         .setTitle("删除线路")
                         .setMessage("确定从标记中删除线路 \"" + line.lineName + "\" 吗？")
                         .setPositiveButton("删除", (dialog, which) -> {
@@ -314,10 +326,12 @@ public class StationDetailsFragment extends DialogFragment {
             });
         }
 
-        new AlertDialog.Builder(requireContext())
+        Dialog dialog = new MaterialAlertDialogBuilder(requireContext())
                 .setView(dialogView)
                 .setPositiveButton("关闭", null)
-                .show();
+                .create();
+        dialog.show();
+        setDialogFullWidth(dialog);
     }
 
     private void loadMarkerLinesDialog(DirectionMarker marker, RecyclerView linesRecyclerView, TextView emptyText) {
@@ -640,7 +654,28 @@ public class StationDetailsFragment extends DialogFragment {
                     break;
                 }
             }
-            if (matchedDir == null) continue;
+            if (matchedDir == null) {
+                // 跨站台线路：当前站接口数据里没有该方向（它属于标记里的其它站台），
+                // 用标记保存的字段构造展示项并加入列表。之后 loadStationData 中统一的车辆动态请求
+                // 会按 (lineId, stationId) 单独拉取它的实时车辆，并自动合并到这个对象上。
+                BusApiClient.LineDirection crossDir = new BusApiClient.LineDirection();
+                crossDir.lineId = lineId;
+                crossDir.stationId = stationId;
+                String crossName = marker.getLineName(i);
+                crossDir.lineName = crossName;
+                crossDir.startStation = marker.getStartStation(i);
+                crossDir.endStation = marker.getEndStation(i);
+                crossDir.departureTime = marker.getDepartureTime(i);
+                crossDir.collectTime = marker.getCollectTime(i);
+                if (i < marker.lineTypes.size()) {
+                    crossDir.lineTypeName = marker.lineTypes.get(i);
+                }
+                BusApiClient.StationLineInfo crossItem = new BusApiClient.StationLineInfo();
+                crossItem.lineName = crossName;
+                crossItem.up = crossDir; // 单向展示，down 留空
+                filtered.add(crossItem);
+                continue;
+            }
 
             // JSON 里 lineName 在 StationLineInfo 父级，up/down 子对象通常为空，需补上，否则卡片显示 null
             String reliableName = (matchedFull != null && matchedFull.lineName != null)

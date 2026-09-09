@@ -1,31 +1,66 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
-    android:padding="16dp">
+    android:paddingTop="20dp"
+    android:paddingBottom="8dp">
 
-    <TextView
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="标记内的线路"
-        android:textSize="16sp"
-        android:textStyle="bold"
-        android:textColor="@color/black"
-        android:layout_marginBottom="8dp"/>
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="20dp"
+        android:paddingEnd="20dp"
+        android:paddingBottom="12dp">
 
-    <TextView
-        android:id="@+id/marker_name_text"
+        <ImageView
+            android:layout_width="22dp"
+            android:layout_height="22dp"
+            android:layout_marginEnd="10dp"
+            android:src="@drawable/ic_directions"
+            app:tint="@color/marker_primary"/>
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="标记线路"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:textColor="@color/text_primary"/>
+
+            <TextView
+                android:id="@+id/marker_name_text"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="13sp"
+                android:textColor="@color/text_secondary"
+                android:layout_marginTop="2dp"/>
+        </LinearLayout>
+    </LinearLayout>
+
+    <View
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:textSize="14sp"
-        android:textColor="#666666"
-        android:layout_marginBottom="16dp"/>
+        android:layout_height="1dp"
+        android:background="#EEF1F6"/>
 
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/lines_recycler_view"
         android:layout_width="match_parent"
-        android:layout_height="200dp"/>
+        android:layout_height="300dp"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="8dp"
+        android:scrollbars="vertical"/>
 
     <TextView
         android:id="@+id/empty_text"
@@ -33,9 +68,8 @@
         android:layout_height="wrap_content"
         android:text="暂无线路"
         android:textSize="14sp"
-        android:textColor="#999999"
+        android:textColor="@color/text_secondary"
         android:gravity="center"
-        android:padding="20dp"
+        android:padding="32dp"
         android:visibility="gone"/>
-
 </LinearLayout>

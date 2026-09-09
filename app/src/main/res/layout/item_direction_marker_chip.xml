@@ -5,7 +5,7 @@
     android:layout_marginEnd="8dp"
     android:clickable="true"
     android:focusable="true"
-    android:foreground="?android:attr/selectableItemBackground"
+    android:foreground="?attr/selectableItemBackgroundBorderless"
     android:background="@drawable/marker_chip_background">
 
     <TextView
@@ -16,6 +16,6 @@
         android:paddingEnd="12dp"
         android:paddingTop="6dp"
         android:paddingBottom="6dp"
-        android:textSize="12sp"
-        android:textColor="#0070FD"/>
+        android:textSize="14sp"
+        android:textColor="@color/text_primary"/>
 </FrameLayout>
