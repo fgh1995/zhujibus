@@ -1464,6 +1464,8 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         // ⭐ 保存当前实例的静态引用（用于POV模式）
         currentInstance = this;
         setContentView(R.layout.activity_bus_line_details);
+        // Android 15+ 强制 Edge-to-Edge，动态避让状态栏，防止顶部 UI 重叠
+        SystemBarUtils.fitSystemBars(this);
         applySquareNavigationLayout(0.8f);
         Intent intent = getIntent();
         if (intent != null) {

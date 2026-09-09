@@ -110,6 +110,8 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         try {
             setContentView(R.layout.activity_main);
+            // Android 15+ 强制 Edge-to-Edge，动态避让状态栏，防止顶部 UI 重叠
+            SystemBarUtils.fitSystemBars(this);
             recyclerView = findViewById(R.id.recyclerView);
             tv_search_line = findViewById(R.id.tv_search_line);
             autoScrollTextView = findViewById(R.id.auto_scroll_text);

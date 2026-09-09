@@ -16,6 +16,8 @@ public class NoticeDetailActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_notice_detail);
+        // Android 15+ 强制 Edge-to-Edge，动态避让状态栏，防止顶部 UI 重叠
+        SystemBarUtils.fitSystemBars(this);
 
         String title = getIntent().getStringExtra(EXTRA_TITLE);
         String content = getIntent().getStringExtra(EXTRA_CONTENT);

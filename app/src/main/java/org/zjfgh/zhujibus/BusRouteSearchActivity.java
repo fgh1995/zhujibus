@@ -33,6 +33,8 @@ public class BusRouteSearchActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         try {
             setContentView(R.layout.activity_bus_route_search);
+            // Android 15+ 强制 Edge-to-Edge，动态避让状态栏，防止顶部 UI 重叠
+            SystemBarUtils.fitSystemBars(this);
 
             edSearchBusLine = findViewById(R.id.ed_search_bus);
             viewPager = findViewById(R.id.viewPager);

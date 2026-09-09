@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        Android 15（API 35）起会对 targetSdk >= 35 的应用强制 Edge-to-Edge，
+        内容默认延伸到状态栏/导航栏后面，导致顶部 UI 与状态栏重叠。
+        当前应用未做沉浸式适配，这里沿用旧版系统的排版（内容位于状态栏下方），
+        声明退出强制 Edge-to-Edge。后续若正式迁移到 Edge-to-Edge，请移除该项。
+    -->
+    <style name="Theme.诸暨公交" parent="@style/Base.Theme.诸暨公交">
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">?attr/isLightTheme</item>
+        <item name="android:windowOptOutEdgeToEdgeEnforcement">true</item>
+    </style>
+</resources>

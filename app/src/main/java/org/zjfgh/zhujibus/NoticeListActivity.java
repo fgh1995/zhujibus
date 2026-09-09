@@ -25,6 +25,8 @@ public class NoticeListActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_notice_list);
+        // Android 15+ 强制 Edge-to-Edge，动态避让状态栏，防止顶部 UI 重叠
+        SystemBarUtils.fitSystemBars(this);
 
         findViewById(R.id.tv_back).setOnClickListener(v -> finish());
         recyclerView = findViewById(R.id.rv_notice);
