@@ -428,6 +428,9 @@ public class ScheduleFragment extends Fragment {
      */
     private String computeInboundArrivalTime(String departureTime) {
         try {
+            // 末班车到达时间未知（如接口未返回线路距离）：进场到达同样无法推算，直接透传占位符，
+            // 避免走异常分支打出一堆"计算进场到达时间失败"的错误日志
+            if (UNKNOWN_TIME.equals(departureTime)) return UNKNOWN_TIME;
             String[] parts = departureTime.split(":");
             if (parts.length != 2) {
                 return departureTime;
