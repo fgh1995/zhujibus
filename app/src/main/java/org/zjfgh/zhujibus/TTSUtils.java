@@ -48,6 +48,8 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
     private boolean isPlaying = false;
     private String currentUtteranceId;
     private List<QueuedAnnouncement> pendingAnnouncements = new ArrayList<>();
+    // 计划发车提醒队列：多条线路同一分钟发车时依次播报
+    private final List<DepartureAnnouncement> pendingDepartures = new ArrayList<>();
 
     // 合成完成闩：utteranceId -> 闩，用于 synthesizeToFile 后精确等待落盘，
     // 避免固定 500ms 盲等读到"半截文件"（WAV 头/数据不完整 → 解析出错误采样率 → 重采样后变快/变调）。
@@ -101,6 +103,21 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
             this.lineName = lineName;
             this.endStation = endStation;
             this.nextStationName = nextStationName;
+        }
+    }
+
+    /** 计划发车提醒的播报参数（planTime 统一为 HH:mm） */
+    private static class DepartureAnnouncement {
+        String lineName;
+        String startStation;
+        String endStation;
+        String planTime;
+
+        DepartureAnnouncement(String lineName, String startStation, String endStation, String planTime) {
+            this.lineName = lineName;
+            this.startStation = startStation;
+            this.endStation = endStation;
+            this.planTime = planTime;
         }
     }
 
@@ -364,6 +381,218 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
 
     public void queueArrivalAnnouncement(String lineName, String startStation, String endStation, String nextStationName) {
         pendingAnnouncements.add(new QueuedAnnouncement(lineName, endStation, nextStationName));
+    }
+
+    /**
+     * 计划发车提醒（立即播报）。当前播放器忙（正在播进站提醒或其它发车提醒）时自动改为排队。
+     *
+     * @param lineName     线路名，如 "9路A"
+     * @param startStation 起点站
+     * @param endStation   终点站
+     * @param planTime     计划发车时间，形如 "HH:mm"（也兼容 "HH:mm:ss"、"yyyy-MM-dd HH:mm:ss"）
+     */
+    public void playDepartureAnnouncement(String lineName, String startStation, String endStation, String planTime) {
+        DepartureAnnouncement da = new DepartureAnnouncement(lineName, startStation, endStation, planTime);
+        if (isPlaying || !pendingAnnouncements.isEmpty() || !pendingDepartures.isEmpty()) {
+            pendingDepartures.add(da); // 有正在播放的内容，排队等待播完后依次播放
+            return;
+        }
+        pendingDepartures.add(da);
+        playNextDepartureAnnouncement();
+    }
+
+    /**
+     * 计划发车提醒（排队播报）。用于"同一时刻多条线路发车"时把后续线路接在后面播。
+     */
+    public void queueDepartureAnnouncement(String lineName, String startStation, String endStation, String planTime) {
+        pendingDepartures.add(new DepartureAnnouncement(lineName, startStation, endStation, planTime));
+    }
+
+    /** 取队首的发车提醒并播放；播放结束由 MediaPlayer 回调再次调用本方法完成续播 */
+    private void playNextDepartureAnnouncement() {
+        if (pendingDepartures.isEmpty()) {
+            return;
+        }
+        final DepartureAnnouncement da = pendingDepartures.remove(0);
+        backgroundHandler.post(() -> {
+            List<PlaybackItem> items = new ArrayList<>();
+            buildDepartureAnnouncement(items, da.lineName, da.startStation, da.endStation, da.planTime);
+            buildAndPlayMergedAudio(items);
+        });
+    }
+
+    // 公交车：复用既有 cn_00_bus（语义等同 cn_bus_vehicle）
+    private static final int RES_BUS_VEHICLE = R.raw.cn_00_bus;
+    // 「零」：复用既有 cn_num_0（语义等同 cn_minute_ling），用于 0X 分的口播
+    private static final int RES_ZERO = R.raw.cn_num_0;
+
+    /**
+     * 拼接"计划发车提醒"语音（预制音频 + 站名语音包，缺失片段由 TTS 兜底）。
+     * <p>
+     * 片段顺序：叮咚 → 诸暨公交提醒您 → 线路号 → 公交车 → 计划 → 时间口播 → 由 → 起点站 → 开往 → 终点站 → 发车时间仅供参考…
+     * <p>
+     * 计划发车时间无法解析（异常返回值）时，整句退化为
+     * {@link #buildDepartureAnnouncementText} 交由 TTS 合成，避免漏播。
+     */
+    private void buildDepartureAnnouncement(List<PlaybackItem> items, String lineName,
+                                            String startStation, String endStation, String planTime) {
+        int[] hourMinute = parseHourMinute(planTime);
+        if (hourMinute == null) {
+            items.add(new PlaybackItem(R.raw.network_stop_chime));
+            items.add(new PlaybackItem(
+                    buildDepartureAnnouncementText(lineName, startStation, endStation, planTime),
+                    PlaybackItem.Type.TTS_CN));
+            items.add(new PlaybackItem(
+                    buildDepartureAnnouncementTextEn(lineName, startStation, endStation, planTime),
+                    PlaybackItem.Type.TTS_EN));
+            return;
+        }
+
+        items.add(new PlaybackItem(R.raw.network_stop_chime));             // 叮咚提示音
+        items.add(new PlaybackItem(R.raw.cn_01_zhuji_bus_reminder));       // 诸暨公交提醒您
+        addCnLineNumber(items, lineName);                                  // 线路号，如「九 路 A」
+        items.add(new PlaybackItem(RES_BUS_VEHICLE));                      // 公交车
+        items.add(new PlaybackItem(R.raw.cn_plan));                        // 计划
+        addDepartureTime(items, hourMinute[0], hourMinute[1]);             // 六点整 / 六点零五分 / 六点三十分
+        items.add(new PlaybackItem(R.raw.cn_from));                        // 由
+        addCnStationName(items, startStation);                             // 起点站（语音包优先）
+        items.add(new PlaybackItem(R.raw.cn_02_heading_to));               // 开往
+        addCnStationName(items, endStation);                               // 终点站（语音包优先）
+        items.add(new PlaybackItem(R.raw.cn_plan_reference_only));         // 发车时间仅供参考，请注意实际发车车辆信息
+
+        // 英文：与既有报站一致，中英连续播报且叮咚只响一次
+        items.add(new PlaybackItem(R.raw.en_01_zhuji_bus_reminder));       // Zhuji Bus reminds you
+        addEnLineNumber(items, lineName);                                  // 线路号，如 route + nine + A
+        items.add(new PlaybackItem(R.raw.en_plan));                        // scheduled departure at
+        addDepartureTimeEn(items, hourMinute[0], hourMinute[1]);           // six o'clock / six oh five / six thirty
+        items.add(new PlaybackItem(R.raw.en_from));                        // from
+        addEnStationName(items, startStation);                             // 起点站（英文语音包优先）
+        items.add(new PlaybackItem(R.raw.en_02_to));                       // to
+        addEnStationName(items, endStation);                               // 终点站（英文语音包优先）
+        items.add(new PlaybackItem(R.raw.en_plan_reference_only));         // departure time is for reference only…
+    }
+
+    /**
+     * 计划发车时间的口播片段（优化读法）：
+     * <ul>
+     *   <li>06:00 → 六 + 点 + 整；</li>
+     *   <li>06:05 → 六 + 点 + 零 + 五 + 分；</li>
+     *   <li>06:30 → 六 + 点 + 三十 + 分。</li>
+     * </ul>
+     * 全部片段均为预制音频（含「整」= cn_sharp）。
+     */
+    private void addDepartureTime(List<PlaybackItem> items, int hour, int minute) {
+        addCnNumber(items, hour);
+        items.add(new PlaybackItem(R.raw.cn_hour));                        // 点
+        if (minute == 0) {
+            items.add(new PlaybackItem(R.raw.cn_sharp));                   // 整点：X点整
+            return;
+        }
+        if (minute < 10) {
+            items.add(new PlaybackItem(RES_ZERO));                         // 零X分
+        }
+        addCnNumber(items, minute);
+        items.add(new PlaybackItem(R.raw.cn_minute));                      // 分
+    }
+
+    /**
+     * 计划发车时间的英文口播片段，与 {@link #formatPlanTimeToSpeechEn} 文本保持同读法：
+     * <ul>
+     *   <li>06:00 → six + o'clock；</li>
+     *   <li>06:05 → six + oh + five；</li>
+     *   <li>06:30 → six + thirty。</li>
+     * </ul>
+     */
+    private void addDepartureTimeEn(List<PlaybackItem> items, int hour, int minute) {
+        addEnNumber(items, hour);
+        if (minute == 0) {
+            items.add(new PlaybackItem(R.raw.en_oclock));                  // 整点：X o'clock
+            return;
+        }
+        if (minute < 10) {
+            items.add(new PlaybackItem(R.raw.en_oh));                      // oh，如 six oh five
+        }
+        addEnNumber(items, minute);
+    }
+
+    /**
+     * 计划发车提醒的完整文本。抽出为独立方法，便于：
+     * <ul>
+     *   <li>语音包生成脚本（AI 语音生成）直接复用，按片段录制同名预制音频；</li>
+     *   <li>调试/日志确认实际播报内容。</li>
+     * </ul>
+     * 播报内容："诸暨公交提醒您，XX路公交车，计划 xx 点 xx 分，由 起点站 开往 终点站，发车时间仅供参考，请注意实际发车车辆信息。"
+     */
+    public static String buildDepartureAnnouncementText(String lineName, String startStation,
+                                                        String endStation, String planTime) {
+        return "诸暨公交提醒您，" + nullToEmpty(lineName) + "公交车，计划"
+                + formatPlanTimeToSpeech(planTime) + "，由"
+                + nullToEmpty(startStation) + "开往" + nullToEmpty(endStation)
+                + "，发车时间仅供参考，请注意实际发车车辆信息。";
+    }
+
+    /**
+     * 计划发车提醒的完整文本（英文版），仅供无法解析时间的 TTS 兜底、日志核对与语音包生成脚本对齐。
+     */
+    public String buildDepartureAnnouncementTextEn(String lineName, String startStation,
+                                                   String endStation, String planTime) {
+        String enLine = getEnLineName(lineName);
+        String enStart = VoicePackManager.getInstance(context).getStationEnglish(startStation);
+        String enEnd = VoicePackManager.getInstance(context).getStationEnglish(endStation);
+        return "Zhuji Bus reminds you, " + nullToEmpty(enLine) + " bus, scheduled departure at "
+                + formatPlanTimeToSpeechEn(planTime) + ", from "
+                + nullToEmpty(enStart) + " to " + nullToEmpty(enEnd)
+                + ", departure time is for reference only, "
+                + "please pay attention to the actual bus departure information.";
+    }
+
+    /**
+     * 把计划发车时间转成英文口语文本，读法与 {@link #addDepartureTimeEn} 保持一致：
+     * "06:30" → "6 30"；"06:05" → "6 oh 5"；整点 "06:00" → "6 o'clock"。
+     * 无法解析时返回空串。
+     */
+    public static String formatPlanTimeToSpeechEn(String planTime) {
+        int[] hourMinute = parseHourMinute(planTime);
+        if (hourMinute == null) return "";
+        int hour = hourMinute[0];
+        int minute = hourMinute[1];
+        if (minute == 0) return hour + " o'clock";
+        if (minute < 10) return hour + " oh " + minute;
+        return hour + " " + minute;
+    }
+
+    /**
+     * "06:30" → "6点30分"；"06:05" → "6点零5分"；整点 "06:00" → "6点整"。
+     * 无法解析时返回空串。
+     */
+    public static String formatPlanTimeToSpeech(String planTime) {
+        int[] hourMinute = parseHourMinute(planTime);
+        if (hourMinute == null) return "";
+        int hour = hourMinute[0];
+        int minute = hourMinute[1];
+        if (minute == 0) return hour + "点整";
+        if (minute < 10) return hour + "点零" + minute + "分";
+        return hour + "点" + minute + "分";
+    }
+
+    /** 从 "HH:mm" / "HH:mm:ss" / "yyyy-MM-dd HH:mm:ss" 中解析出 {时, 分}；失败返回 null */
+    public static int[] parseHourMinute(String planTime) {
+        if (planTime == null || planTime.isEmpty()) return null;
+        java.util.regex.Matcher matcher =
+                java.util.regex.Pattern.compile("(\\d{1,2}):(\\d{2})").matcher(planTime);
+        if (!matcher.find()) return null;
+        try {
+            int hour = Integer.parseInt(matcher.group(1));
+            int minute = Integer.parseInt(matcher.group(2));
+            if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+            return new int[]{hour, minute};
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private static String nullToEmpty(String s) {
+        return s == null ? "" : s;
     }
 
     private void buildArrivalAnnouncementWithDirection(List<PlaybackItem> items, String lineName, String endStation, String nextStationName) {
@@ -663,6 +892,9 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
                 abandonAudioFocus();
                 if (!pendingAnnouncements.isEmpty()) {
                     mergeAndPlayQueuedAnnouncements();
+                } else if (!pendingDepartures.isEmpty()) {
+                    // 上一段播完，接着播排队的「计划发车提醒」
+                    playNextDepartureAnnouncement();
                 }
             });
             mediaPlayer.setOnErrorListener((mp, what, extra) -> {
@@ -1287,12 +1519,19 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
         if (file != null) {
             items.add(new PlaybackItem(file.getAbsolutePath(), true));
         } else {
-            items.add(new PlaybackItem(stationName, PlaybackItem.Type.TTS_CN));
+            // 英文语音包缺失/下载中：改用站名英文（缺省取拼音）由英文 TTS 合成
+            String enName = VoicePackManager.getInstance(context).getStationEnglish(stationName);
+            if (enName == null || enName.isEmpty()) {
+                items.add(new PlaybackItem(stationName, PlaybackItem.Type.TTS_EN));
+            } else {
+                items.add(new PlaybackItem(enName, PlaybackItem.Type.TTS_EN));
+            }
         }
     }
 
     public void stopAll() {
         pendingAnnouncements.clear();
+        pendingDepartures.clear();
         isPlaying = false;
         currentUtteranceId = null;
         mainHandler.removeCallbacksAndMessages(null);

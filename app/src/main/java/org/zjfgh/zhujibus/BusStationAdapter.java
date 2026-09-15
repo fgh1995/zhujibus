@@ -47,6 +47,16 @@ public class BusStationAdapter extends RecyclerView.Adapter<BusStationAdapter.Bu
         }
     }
 
+    /**
+     * 只刷新某一条线路卡片：标记模式下车辆/计划发车时间随各线路逐条返回，
+     * 逐条刷新即可，避免整表重绑（闪烁、方向翻页被重置）。
+     */
+    public void notifyLineChanged(int position) {
+        if (position >= 0 && position < busLineItems.size()) {
+            notifyItemChanged(position);
+        }
+    }
+
     public void setHighlightedLines(List<String> lineIds, List<String> stationIds) {
         this.pendingHighlightLineIds = lineIds != null ? new ArrayList<>(lineIds) : new ArrayList<>();
         this.pendingHighlightStationIds = stationIds != null ? new ArrayList<>(stationIds) : new ArrayList<>();
