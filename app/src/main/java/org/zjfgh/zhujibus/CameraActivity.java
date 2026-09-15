@@ -211,6 +211,9 @@ public class CameraActivity extends AppCompatActivity {
     private float smoothedPovSpeed = -1f;
     private static final float SPEED_EMA_ALPHA = 0.25f;
     private static final float SPEED_JUMP_THRESHOLD = 40f;
+    // 低速阈值：低于该速度直接采用原始值，不做 EMA 平滑，
+    // 否则停车时码表会按 4 → 3.2 → 1 的方式缓慢衰减，迟迟不归零
+    private static final float LOW_SPEED_NO_SMOOTH_KMH = 10f;
 
     private final LocationListener gpsListener = new LocationListener() {
         @Override
@@ -435,7 +438,10 @@ public class CameraActivity extends AppCompatActivity {
 
     private void updateDetectorRouteData() {
         if (povDetector != null) {
-            povDetector.setStationRadius(30.0, 80.0);
+            // 进/出站判定范围跟随"报站设置"里的设置（此前硬编码 30/80，用户在车机里改了不生效）
+            povDetector.setStationRadius(
+                    BusLineDetailActivity.getEnterStationRadius(),
+                    BusLineDetailActivity.getExitStationRadius());
             povDetector.setRouteData(stationList, routePoints);
         }
         updateInitialNextStationDisplay();
@@ -493,7 +499,10 @@ public class CameraActivity extends AppCompatActivity {
         float rawSpeedKmh = location.getSpeed() * 3.6f;
         if (rawSpeedKmh < 0f) rawSpeedKmh = 0f;
 
-        if (smoothedPovSpeed < 0f) {
+        if (smoothedPovSpeed < 0f
+                || rawSpeedKmh < LOW_SPEED_NO_SMOOTH_KMH
+                || smoothedPovSpeed < LOW_SPEED_NO_SMOOTH_KMH) {
+            // 低速段（<10km/h，含停车）直接采用原始值，避免 4 → 3.2 → 1 的缓慢衰减、码表不归零
             smoothedPovSpeed = rawSpeedKmh;
         } else if (Math.abs(rawSpeedKmh - smoothedPovSpeed) > SPEED_JUMP_THRESHOLD) {
             return;

@@ -28,6 +28,8 @@ public class ScheduleFragment extends Fragment {
 
     private static final String TAG = "ScheduleFragment";
     private static final String REQUEST_TAG_PREFIX = "schedule_";
+    /** 无法判断到达时间时的占位显示（如接口未返回线路距离，推算不出运行时间） */
+    private static final String UNKNOWN_TIME = "--:--";
 
     private LinearLayout tvTitle;
     private TextView tvLoading;
@@ -257,7 +259,16 @@ public class ScheduleFragment extends Fragment {
             final String startStation = lineDirection.startStation;
             final String endStation = lineDirection.endStation;
             // 根据线路长度(公里)和367米/分钟计算运行时间(分钟)
-            final int travelMinutes = (int) Math.ceil(lineDirection.lineLength * 1000.0 / 367.0);
+            // ⚠️ 接口可能不返回线路长度（lineLength <= 0）：此时推算不出运行时间，
+            //    中间班次的"到达"不能再按"发车 + 5 分钟"算（会得到一个明显错误的到达时刻），
+            //    直接显示占位符 UNKNOWN_TIME（--:--）。
+            final boolean hasLineLength = lineDirection.lineLength > 0;
+            final int travelMinutes = hasLineLength
+                    ? (int) Math.ceil(lineDirection.lineLength * 1000.0 / 367.0) : 0;
+            if (!hasLineLength) {
+                Log.w(TAG, "线路距离为空(lineLength=" + lineDirection.lineLength
+                        + ")，无法推算运行时间，中间班次到达时间显示 " + UNKNOWN_TIME);
+            }
 
             // 获取当前时间
             Calendar now = Calendar.getInstance();
@@ -283,7 +294,9 @@ public class ScheduleFragment extends Fragment {
 
             for (int i = 0; i < scheduleTimes.size(); i++) {
                 String departure = scheduleTimes.get(i);
-                String arrival = computeArrivalTime(departure, travelMinutes);
+                // 有线路距离才推得出到达时间；没有就显示 --:--（不要用"发车+5分钟"兜底）
+                String arrival = hasLineLength
+                        ? computeArrivalTime(departure, travelMinutes) : UNKNOWN_TIME;
                 lastArrivalTime = arrival;
 
                 // 计算该班次发车时间的分钟数

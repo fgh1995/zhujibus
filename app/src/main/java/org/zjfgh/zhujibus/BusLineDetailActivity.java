@@ -114,7 +114,8 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private static BusLineDetailActivity currentInstance = null;
 
     MoreFragment moreFragment;
-    String priceText = "0.00";
+    // 车机显示的票价文本；接口没返回票价时用 "--"（不猜数值）
+    String priceText = "--";
     // ⭐ 导航模块视图引用已迁移到 NavigationMainFragment，Activity 不再持有：
     //   navTimeHM / navTimeSecond / navDateText / navRouteNo / navNextStation / navDirection
     //   navigationTimeHandler / navigationTimeRunnable / updateNavigationTime()
@@ -180,6 +181,11 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private volatile int lastAnnouncedStationIndex = -1;
     private volatile boolean isInsideStationRadius = false;
     private volatile int lastInsideStationIndex = -1;
+    // ⭐ 出站判定用：进站后到该站的最小距离。
+    //    "出站"必须在"距离由减小转为增大"之后才允许判定（车辆真的驶离该站），
+    //    否则进站半径大于出站半径时（如进站80/出站40），车辆还在接近（距离落在40~80）
+    //    就会满足"距离 > 出站半径"，表现为刚报完进站马上又报出站。
+    private volatile double insideStationMinDistance = Double.MAX_VALUE;
     private volatile boolean hasLeftTerminalStation = false;
     private volatile int gpsCurrentStationIndex = -1;
     // ⭐ 已确认离开/到达的最远站点索引。离开某站时推进到该站索引，
@@ -344,6 +350,9 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     }
 
     private static final double STATION_PROXIMITY_THRESHOLD_METERS = 50.0;
+    // 距离比"进站后的最小距离"增大多少米，才算"车辆已越过最近点、开始驶离站点"。
+    // 用"最小距离 + 余量"而不是"上一帧 < 当前帧"，是为了抗 GPS 抖动造成的单帧回跳。
+    private static final double EXIT_MOVING_AWAY_METERS = 5.0;
 
     private double lastLocationLat = 0;
     private double lastLocationLon = 0;
@@ -354,6 +363,9 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private static final int SPEED_WINDOW_SIZE = 3;
     private static final float MAX_VALID_SPEED_KMH = 120.0f;
     private static final float MIN_VALID_SPEED_KMH = 0.5f;
+    // 预计到达时间的最低有效速度：低于该速度时"预计"改为显示距离。
+    // 用 0.5km/h 这种极低门槛时，车辆刚起步/近乎停车会算出"30分钟"之类的离谱预计时间。
+    private static final float ETA_MIN_SPEED_KMH = 3.0f;
     private final ArrayList<Float> speedWindow = new ArrayList<>();
     private float currentSmoothedSpeedKmh = 0f;
     private Handler speedTimeoutHandler = new Handler();
@@ -374,7 +386,9 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             return displayName;
         }
     }
-    private DistanceMode currentDistanceMode = DistanceMode.STRAIGHT_LINE;
+    // 报站判定用的距离口径：默认"沿线距离"（车辆沿线路实际要走的里程）。
+    // GPS 计算跑在后台 HandlerThread、滑块/点击在主线程改，故加 volatile 保证可见性
+    private volatile DistanceMode currentDistanceMode = DistanceMode.ALONG_ROUTE;
 
     public enum CoordConvertMode {
         WGS_TO_GCJ("WGS→GCJ-02"),
@@ -542,6 +556,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             lastAnnouncedStationIndex = -1;
             isInsideStationRadius = false;
             lastInsideStationIndex = -1;
+            insideStationMinDistance = Double.MAX_VALUE;
             hasLeftTerminalStation = false;
             gpsCurrentStationIndex = -1;
             committedStationIndex = -1;
@@ -594,6 +609,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             lastAnnouncedStationIndex = -1;
             isInsideStationRadius = false;
             lastInsideStationIndex = -1;
+            insideStationMinDistance = Double.MAX_VALUE;
             hasLeftTerminalStation = false;
             gpsCurrentStationIndex = -1;
             committedStationIndex = -1;
@@ -800,6 +816,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         boolean isLeavingTerminal = false;
 
         final float[] tmpResults = new float[1];
+        double insideCandidateDistance = -1;
         for (int i = 0; i < stations.size(); i++) {
             BusApiClient.BusLineStation station = stations.get(i);
             double stationLat = station.poiOriginLat;
@@ -847,14 +864,32 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 nearestStationDirectDistance = directDistance;
             }
 
-            if (distanceForCompare <= enterStationRadius) {
-                isInsideRadius = true;
-                currentInsideStationIndex = i;
-                break;
+            // ⭐ 出站判定：只针对"上一帧还在站内"的那个站点，且必须同时满足：
+            //   ① 距离已由减小转为增大（车辆越过最近点、开始驶离该站）——用"进站后的最小距离 + 余量"判断，
+            //      比"上一帧 < 当前帧"更抗 GPS 抖动；
+            //   ② 距离超过【出站半径】。
+            //    缺①时（例如进站80/出站40），车辆还在接近、距离落在 40~80 就已经满足②，
+            //    于是刚报完进站立刻又报出站；加上①后，只有车辆驶过该站再往外走才会报出站。
+            if (i == snapshotLastInside) {
+                if (distanceForCompare < insideStationMinDistance) {
+                    insideStationMinDistance = distanceForCompare;
+                }
+                boolean movingAway = distanceForCompare >= insideStationMinDistance + EXIT_MOVING_AWAY_METERS;
+                if (movingAway && distanceForCompare > exitStationRadius) {
+                    isBeyondExitRadius = true;
+                    continue;
+                }
             }
 
-            if (i == snapshotLastInside && distanceForCompare > exitStationRadius) {
-                isBeyondExitRadius = true;
+            // 进站判定：取【站内最近】的一站（不再一命中就 break）。
+            // 一命中就 break 会带来两个问题：
+            //   1) 前方紧挨着的下一站会被前一站遮住（两站间距小于进站半径时），永远进不了站 → 漏报；
+            //   2) "最近站点/距离"只统计到 break 之前，显示的距离可能不是真正最近的那站。
+            if (distanceForCompare <= enterStationRadius
+                    && (insideCandidateDistance < 0 || distanceForCompare < insideCandidateDistance)) {
+                insideCandidateDistance = distanceForCompare;
+                isInsideRadius = true;
+                currentInsideStationIndex = i;
             }
         }
 
@@ -914,6 +949,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 }
                 isInsideStationRadius = false;
                 lastInsideStationIndex = -1;
+                insideStationMinDistance = Double.MAX_VALUE; // 已离站：重置最小距离，下一站重新统计
                 gpsCurrentStationIndex = leavingIndex;
                 // ⭐ 已离开该站，推进 committed，后续回跳到该站或之前站点均视为跳变噪声
                 committedStationIndex = leavingIndex;
@@ -967,6 +1003,10 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                         gpsCurrentStationIndex = finalCurrentInsideStationIndex;
                     }
                     if (!(isTerminalStation && snapshotHasLeftTerminal)) {
+                        // 进站/换站时重置"进站后的最小距离"，确保出站判定按本站的"先减小后增大"来判断
+                        if (!wasInsideStation || snapshotLastInside != finalCurrentInsideStationIndex) {
+                            insideStationMinDistance = Double.MAX_VALUE;
+                        }
                         lastInsideStationIndex = finalCurrentInsideStationIndex;
                     }
                 }
@@ -1102,22 +1142,26 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 Log.d(TAG, String.format(Locale.CHINA, "EAT计算: 下一站[%d]%s 直线=%.0fm (无沿线数据)",
                         nextStationIndex, nextStation.stationName, distanceToNext));
             }
-            if (nearestStationDistance >= STATION_PROXIMITY_THRESHOLD_METERS && segmentDistance > 0) {
-                double calculatedDistance = segmentDistance - nearestStationDistance - 100;
-                if (calculatedDistance > 0) {
-                    distanceToNext = calculatedDistance;
-                    Log.d(TAG, String.format(Locale.CHINA, "EAT修正: 站点[%d]%s->[%d]%s 站间距离=%.0fm, GPS到站点=%.0fm, 修正后=%.0fm",
-                            currentStationIndex, nearestStationName, nextStationIndex, nextStation.stationName,
+            // ⭐ 到下一站的距离：
+            //   ① 有沿线数据时，直接用上面算出的「当前位置 → 下一站」沿线距离（最准，不再被覆盖）；
+            //   ② 没有沿线数据时，用「本站到下一站的站间距离 - 当前位置到本站的距离」估算（车辆在本站与下一站之间时成立）；
+            //   ③ 估算不出时保留上面按直线算出的距离。
+            // 原实现把「到最近站点的距离」直接当成「到下一站的距离」（最近站点常常在车辆后方），
+            // 又用 segmentDistance - nearestStationDistance - 100 这类混合站点的经验值覆盖沿线距离，
+            // 会让「预计到达时间」明显失真（偏大或偏小）。
+            if (routePoints == null || routePoints.isEmpty()) {
+                double estimatedDistance = segmentDistance - Math.max(0, nearestStationDistance);
+                if (segmentDistance > 0 && estimatedDistance > 0) {
+                    distanceToNext = estimatedDistance;
+                    Log.d(TAG, String.format(Locale.CHINA, "EAT估算: 站间距离=%.0fm, 当前位置到站点=%.0fm, 估算到下一站=%.0fm",
                             segmentDistance, nearestStationDistance, distanceToNext));
                 }
-            } else {
-                if (nearestStationDistance < STATION_PROXIMITY_THRESHOLD_METERS) {
-                    distanceToNext = 0;
-                    Log.d(TAG, String.format(Locale.CHINA, "EAT修正: 在站点[%d]%s停靠中，忽略到下一站距离",
-                            currentStationIndex, nearestStationName));
-                } else {
-                    distanceToNext = nearestStationDistance;
-                }
+            }
+            if (nearestStationDistance >= 0 && nearestStationDistance < enterStationRadius) {
+                // 已停靠在站内：到下一站的距离按 0 处理（此处不显示"预计时间"）
+                distanceToNext = 0;
+                Log.d(TAG, String.format(Locale.CHINA, "EAT修正: 在站点[%d]%s停靠中，忽略到下一站距离",
+                        currentStationIndex, nearestStationName));
             }
         } else {
             Log.d(TAG, "EAT计算: 未找到有效的nextStationIndex");
@@ -1177,7 +1221,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         String terminalEat = "--";
         Log.d(TAG, String.format(Locale.CHINA, "当前站到下一站沿线距离: %s", formatDistance(distanceToNext)));
 
-        if (speedKmh > MIN_VALID_SPEED_KMH) {
+        if (speedKmh > ETA_MIN_SPEED_KMH) {
             double speedMps = speedKmh / 3.6;
             if (distanceToNext > 0) {
                 int secondsNext = (int) (distanceToNext / speedMps);
@@ -1363,26 +1407,33 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private void updatePriceTips(BusApiClient.BusLineDirection lineDirection) {
         String[] priceTips = buildPriceTips(lineDirection);
         String[] priceTipsEn = buildPriceTipsEn(lineDirection);
-        if (priceTips != null) {
-            int[] priceColors = new int[priceTips.length];
-            for (int i = 0; i < priceTips.length; i++) {
-                priceColors[i] = TIPS_COLOR_PURPLE;
-            }
-            int baseCount = TIPS_TEXT_BASE.length;
-            currentTipsText = new String[priceTips.length + baseCount];
-            currentTipsColor = new int[currentTipsText.length];
-            currentTipsEnText = new String[priceTips.length + baseCount];
-            System.arraycopy(priceTips, 0, currentTipsText, 0, priceTips.length);
-            System.arraycopy(priceColors, 0, currentTipsColor, 0, priceColors.length);
-            System.arraycopy(TIPS_TEXT_BASE, 0, currentTipsText, priceTips.length, baseCount);
-            System.arraycopy(TIPS_COLOR_BASE, 0, currentTipsColor, priceTips.length, baseCount);
-            System.arraycopy(priceTipsEn, 0, currentTipsEnText, 0, priceTipsEn.length);
-            System.arraycopy(TIPS_EN_TEXT_BASE, 0, currentTipsEnText, priceTipsEn.length, baseCount);
-        } else {
+        Log.d(TAG, "票价提示: totalPrice=" + (lineDirection == null ? "null" : lineDirection.totalPrice)
+                + ", lineType=" + (lineDirection == null ? -1 : lineDirection.lineType)
+                + ", lineTypeName=" + (lineDirection == null ? "null" : lineDirection.lineTypeName)
+                + ", tips=" + java.util.Arrays.toString(priceTips));
+        if (priceTips == null || priceTips.length == 0) {
             currentTipsText = TIPS_TEXT_BASE;
             currentTipsColor = TIPS_COLOR_BASE;
             currentTipsEnText = TIPS_EN_TEXT_BASE;
+            return;
         }
+
+        // 中英两套按索引一一对应；英文缺条目时用中文兜底，
+        // 避免轮播数组里出现 null 条目（现象就是轮播到那一条时一片空白）
+        int priceCount = priceTips.length;
+        int baseCount = TIPS_TEXT_BASE.length;
+        currentTipsText = new String[priceCount + baseCount];
+        currentTipsColor = new int[priceCount + baseCount];
+        currentTipsEnText = new String[priceCount + baseCount];
+
+        for (int i = 0; i < priceCount; i++) {
+            currentTipsText[i] = priceTips[i];
+            currentTipsColor[i] = TIPS_COLOR_PURPLE;
+            currentTipsEnText[i] = (priceTipsEn != null && i < priceTipsEn.length) ? priceTipsEn[i] : priceTips[i];
+        }
+        System.arraycopy(TIPS_TEXT_BASE, 0, currentTipsText, priceCount, baseCount);
+        System.arraycopy(TIPS_COLOR_BASE, 0, currentTipsColor, priceCount, baseCount);
+        System.arraycopy(TIPS_EN_TEXT_BASE, 0, currentTipsEnText, priceCount, baseCount);
     }
 
     private String toChineseNumber(double number) {
@@ -1399,63 +1450,57 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         return formatPrice(number);
     }
 
+    /**
+     * 票价提示文案（会拼进"轮播文本"循环播放）。
+     * <p>
+     * 规则：
+     * <ul>
+     *   <li>接口没有返回票价（totalPrice &lt;= 0）：返回 null，不加票价提示（不猜票价）；</li>
+     *   <li>城乡公交且票价 &gt; 2 元：多票制，提示上下车均需刷卡扫码；</li>
+     *   <li>其余有票价的情况（城市公交、城乡 1/2 元一票制）：无人售票单一票价。</li>
+     * </ul>
+     * ⚠️ 返回数组长度必须与 {@link #buildPriceTipsEn} 完全对应：updatePriceTips 是把两者
+     * 按各自长度拼进轮播数组的，长度不一致会导致轮播越界或出现空条目。
+     */
     private String[] buildPriceTips(BusApiClient.BusLineDirection lineDirection) {
+        if (lineDirection == null) return null;
         double price = lineDirection.totalPrice;
-        int lineType = lineDirection.lineType;
-        String lineTypeName = lineDirection.lineTypeName;
+        if (price <= 0) return null;   // 接口未返回票价：不显示票价提示
 
-        boolean isCityBus = (lineType == 1 || "城市".equals(lineTypeName));
-        boolean isIntercityBus = (lineTypeName != null && lineTypeName.contains("城乡"));
-
-        if (!isCityBus && !isIntercityBus && price > 0) {
-            if (price == 1.0) {
-                isCityBus = true;
-            } else if (price >= 2.0) {
-                isIntercityBus = true;
-            }
-        }
-
-        if (isCityBus && price == 1.0) {
-            return new String[]{"无人售票   票价一元"};
-        } else if (isIntercityBus && price == 2.0) {
-            return new String[]{"无人售票   票价二元"};
-        } else if (isIntercityBus && price > 0) {
+        if (isIntercityMultiFareLine(lineDirection)) {
             return new String[]{"多票制二~" + toChineseNumber(price) + "元", "上下车均需刷卡扫码"};
-        } else if (price == 1.0) {
-            return new String[]{"无人售票   票价一元"};
         }
-
-        return null;
+        return new String[]{"无人售票   票价" + toChineseNumber(price) + "元"};
     }
 
     /** 与 buildPriceTips 平行：返回价格提示的英文翻译，索引与中文一一对应 */
     private String[] buildPriceTipsEn(BusApiClient.BusLineDirection lineDirection) {
+        if (lineDirection == null) return null;
         double price = lineDirection.totalPrice;
+        if (price <= 0) return null;   // 接口未返回票价：不显示票价提示
+
+        if (isIntercityMultiFareLine(lineDirection)) {
+            return new String[]{"Multi-fare system Fare: 2~" + formatPrice(price) + " yuan", "Tap or scan on both entry and exit"};
+        }
+        return new String[]{"No conductor    Fare: " + formatPrice(price) + " yuan"};
+    }
+
+    /**
+     * 是否「城乡公交 + 多票制」（票价 &gt; 2 元）：这类线路上下车都要刷卡扫码。
+     * 中英文两套文案共用这一处判断，避免两边各写一套条件后出现长度/内容不一致。
+     */
+    private boolean isIntercityMultiFareLine(BusApiClient.BusLineDirection lineDirection) {
+        if (lineDirection == null || lineDirection.totalPrice <= 2.0) return false;
         int lineType = lineDirection.lineType;
         String lineTypeName = lineDirection.lineTypeName;
-
-        boolean isCityBus = (lineType == 1 || "城市".equals(lineTypeName));
+        // 接口返回的类型名是"城市公交/城乡公交"这类带后缀的文案，
+        // 原来用 "城市".equals(lineTypeName) 匹配不上，只能用 lineType==1 兜底
+        boolean isCityBus = (lineType == 1 || (lineTypeName != null && lineTypeName.contains("城市")));
         boolean isIntercityBus = (lineTypeName != null && lineTypeName.contains("城乡"));
-
-        if (!isCityBus && !isIntercityBus && price > 0) {
-            if (price == 1.0) {
-                isCityBus = true;
-            } else if (price >= 2.0) {
-                isIntercityBus = true;
-            }
+        if (!isCityBus && !isIntercityBus) {
+            return true;   // 类型缺失：>2 元按多票制处理（与原逻辑一致）
         }
-
-        if (isCityBus && price == 1.0) {
-            return new String[]{"No conductor    Fare: 1 yuan"};
-        } else if (isIntercityBus && price == 2.0) {
-            return new String[]{"No conductor    Fare: 2 yuan"};
-        } else if (isIntercityBus && price > 0) {
-            return new String[]{"Multi-fare system Fare: 2~" + formatPrice(price) + " yuan", "Tap or scan on both entry and exit"};
-        } else if (price == 1.0) {
-            return new String[]{"No conductor    Fare: 1 yuan"};
-        }
-
-        return null;
+        return isIntercityBus;
     }
 
     @Override
@@ -2227,6 +2272,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             lastAnnouncedStationIndex = -1;
             isInsideStationRadius = false;
             lastInsideStationIndex = -1;
+            insideStationMinDistance = Double.MAX_VALUE;
             gpsCurrentStationIndex = -1;
             committedStationIndex = -1;
             realTimeManager.stopTracking();
@@ -2303,6 +2349,12 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         }
         Log.d(TAG, "lineDirection.id = " + lineDirection.id);
         Log.d(TAG, "lineDirection.stationList size = " + (lineDirection.stationList == null ? "null" : lineDirection.stationList.size()));
+
+        // ⭐ 先把票价提示拼进轮播并立刻显示首页文案：放在最前面，
+        //    避免后面的 UI 更新（地图、站点列表等）一旦抛异常就把轮播文案一起跳过。
+        updatePriceTips(lineDirection);
+        startTipsAnimation();
+
         if (navigationMainFragment != null) {
             navigationMainFragment.setLineData(lineDirection, isTwoWayLine, currentDirection);
         }
@@ -2333,8 +2385,6 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         updateBusTimes(lineDirection);
         updateRouteSummary(lineDirection);
         updateTicketPrice();
-        updatePriceTips(lineDirection);
-        startTipsAnimation();
         setupStationList(lineDirection);
         Log.d(TAG, "setupStationList 调用完成");
     }
@@ -2428,11 +2478,9 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
 
     private void updateTicketPrice() {
         BusApiClient.BusLineDirection lineDirection = getCurrentDirectionData();
-        double price = 1.0;
-        if (lineDirection != null && lineDirection.totalPrice > 0) {
-            price = lineDirection.totalPrice;
-        }
-        priceText = String.format(Locale.getDefault(), "%.2f", price);
+        // 接口没返回票价（totalPrice <= 0）时不猜数值，车机直接显示 "--"
+        double price = lineDirection == null ? 0 : lineDirection.totalPrice;
+        priceText = price > 0 ? String.format(Locale.getDefault(), "%.2f", price) : "--";
         if (navigationMainFragment != null) {
             navigationMainFragment.updatePriceText(priceText);
         }

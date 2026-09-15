@@ -52,6 +52,11 @@ public class SpeakFragment extends Fragment {
             initViews(view);
             setupSeekBars();
             updateSliderText();
+            // 视图就绪后再挂"报站判定: 直线/沿线"的点击事件。
+            // （外部可能在事务 commit 前就调用了 initDistanceModeToggle，那时视图还不存在，
+            //   所以这里必须再绑一次，否则点击永远没反应）
+            applyDistanceModeText();
+            bindDistanceModeToggle();
         } catch (Exception e) {
             Log.e(TAG, "onViewCreated 失败", e);
         }
@@ -191,10 +196,7 @@ public class SpeakFragment extends Fragment {
      */
     public void setDistanceMode(boolean isStraightLine) {
         currentDistanceMode = isStraightLine ? DistanceMode.STRAIGHT_LINE : DistanceMode.ALONG_ROUTE;
-        if (distanceModeInfo != null) {
-            String modeText = currentDistanceMode == DistanceMode.STRAIGHT_LINE ? "直线距离" : "沿线距离";
-            distanceModeInfo.setText(String.format(Locale.CHINA, "报站判定: %s", modeText));
-        }
+        applyDistanceModeText();
     }
 
     /**
@@ -204,24 +206,36 @@ public class SpeakFragment extends Fragment {
         return currentDistanceMode == DistanceMode.STRAIGHT_LINE;
     }
 
+    /** 按当前模式刷新"报站判定: 直线距离/沿线距离"文案 */
+    private void applyDistanceModeText() {
+        if (distanceModeInfo == null) return;
+        String modeText = currentDistanceMode == DistanceMode.STRAIGHT_LINE ? "直线距离" : "沿线距离";
+        distanceModeInfo.setText(String.format(Locale.CHINA, "报站判定: %s", modeText));
+    }
+
     /**
-     * 初始化距离模式点击切换
+     * 初始化距离模式点击切换。
+     * <p>
+     * 允许在视图创建之前调用：监听器会先存下来，等 {@link #onViewCreated} 里视图就绪后再真正绑定，
+     * 避免外部在 FragmentTransaction commit 前调用时（此时 findViewById 还是 null）监听丢失、点击无反应。
      */
     public void initDistanceModeToggle(OnDistanceModeChangeListener listener) {
-        if (distanceModeInfo != null) {
-            distanceModeInfo.setOnClickListener(v -> {
-                if (currentDistanceMode == DistanceMode.STRAIGHT_LINE) {
-                    currentDistanceMode = DistanceMode.ALONG_ROUTE;
-                } else {
-                    currentDistanceMode = DistanceMode.STRAIGHT_LINE;
-                }
-                String modeText = currentDistanceMode == DistanceMode.STRAIGHT_LINE ? "直线距离" : "沿线距离";
-                distanceModeInfo.setText(String.format(Locale.CHINA, "报站判定: %s", modeText));
-                if (listener != null) {
-                    listener.onDistanceModeToggled(currentDistanceMode == DistanceMode.STRAIGHT_LINE);
-                }
-            });
-        }
+        this.distanceModeListener = listener;
+        bindDistanceModeToggle();
+    }
+
+    /** 挂上"报站判定"点击事件（视图不存在或已挂过则直接返回） */
+    private void bindDistanceModeToggle() {
+        if (distanceModeInfo == null || distanceModeInfo.hasOnClickListeners()) return;
+        distanceModeInfo.setOnClickListener(v -> {
+            currentDistanceMode = (currentDistanceMode == DistanceMode.STRAIGHT_LINE)
+                    ? DistanceMode.ALONG_ROUTE
+                    : DistanceMode.STRAIGHT_LINE;
+            applyDistanceModeText();
+            if (distanceModeListener != null) {
+                distanceModeListener.onDistanceModeToggled(currentDistanceMode == DistanceMode.STRAIGHT_LINE);
+            }
+        });
     }
 
     public interface OnDistanceModeChangeListener {
@@ -240,7 +254,10 @@ public class SpeakFragment extends Fragment {
             return displayName;
         }
     }
-    private DistanceMode currentDistanceMode = DistanceMode.STRAIGHT_LINE;
+    // 默认按"沿线距离"判定（车辆沿线路实际要走的里程）；直线距离仅作显示对照与无几何数据时的兜底
+    private DistanceMode currentDistanceMode = DistanceMode.ALONG_ROUTE;
+    // 距离模式切换监听（外部注入；视图创建前调用也有效，见 initDistanceModeToggle）
+    private OnDistanceModeChangeListener distanceModeListener;
 
     /**
      * GPS 显示状态

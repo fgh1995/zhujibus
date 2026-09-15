@@ -32,6 +32,7 @@ import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -44,7 +45,10 @@ public class StationDetailsFragment extends DialogFragment {
     private RecyclerView recyclerView;
     private BusStationAdapter adapter;
     private String currentStationName;
-    private Set<String> announcedVehicles = new HashSet<>();
+    // 已播报过的车辆：key = lineId_stationId[_车牌] -> 播报时间。
+    // 按「车辆」而不是「线路」记录，并且只在车辆到站/过站（或记录过期）后失效，
+    // 这样既不会因为 GPS 抖动、某一轮取不到数据而把同一辆车重复播报，也不会漏掉后面的车。
+    private final Map<String, Long> announcedVehicles = new HashMap<>();
     // 已播报过的「计划发车提醒」：lineId_stationId_HH:mm，用于同一分钟内不重复播报
     private Set<String> announcedDepartures = new HashSet<>();
     private Handler refreshHandler;
@@ -52,6 +56,8 @@ public class StationDetailsFragment extends DialogFragment {
     private static final long REFRESH_INTERVAL = 10000;
     // 报站距离阈值：车辆距本站 < 400m 才语音报站
     private static final int ANNOUNCE_MAX_DISTANCE = 400;
+    // 车辆播报记录的保留时长：超过后允许重新播报（同一辆车很久以后再次驶向本站等场景）
+    private static final long ANNOUNCE_VEHICLE_RECORD_TTL_MS = 60 * 60 * 1000L;
     private DirectionMarkerDatabaseHelper dbHelper;
     private LinearLayout markersContainer;
     private LinearLayout markersScrollContent;
@@ -67,11 +73,26 @@ public class StationDetailsFragment extends DialogFragment {
     // 标记模式一轮线路取数是否仍在进行：进行中时刷新节拍不再发起新一轮，
     // 避免新一轮把上一轮还没取完的线路请求作废（表现为列表迟迟不出车辆、迟迟不报站）
     private boolean markerLoadingInProgress = false;
-    // 标记模式本轮播报状态：首条立即播，其余排队依次播
-    private boolean markerAnnouncementStarted = false;
+    // 已记录、尚未到点的计划发车时间：计划发车时间会被服务端滚成下一班
+    // （22:00 那班一开走就变成下一班），只靠「取数那一刻」比对很容易正好错过整点而漏播，
+    // 所以记录下来交给每轮刷新节拍复查。
+    private final List<PendingDeparturePlan> pendingDeparturePlans = new ArrayList<>();
     // 单条线路最长等待时间：超时不再等待该线路，直接处理下一条，避免一条慢线路拖住整轮刷新
     private static final long MARKER_LINE_TIMEOUT_MS = 5000;
     private Handler scheduleHandler;
+
+    /** 已记录、尚未到点的计划发车时间（planHm 形如 HH:mm） */
+    private static class PendingDeparturePlan {
+        final String lineId;
+        final String stationId;
+        final String planHm;
+
+        PendingDeparturePlan(String lineId, String stationId, String planHm) {
+            this.lineId = lineId;
+            this.stationId = stationId;
+            this.planHm = planHm;
+        }
+    }
 
     public static StationDetailsFragment newInstance(String stationName) {
         StationDetailsFragment fragment = new StationDetailsFragment();
@@ -376,7 +397,7 @@ public class StationDetailsFragment extends DialogFragment {
         markerRequestGeneration++;
         markerLineIndex = -1;
         markerLoadingInProgress = false;
-        markerAnnouncementStarted = false;
+        pendingDeparturePlans.clear();
         if (scheduleHandler != null) {
             scheduleHandler.removeCallbacksAndMessages(null);
         }
@@ -397,6 +418,7 @@ public class StationDetailsFragment extends DialogFragment {
     private void queryWithMarker(DirectionMarker marker) {
         announcedVehicles.clear();
         announcedDepartures.clear();
+        pendingDeparturePlans.clear();
         lineDetailCache.clear();
         if (marker.lineIds.isEmpty()) {
             Toast.makeText(requireContext(), "标记中没有线路", Toast.LENGTH_SHORT).show();
@@ -411,11 +433,11 @@ public class StationDetailsFragment extends DialogFragment {
             @Override
             public void run() {
                 if (currentSelectedMarker != null) {
-                    if (markerLoadingInProgress) {
-                        // 上一轮线路取数还没结束：不发起新一轮（否则会作废还没取完的线路请求），
-                        // 只复查一次「计划发车提醒」，避免这一节拍正好跨过发车时刻而漏播
-                        recheckDepartureAnnouncements();
-                    } else {
+                    // 每轮都复查一次「计划发车提醒」：计划发车时间会被服务端滚成下一班，
+                    // 只在取数那一刻比对很容易正好错过整点那一分钟而漏播
+                    checkDepartureAnnouncements();
+                    if (!markerLoadingInProgress) {
+                        // 上一轮线路取数还没结束时不发起新一轮，避免把没取完的线路请求作废
                         refreshWithMarker(currentSelectedMarker);
                     }
                 } else {
@@ -502,8 +524,6 @@ public class StationDetailsFragment extends DialogFragment {
                         }
                         if (!isUiAlive()) return;
                         currentBusLineItems = response.data;
-                        // 新一轮数据：本轮首条播报立即播，其余排队
-                        markerAnnouncementStarted = false;
 
                         if (currentSelectedMarker != null && buildMarkerFilteredList()) {
                             // 标记选中：已裁剪出单向列表，接着按“线路车辆详情”取最近车辆
@@ -779,7 +799,6 @@ public class StationDetailsFragment extends DialogFragment {
     private void startMarkerVehicleLoading() {
         markerRequestGeneration++;
         markerLineIndex = -1;
-        markerAnnouncementStarted = false;
 
         List<BusApiClient.StationLineInfo> items = currentBusLineItems;
         if (items == null || items.isEmpty()) {
@@ -1061,12 +1080,19 @@ public class StationDetailsFragment extends DialogFragment {
                 if (s != null && stationId.equals(s.id)) return i;
             }
         }
-        // 兜底：同一站台可能存在多个 id，按站名再找一次
+        // 兜底：同一站台可能存在多个 id，按站名再找一次。
+        // 仅当站名在该方向里唯一出现时才敢用：环形线路或同名站台出现多次时无法确定是哪一站，
+        // 猜错会导致“还差几站/距离”算错，报站时机跟着错，此时宁可放弃兜底交给站点接口路径。
         if (currentStationName != null) {
+            int matchedIndex = -1;
             for (int i = 0; i < stations.size(); i++) {
                 BusApiClient.BusLineStation s = stations.get(i);
-                if (s != null && currentStationName.equals(s.stationName)) return i;
+                if (s != null && currentStationName.equals(s.stationName)) {
+                    if (matchedIndex >= 0) return -1;
+                    matchedIndex = i;
+                }
             }
+            return matchedIndex;
         }
         return -1;
     }
@@ -1107,6 +1133,7 @@ public class StationDetailsFragment extends DialogFragment {
         vi.distance = bestDistance;
         vi.isArriveStation = (bestStops == 0 && best.isArriveStation == 1) ? 1 : 0;
         vi.gpsTime = best.gpsTime;
+        vi.plateNumber = best.plateNumber;                    // 用于按“车辆”去重播报
         return vi;
     }
 
@@ -1157,62 +1184,139 @@ public class StationDetailsFragment extends DialogFragment {
         }
     }
 
-    /** 只复查一次「计划发车提醒」（用于上一轮取数还没结束、本轮跳过刷新的节拍） */
-    private void recheckDepartureAnnouncements() {
-        List<BusApiClient.StationLineInfo> items = currentBusLineItems;
-        if (items == null) return;
-        for (BusApiClient.StationLineInfo item : items) {
-            if (item == null) continue;
-            announceDepartureForMarkerLine(item.up);
-            announceDepartureForMarkerLine(item.down);
-        }
-    }
-
     /**
-     * 标记选中时的「进站报站」判断（按单条线路调用）：
-     * 车辆距本站 < {@link #ANNOUNCE_MAX_DISTANCE}(400m) 且为下一班才播报，
-     * 方向匹配已精确到 (lineId, stationId)，避免同一 lineId 的反向车辆被误当成该方向。
+     * 标记选中时的「进站报站」判断（按单条线路调用）。
      * <p>
-     * 该线路的车辆离开进站范围后会清掉记录，下次再进站可以重新播报。
+     * 播报条件：该方向的最近一班车“下一站就是本站”，且距本站 &lt; {@link #ANNOUNCE_MAX_DISTANCE}(400m)。
+     * 方向匹配已精确到 (lineId, stationId)，避免同一 lineId 的反向车辆被误当成该方向。<br>
+     * 车辆到达本站时若此前没播过（取数间隔偏大时可能整段 400m 窗口都没采到），补播一次，
+     * 避免整趟车彻底不报；播报记录按车辆（车牌）保存，之后本趟不再重复播。
      */
     private void announceForMarkerLine(BusApiClient.LineDirection dir) {
         if (currentSelectedMarker == null || dir == null || dir.lineId == null) return;
 
-        String vehicleKey = dir.lineId + "_" + dir.stationId;
         BusApiClient.StationVehicleInfo vi = dir.vehicleInfo;
-        boolean inAnnounceRange = vi != null
-                && vi.nextNumber == 0            // 为本站的最近一班
-                && vi.isArriveStation == 0       // 尚未到站
-                && vi.distance > 0 && vi.distance < ANNOUNCE_MAX_DISTANCE;
-
-        if (!inAnnounceRange) {
-            announcedVehicles.remove(vehicleKey);
+        if (vi == null) {
+            // 本轮该线路没有车辆数据（没有车在跑，或本次取数失败/超时）：
+            // 不做任何处理，避免把播报记录误清掉，导致同一辆车下一轮被重复播报
             return;
         }
-        if (!announcedVehicles.add(vehicleKey)) return; // 该车已在范围内播报过
 
-        if (markerAnnouncementStarted) {
-            ttsUtils.queueArrivalAnnouncement(dir.lineName, dir.startStation, dir.endStation, currentStationName);
-        } else {
-            markerAnnouncementStarted = true;
-            ttsUtils.playArrivalAnnouncement(dir.lineName, dir.startStation, dir.endStation, currentStationName);
+        String vehicleKey = markerVehicleKey(dir, vi);
+        boolean arrivedAtThisStation = vi.isArriveStation == 1;
+        boolean inAnnounceRange = vi.nextNumber == 0
+                && vi.isArriveStation == 0       // 尚未到站（到站走下面的补播分支）
+                && vi.distance > 0
+                && vi.distance < ANNOUNCE_MAX_DISTANCE;
+
+        if (arrivedAtThisStation || inAnnounceRange) {
+            if (markVehicleAnnounced(vehicleKey)) {
+                ttsUtils.playArrivalAnnouncement(dir.lineName, dir.startStation, dir.endStation, currentStationName);
+            }
+            if (arrivedAtThisStation) return;
+        }
+
+        if (vi.nextNumber > 0) {
+            // 当前最近的一辆车还差多站：说明刚播报过的那辆车已经过站了（若车牌未知，
+            // 记录只按线路维度保存，这里清掉，保证“下一辆车”还能再播）
+            announcedVehicles.remove(anonymousVehicleKey(dir));
+        }
+    }
+
+    /** 播报记录 key：优先按车辆（车牌）区分，车牌缺失时退回按线路+站点维度 */
+    private String markerVehicleKey(BusApiClient.LineDirection dir, BusApiClient.StationVehicleInfo vi) {
+        String plate = vi == null ? null : vi.plateNumber;
+        return (plate == null || plate.isEmpty())
+                ? anonymousVehicleKey(dir)
+                : anonymousVehicleKey(dir) + "_" + plate;
+    }
+
+    private String anonymousVehicleKey(BusApiClient.LineDirection dir) {
+        return dir.lineId + "_" + dir.stationId;
+    }
+
+    /** 记录并返回该车辆本轮是否需要播报（false 表示这辆车已经播报过） */
+    private boolean markVehicleAnnounced(String vehicleKey) {
+        long now = System.currentTimeMillis();
+        purgeExpiredVehicleRecords(now);
+        Long lastAnnounced = announcedVehicles.get(vehicleKey);
+        if (lastAnnounced != null && now - lastAnnounced < ANNOUNCE_VEHICLE_RECORD_TTL_MS) {
+            return false;
+        }
+        announcedVehicles.put(vehicleKey, now);
+        return true;
+    }
+
+    /** 清理过期的播报记录，避免集合随运营时间无界增长 */
+    private void purgeExpiredVehicleRecords(long now) {
+        if (announcedVehicles.isEmpty()) return;
+        Iterator<Map.Entry<String, Long>> iterator = announcedVehicles.entrySet().iterator();
+        while (iterator.hasNext()) {
+            if (now - iterator.next().getValue() >= ANNOUNCE_VEHICLE_RECORD_TTL_MS) {
+                iterator.remove();
+            }
         }
     }
 
     /**
      * 标记选中时的「计划发车提醒」判断（按单条线路调用）：
-     * 线路的计划发车时间（planTime，形如 HH:mm）与当前时间一致时播报，
-     * 播报内容由 {@link TTSUtils#buildDepartureAnnouncementText} 生成（现阶段整句纯 TTS）。
+     * 读出该线路的计划发车时间（planTime，形如 HH:mm），记录下来并立即判断是否到点。
      * <p>
-     * 键 lineId_stationId_HH:mm 保证同一分钟内多次轮询只播一次
-     * （刷新间隔 10s，同一分钟会命中多次）；多条线路同时发车时首条立即播、其余排队。
+     * 计划发车时间会被服务端滚动更新（22:00 那班一开走就变成下一班），因此不能只在
+     * 「取数那一刻」比对 —— 记录下来交给 {@link #checkDepartureAnnouncements()} 每轮复查，
+     * 否则正好跨过整点那一分钟时会漏播。
      */
     private void announceDepartureForMarkerLine(BusApiClient.LineDirection dir) {
+        if (dir == null) return;
+        String planHm = normalizePlanTime(dir.planTime);
+        if (planHm == null) return;
+        rememberDeparturePlanTime(dir.lineId, dir.stationId, planHm);
+        playDepartureIfDue(dir, planHm);
+    }
+
+    /** 记录「尚未到点」的计划发车时间；已经过去的时间不记，避免事后误播 */
+    private void rememberDeparturePlanTime(String lineId, String stationId, String planHm) {
+        if (lineId == null || stationId == null || planHm == null) return;
+        if (planHm.compareTo(nowHourMinute()) < 0) return;
+        for (PendingDeparturePlan plan : pendingDeparturePlans) {
+            if (plan.lineId.equals(lineId) && plan.stationId.equals(stationId)
+                    && plan.planHm.equals(planHm)) {
+                return;
+            }
+        }
+        pendingDeparturePlans.add(new PendingDeparturePlan(lineId, stationId, planHm));
+    }
+
+    /**
+     * 刷新节拍里的复查：所有已记录的计划发车时间，到点的播报、已经过点的丢弃。
+     * 这样即使服务端在整点前把计划时间滚成了下一班，到点这一分钟也不会漏播。
+     */
+    private void checkDepartureAnnouncements() {
+        if (currentSelectedMarker == null || pendingDeparturePlans.isEmpty()) return;
+        String nowHm = nowHourMinute();
+        Iterator<PendingDeparturePlan> iterator = pendingDeparturePlans.iterator();
+        while (iterator.hasNext()) {
+            PendingDeparturePlan plan = iterator.next();
+            if (plan.planHm.compareTo(nowHm) < 0) {
+                iterator.remove(); // 已经过点：丢弃，避免过一会儿再播
+                continue;
+            }
+            if (!plan.planHm.equals(nowHm)) continue; // 还没到点
+            BusApiClient.LineDirection dir = findMarkerDirection(plan.lineId, plan.stationId);
+            if (dir != null) playDepartureIfDue(dir, plan.planHm);
+        }
+    }
+
+    /**
+     * 计划发车时间正好是当前分钟就播报。
+     * 键 lineId_stationId_HH:mm 保证同一线路同一分钟只播一次（刷新间隔 10s，同一分钟会命中多次）。
+     * 播放统一走 {@link TTSUtils#playDepartureAnnouncement}（内部自动处理「忙则排队」），
+     * 避免出现「排进队列却没有任何播放被触发」而永远不播的情况。
+     */
+    private void playDepartureIfDue(BusApiClient.LineDirection dir, String planHm) {
         if (currentSelectedMarker == null || dir == null
                 || dir.lineId == null || dir.stationId == null) return;
         if (dir.startStation == null || dir.endStation == null) return;
-
-        String planHm = normalizePlanTime(dir.planTime);
         if (planHm == null || !nowHourMinute().equals(planHm)) return;
 
         String departureKey = dir.lineId + "_" + dir.stationId + "_" + planHm;
@@ -1226,12 +1330,7 @@ public class StationDetailsFragment extends DialogFragment {
 
         if (!announcedDepartures.add(departureKey)) return; // 本分钟已播报过
 
-        if (markerAnnouncementStarted) {
-            ttsUtils.queueDepartureAnnouncement(dir.lineName, dir.startStation, dir.endStation, planHm);
-        } else {
-            markerAnnouncementStarted = true;
-            ttsUtils.playDepartureAnnouncement(dir.lineName, dir.startStation, dir.endStation, planHm);
-        }
+        ttsUtils.playDepartureAnnouncement(dir.lineName, dir.startStation, dir.endStation, planHm);
     }
 
     /** 当前时间，形如 HH:mm */

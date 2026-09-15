@@ -17,6 +17,10 @@ public class PovStationDetector {
     private static final double DEFAULT_ENTER_STATION_RADIUS = 30.0;
     private static final double DEFAULT_EXIT_STATION_RADIUS = 80.0;
     private static final double STATION_PROXIMITY_THRESHOLD_METERS = 300.0;
+    // 距离比"进站后的最小距离"增大多少米，才算"车辆已越过最近点、开始驶离站点"。
+    // 出站必须"距离由减小转为增大"后再超过出站半径，否则进站半径大于出站半径时
+    // （如进站80/出站40），车辆接近途中就会被误判成出站。
+    private static final double EXIT_MOVING_AWAY_METERS = 5.0;
     private static final float MIN_VALID_SPEED_KMH = 3.0f;
     private static final long GPS_PROCESS_INTERVAL_MS = 1000L;
 
@@ -35,6 +39,8 @@ public class PovStationDetector {
 
     private boolean isInsideStationRadius = false;
     private int lastInsideStationIndex = -1;
+    // 进站后到该站的最小距离：用于判断"距离是否已由减小转为增大"（车辆是否已驶离该站）
+    private double insideStationMinDistance = Double.MAX_VALUE;
     private int currentStationIndex = -1;
     private int nextStationIndex = 0;
     private String nearestStationName = "";
@@ -206,7 +212,10 @@ public class PovStationDetector {
             }
         }
 
-        if (!result.isInside && isInsideStationRadius && lastInsideStationIndex >= 0) {
+        // ⭐ 出站判定独立于进站判定：只按【出站半径】判断"是否已离开上一帧所在站点"。
+        //    原实现带 !result.isInside 门槛，于是只要还在进站半径内就永远判不出站 ——
+        //    出站半径小于进站半径时（例如进站40/出站30），表现就是"出站按进站半径判定"。
+        if (isInsideStationRadius && lastInsideStationIndex >= 0) {
             BusApiClient.BusLineStation lastInside = stationList.get(lastInsideStationIndex);
             double stationLat = lastInside.poiOriginLat;
             double stationLon = lastInside.poiOriginLon;
@@ -218,7 +227,14 @@ public class PovStationDetector {
                             RouteGeometryUtils.calculateDistances(lat, lon, stationLat, stationLon, routePoints);
                     distance = routeDistance.alongRouteDistance >= 0 ? routeDistance.alongRouteDistance : routeDistance.directDistance;
                 }
-                if (distance > exitStationRadius) {
+                // ① 距离已由减小转为增大（越过最近点/站点，用"最小距离 + 余量"抗 GPS 抖动），
+                // ② 且已超过【出站半径】，才算驶离。
+                // 缺①时，进站半径 > 出站半径（如进站80/出站40）会在车辆还在接近时（距离40~80）就判出站。
+                if (distance < insideStationMinDistance) {
+                    insideStationMinDistance = distance;
+                }
+                boolean movingAway = distance >= insideStationMinDistance + EXIT_MOVING_AWAY_METERS;
+                if (movingAway && distance > exitStationRadius) {
                     result.leavingIndex = lastInsideStationIndex;
                     result.stationIndex = lastInsideStationIndex;
                     result.stationName = lastInside.stationName;
@@ -234,6 +250,7 @@ public class PovStationDetector {
             isInsideStationRadius = false;
             currentStationIndex = Math.max(currentStationIndex, result.leavingIndex);
             lastInsideStationIndex = -1;
+            insideStationMinDistance = Double.MAX_VALUE; // 已出站：重置最小距离，下一站重新统计
             nextStationIndex = Math.min(currentStationIndex + 1, stationList.size() - 1);
             callback.onStationStatusChanged(false, nextStationIndex, stationList.get(nextStationIndex).stationName);
             return;
@@ -245,6 +262,10 @@ public class PovStationDetector {
             }
         } else if (result.stationIndex <= currentStationIndex) {
             return;
+        }
+        if (!isInsideStationRadius || result.stationIndex != currentStationIndex) {
+            // 进站/换站：重新统计"最小距离"，让出站判定按本站的"先减小后增大"来判断
+            insideStationMinDistance = Double.MAX_VALUE;
         }
         isInsideStationRadius = true;
         lastInsideStationIndex = result.stationIndex;
@@ -329,6 +350,7 @@ public class PovStationDetector {
     private void resetState() {
         isInsideStationRadius = false;
         lastInsideStationIndex = -1;
+        insideStationMinDistance = Double.MAX_VALUE;
         currentStationIndex = -1;
         nextStationIndex = 0;
         nearestStationName = "";

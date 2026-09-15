@@ -100,7 +100,7 @@
                         app:labelTextSize="15sp"
                         app:labelLitColor="#00FFFF"
                         app:labelDimColor="#00FFFF"
-                        app:labelText="报站判定: 直线距离"
+                        app:labelText="报站判定: 沿线距离"
                         android:text="" />
                     <LinearLayout
                         android:layout_width="match_parent"

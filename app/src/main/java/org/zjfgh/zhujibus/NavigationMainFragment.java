@@ -67,6 +67,9 @@ public class NavigationMainFragment extends Fragment {
     // ---- 速度平滑处理（EWMA + 变化率限制） ----
     private static final float EWMA_ALPHA = 0.3f;       // EWMA 权重：新值权重 0.3，旧值权重 0.7
     private static final float MAX_SPEED_CHANGE = 5f;   // 最大速度变化率（km/h/帧），防止跳变
+    // 低速阈值：低于该速度直接采用原始值，不做 EWMA 平滑。
+    // 否则停车时码表会按 4 → 3 → 2 → 1 的方式慢慢衰减，迟迟不归零（EWMA 只会渐近逼近 0）。
+    private static final float LOW_SPEED_NO_SMOOTH_KMH = 10f;
     private float smoothedSpeed = 0f;                   // EWMA 平滑后的速度
     private boolean speedInitialized = false;           // 是否已初始化速度
 
@@ -307,9 +310,11 @@ public class NavigationMainFragment extends Fragment {
                 return;
             }
 
-            // EWMA 平滑处理
-            if (!speedInitialized) {
-                // 首次初始化，直接使用当前速度
+            // 低速段（<10km/h，含停车）直接采用原始值：
+            // 不这样做的话，停车后 EWMA 会让码表按 4 → 3 → 2 → 1 缓慢衰减，迟迟不归零。
+            if (!speedInitialized
+                    || speedKmh < LOW_SPEED_NO_SMOOTH_KMH
+                    || smoothedSpeed < LOW_SPEED_NO_SMOOTH_KMH) {
                 smoothedSpeed = speedKmh;
                 speedInitialized = true;
             } else {
@@ -442,9 +447,9 @@ public class NavigationMainFragment extends Fragment {
             updateRouteSummary(String.valueOf(directionData.lineLength));
         }
 
-        // 4. 更新票价
-        double price = directionData.totalPrice > 0 ? directionData.totalPrice : 1.0;
-        updatePriceText(String.format(Locale.getDefault(), "%.2f", price));
+        // 4. 更新票价：接口没返回票价（totalPrice <= 0）时显示 "--"，不再兜底成 1.00
+        double price = directionData.totalPrice;
+        updatePriceText(price > 0 ? String.format(Locale.getDefault(), "%.2f", price) : "--");
 
         // 5. 更新方向
         if (directionData.endStation != null) {
@@ -680,7 +685,11 @@ public class NavigationMainFragment extends Fragment {
     }
 
     public void updatePriceText(String priceText) {
-        if (ticket != null && priceText != null) {
+        if (ticket == null || priceText == null) return;
+        // 接口没返回票价时传进来的是 "--"：此时不带"元"字，直接显示"票价：--"
+        if ("--".equals(priceText)) {
+            ticket.setText("票价：--");
+        } else {
             ticket.setText("票价：" + priceText + " 元");
         }
     }

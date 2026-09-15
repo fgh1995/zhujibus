@@ -367,11 +367,16 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
 
     public void playArrivalAnnouncement(String lineName, String startStation, String endStation, String nextStationName) {
         if (isPlaying) {
+            // 正在播（或正在合成，见下面的占位）：排队，等当前内容播完后由回调续播
             pendingAnnouncements.add(new QueuedAnnouncement(lineName, endStation, nextStationName));
             return;
         }
         pendingAnnouncements.clear();
         pendingAnnouncements.add(new QueuedAnnouncement(lineName, endStation, nextStationName));
+        // 先占位标记为播放中：合并音频是在后台线程构建的（TTS 合成可能耗时数百毫秒），
+        // 若等到真正 start() 才置位，这段空窗期内进来的提醒会被误判为“空闲”，
+        // 从而执行 pendingAnnouncements.clear() 把本条（乃至刚排队的）提醒丢掉、或重复启动播放互相打断。
+        isPlaying = true;
         backgroundHandler.post(() -> {
             List<PlaybackItem> items = new ArrayList<>();
             buildArrivalAnnouncementWithDirection(items, lineName, endStation, nextStationName);
@@ -379,7 +384,16 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
         });
     }
 
+    /**
+     * 进站提醒（排队播报）。用于同一条线路/多线路同一批播报时把后续车队接在后面播。
+     * 若当前没有任何内容在播（例如上一段刚播完），则立即启动播放，避免排队项一直没人播。
+     */
     public void queueArrivalAnnouncement(String lineName, String startStation, String endStation, String nextStationName) {
+        if (!isPlaying && pendingAnnouncements.isEmpty()) {
+            // 当前没有任何内容在播：不排队，直接播，避免“排进队列却没人触发播放”而漏播
+            playArrivalAnnouncement(lineName, startStation, endStation, nextStationName);
+            return;
+        }
         pendingAnnouncements.add(new QueuedAnnouncement(lineName, endStation, nextStationName));
     }
 
@@ -393,19 +407,25 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
      */
     public void playDepartureAnnouncement(String lineName, String startStation, String endStation, String planTime) {
         DepartureAnnouncement da = new DepartureAnnouncement(lineName, startStation, endStation, planTime);
-        if (isPlaying || !pendingAnnouncements.isEmpty() || !pendingDepartures.isEmpty()) {
-            pendingDepartures.add(da); // 有正在播放的内容，排队等待播完后依次播放
+        pendingDepartures.add(da);
+        // 有正在播放/待播的内容时排队，等它播完后依次播；
+        // 否则必须在这里启动播放 —— 注意不能因为「队列里还有之前排队的项」就直接返回，
+        // 否则那些排队项没有任何时机被触发播放（表现为计划发车提醒一直不响）。
+        if (isPlaying || !pendingAnnouncements.isEmpty()) {
             return;
         }
-        pendingDepartures.add(da);
         playNextDepartureAnnouncement();
     }
 
     /**
      * 计划发车提醒（排队播报）。用于"同一时刻多条线路发车"时把后续线路接在后面播。
+     * 若当前没有任何内容在播，则立即启动播放，避免排队项一直没人播。
      */
     public void queueDepartureAnnouncement(String lineName, String startStation, String endStation, String planTime) {
         pendingDepartures.add(new DepartureAnnouncement(lineName, startStation, endStation, planTime));
+        if (!isPlaying && pendingAnnouncements.isEmpty()) {
+            playNextDepartureAnnouncement();
+        }
     }
 
     /** 取队首的发车提醒并播放；播放结束由 MediaPlayer 回调再次调用本方法完成续播 */
@@ -414,6 +434,9 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
             return;
         }
         final DepartureAnnouncement da = pendingDepartures.remove(0);
+        // 先占位标记为播放中：合并音频是在后台线程构建的，若等到真正 start() 才置位，
+        // 这段空窗期内再有新的提醒进来会被误判为"空闲"而重复启动一次播放、互相打断。
+        isPlaying = true;
         backgroundHandler.post(() -> {
             List<PlaybackItem> items = new ArrayList<>();
             buildDepartureAnnouncement(items, da.lineName, da.startStation, da.endStation, da.planTime);
@@ -649,6 +672,7 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
             addEnStationName(items, firstNextStation);
 
             pendingAnnouncements.clear();
+            isPlaying = true; // 同为构建期占位，避免构建期间被误判为空闲
             buildAndPlayMergedAudio(items);
         });
     }
@@ -827,7 +851,10 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
 
             if (wavInfos.isEmpty()) {
                 isPlaying = false;
-                mainHandler.post(this::abandonAudioFocus);
+                mainHandler.post(() -> {
+                    abandonAudioFocus();
+                    playNextDepartureAnnouncementIfIdle();
+                });
                 return;
             }
 
@@ -871,7 +898,17 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
         } catch (Exception e) {
             Log.e(TAG, "拼接音频失败", e);
             isPlaying = false;
-            mainHandler.post(this::abandonAudioFocus);
+            mainHandler.post(() -> {
+                abandonAudioFocus();
+                playNextDepartureAnnouncementIfIdle();
+            });
+        }
+    }
+
+    /** 当前没有内容在播时，把排队的「计划发车提醒」继续播下去（构建失败等异常路径的兜底，避免队列卡死） */
+    private void playNextDepartureAnnouncementIfIdle() {
+        if (!isPlaying && pendingAnnouncements.isEmpty() && !pendingDepartures.isEmpty()) {
+            playNextDepartureAnnouncement();
         }
     }
 
@@ -901,6 +938,7 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
                 Log.e(TAG, "合并音频播放出错: " + what + ", " + extra);
                 isPlaying = false;
                 abandonAudioFocus();
+                playNextDepartureAnnouncementIfIdle();
                 return true;
             });
             mediaPlayer.prepare();

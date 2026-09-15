@@ -774,6 +774,8 @@ public class BusApiClient {
         public String gpsTime;
         public int isArriveStation;
         public String stationId;
+        // 车牌：站点接口不返回，标记模式下由线路车辆详情匹配出的车辆带上，用于按“车辆”去重播报
+        public String plateNumber;
     }
 
     public static class BusVehiclePlanRequest {
