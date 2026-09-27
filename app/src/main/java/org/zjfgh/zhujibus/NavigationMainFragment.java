@@ -9,6 +9,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewTreeObserver;
 import android.widget.ImageView;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
@@ -53,6 +54,14 @@ public class NavigationMainFragment extends Fragment {
     private ImageView iconGpsSignal;
     private ImageView iconNetworkSignal;
     private IBusCloudLineView iBusCloudLineView; // 新增的 IBusCloudLineView
+
+    // ---- 报站模式切换（mode_switch 已从 Activity 迁移到本 Fragment） ----
+    private LinearLayout modeSwitch;
+    private TextView modeText;
+    private TextView modeTips;
+    private TextView networkStatusIndicator;
+    private OnAnnounceModeToggleListener announceModeToggleListener;
+    private OnModeDisplayReadyListener modeDisplayReadyListener;
 
     // ---- 地图导航管理 ----
     private AmapNavigationView navigation;
@@ -100,6 +109,16 @@ public class NavigationMainFragment extends Fragment {
 
     public interface OnGpsArrivalListener {
         void onGpsArrival(int stationIndex);
+    }
+
+    /** 点击模式切换按钮时回调（由 Activity 处理 AnnounceMode 状态切换） */
+    public interface OnAnnounceModeToggleListener {
+        void onAnnounceModeToggle();
+    }
+
+    /** 本 Fragment 视图创建完成、可安全刷新报站模式显示时回调（由 Activity 触发初始显示） */
+    public interface OnModeDisplayReadyListener {
+        void onModeDisplayReady();
     }
 
     public static NavigationMainFragment newInstance(String lineName, String endStation) {
@@ -150,6 +169,20 @@ public class NavigationMainFragment extends Fragment {
             routeSummary = view.findViewById(R.id.route_summary);
             ticket = view.findViewById(R.id.ticket);
             iBusCloudLineView = view.findViewById(R.id.i_bus_cloud_line_view); // 获取 IBusCloudLineView
+
+            // 8. 绑定报站模式切换（mode_switch 已从 Activity 迁移过来）
+            modeSwitch = view.findViewById(R.id.mode_switch);
+            modeText = view.findViewById(R.id.mode_text);
+            modeTips = view.findViewById(R.id.mode_tips);
+            networkStatusIndicator = view.findViewById(R.id.network_status_indicator);
+
+            if (modeSwitch != null && announceModeToggleListener != null) {
+                modeSwitch.setOnClickListener(v -> announceModeToggleListener.onAnnounceModeToggle());
+            }
+            // 视图就绪：通知 Activity 刷新一次报站模式显示（首帧字体/状态对齐）
+            if (modeDisplayReadyListener != null) {
+                modeDisplayReadyListener.onModeDisplayReady();
+            }
 
             // 初始化信号指示器（默认值：GPS 无信号、网络 0 格）
             SignalIndicatorManager.setGpsSignal(iconGpsSignal, false);
@@ -288,6 +321,46 @@ public class NavigationMainFragment extends Fragment {
         this.swapOrientationListener = listener;
         if (navSwapOrientation != null && listener != null) {
             navSwapOrientation.setOnClickListener(listener);
+        }
+    }
+
+    // ---- 报站模式切换相关公开 API ----
+
+    public void setAnnounceModeToggleListener(OnAnnounceModeToggleListener listener) {
+        this.announceModeToggleListener = listener;
+        if (modeSwitch != null && listener != null) {
+            modeSwitch.setOnClickListener(v -> listener.onAnnounceModeToggle());
+        }
+    }
+
+    public void setModeDisplayReadyListener(OnModeDisplayReadyListener listener) {
+        this.modeDisplayReadyListener = listener;
+        // 若视图已绑定（如 Fragment 被恢复、onViewCreated 早于 Activity 设置监听），
+        // 立即触发一次，保证初始显示不遗漏。
+        if (listener != null && modeText != null) {
+            listener.onModeDisplayReady();
+        }
+    }
+
+    /** 设置模式文字（如 "网络" / "GPS 12/24"）及颜色 */
+    public void setModeText(CharSequence text, int color) {
+        if (modeText != null) {
+            modeText.setText(text);
+            modeText.setTextColor(color);
+        }
+    }
+
+    /** 设置网络状态指示灯颜色（绿/蓝/灰） */
+    public void setNetworkStatusIndicatorColor(int color) {
+        if (networkStatusIndicator != null) {
+            networkStatusIndicator.setTextColor(color);
+        }
+    }
+
+    /** 设置网络状态指示灯透明度（用于 GPS 信号弱时闪烁） */
+    public void setNetworkStatusIndicatorAlpha(float alpha) {
+        if (networkStatusIndicator != null) {
+            networkStatusIndicator.setAlpha(alpha);
         }
     }
 
@@ -764,5 +837,9 @@ public class NavigationMainFragment extends Fragment {
         navDirection = null;
         gpsSpeedText = null;
         iBusCloudLineView = null;
+        modeSwitch = null;
+        modeText = null;
+        modeTips = null;
+        networkStatusIndicator = null;
     }
 }

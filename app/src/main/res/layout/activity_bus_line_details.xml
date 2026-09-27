@@ -115,8 +115,8 @@
                     android:gravity="center_vertical">
                     <org.zjfgh.zhujibus.DotMatrixView
                         android:id="@+id/accessibility_icon"
-                        android:layout_width="42dp"
-                        android:layout_height="42dp"
+                        android:layout_width="45dp"
+                        android:layout_height="45dp"
                         app:dotMatrixPattern="accessibility"
                         app:dotMatrixColor="#FFFFFF"
                         android:layout_marginRight="10dp"/>
@@ -131,7 +131,7 @@
                             android:layout_height="wrap_content"
                             android:gravity="center"
                             android:text="00"
-                            app:hsTextSize="30sp"
+                            app:hsTextSize="35sp"
                             android:textColor="#00FF00"
                             android:textStyle="bold"
                             app:hsTextGap="20dp"
@@ -145,12 +145,12 @@
                             android:textColor="#00FF00"
                             android:textStyle="bold"
                             app:hsTextGap="20dp"
-                            app:hsTextSize="15sp" />
+                            app:hsTextSize="20sp" />
                     </LinearLayout>
 
                     <org.zjfgh.zhujibus.DotMatrixView
-                        android:layout_width="42dp"
-                        android:layout_height="42dp"
+                        android:layout_width="45dp"
+                        android:layout_height="45dp"
                         app:dotMatrixPattern="right_arrow"
                         app:dotMatrixColor="#FF0000"/>
                     <LinearLayout
@@ -164,7 +164,7 @@
                             android:layout_height="wrap_content"
                             android:layout_marginStart="8dp"
                             android:textColor="#FF0000"
-                            app:hsTextSize="30sp"
+                            app:hsTextSize="35sp"
                             app:hsTextGap="20dp"
                             android:text="终点站名" />
                         <org.zjfgh.zhujibus.HorizontalScrollTextView
@@ -173,7 +173,7 @@
                             android:layout_height="wrap_content"
                             android:layout_marginStart="8dp"
                             android:textColor="#FF0000"
-                            app:hsTextSize="15sp"
+                            app:hsTextSize="20sp"
                             app:hsTextGap="20dp"
                             android:text="end_station_en_name" />
                     </LinearLayout>
@@ -188,14 +188,14 @@
                         android:id="@+id/tips"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        app:hsTextSize="15sp"
+                        app:hsTextSize="18sp"
                         android:textColor="#FFFF00"
                         app:hsText="文明排队   上下有序"/>
                     <org.zjfgh.zhujibus.HorizontalScrollTextView
                         android:id="@+id/en_tips"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        app:hsTextSize="15sp"
+                        app:hsTextSize="18sp"
                         android:textColor="#FFFF00"
                         app:hsText="Queue in Order Board in Turn" />
                 </LinearLayout>
@@ -235,55 +235,7 @@
                         app:hsGravity="center"
                         app:hsTextColor="#FF0000"
                         app:hsTextGap="90dp"
-                        app:hsTextSize="30sp" />
-                    <LinearLayout
-                        android:id="@+id/mode_switch"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="5dp"
-                        android:layout_marginEnd="5dp"
-                        android:layout_marginTop="4dp"
-                        android:layout_marginBottom="4dp"
-                        android:layout_gravity="center_vertical"
-                        android:orientation="vertical"
-                        android:background="@drawable/led_button_green_selector"
-                        android:clickable="true"
-                        android:focusable="true"
-                        android:paddingStart="4dp"
-                        android:paddingEnd="4dp"
-                        android:paddingTop="4dp"
-                        android:paddingBottom="4dp">
-                        <TextView
-                            android:id="@+id/mode_tips"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="切换模式"
-                            android:layout_gravity="center_horizontal"
-                            android:textColor="#1AFF00"
-                            android:textSize="11sp"/>
-                        <LinearLayout
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:gravity="center_vertical">
-                            <TextView
-                                android:id="@+id/network_status_indicator"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="●"
-                                android:textColor="#00FF00"
-                                android:textSize="10sp" />
-                            <TextView
-                                android:id="@+id/mode_text"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:layout_marginStart="4dp"
-                                android:padding="2dp"
-                                android:fontFeatureSettings="tnum"
-                                android:textColor="#FF0000"
-                                android:textSize="12sp"
-                                android:text="网络"/>
-                        </LinearLayout>
-                    </LinearLayout>
+                        app:hsTextSize="35sp" />
                 </org.zjfgh.zhujibus.view.DotMatrixLinearLayout>
             </LinearLayout>
         </LinearLayout>

@@ -80,7 +80,7 @@ public class DirectionPagerAdapter extends RecyclerView.Adapter<DirectionPagerAd
     public DirectionPagerAdapter(Context context, List<BusApiClient.LineDirection> directions) {
         this.context = context;
         this.directions = directions;
-        this.dottedSongti = Typeface.createFromAsset(context.getAssets(), "fonts/ZiTiGuanJiaBoDian-2.ttf");
+        this.dottedSongti = Typeface.createFromAsset(context.getAssets(), "fonts/DottedSongtiCircleRegular.otf");
     }
 
     @NonNull
@@ -177,6 +177,8 @@ public class DirectionPagerAdapter extends RecyclerView.Adapter<DirectionPagerAd
                     nextBusTime.setText(direction.planTime);
                 } else {
                     nextBusLabel.setText("暂无车辆信息");
+                    // 没有发车时间时清空时间文本：该卡片是复用的，否则会残留上一辆车/上一轮的内容
+                    nextBusTime.setText("");
                 }
             }
 

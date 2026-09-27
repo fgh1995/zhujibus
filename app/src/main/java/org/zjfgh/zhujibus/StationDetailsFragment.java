@@ -32,7 +32,9 @@ import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.Iterator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -68,6 +70,13 @@ public class StationDetailsFragment extends DialogFragment {
     private final Map<String, BusApiClient.BusLineDetailData> lineDetailCache = new HashMap<>();
     // 标记刷新批次号：切换标记/重新查询时自增，用于丢弃过期回调
     private int markerRequestGeneration = 0;
+    // 站点取数批次号：每次 loadStationData 自增，切标记/退出页面时也自增。
+    // 非标记链路（车辆动态 → 计划发车时间）的回调都带批次号校验，
+    // 避免"点标记前发出的双向数据请求"回来后把双向列表刷上界面、还按错方向播报。
+    private int stationDataGeneration = 0;
+    // 最近一次站点接口返回的原始数据（双向）：点自定义标记时先用它立刻裁剪出标记方向的列表，
+    // 不必等下一轮响应（否则点了标记还会继续显示双向列表）
+    private List<BusApiClient.StationLineInfo> latestStationResponse;
     // 标记模式逐条线路处理的进度：当前正在处理的线路下标（-1 表示未在处理）
     private int markerLineIndex = -1;
     // 标记模式一轮线路取数是否仍在进行：进行中时刷新节拍不再发起新一轮，
@@ -77,6 +86,22 @@ public class StationDetailsFragment extends DialogFragment {
     // （22:00 那班一开走就变成下一班），只靠「取数那一刻」比对很容易正好错过整点而漏播，
     // 所以记录下来交给每轮刷新节拍复查。
     private final List<PendingDeparturePlan> pendingDeparturePlans = new ArrayList<>();
+    // 本轮批量取回的计划发车时间：lineId -> HH:mm。
+    // /bus/vehicle/plan 支持逗号分隔的多个 lineId（一次请求即可），不必逐条线路轮询。
+    private final Map<String, String> markerPlanTimeByLine = new HashMap<>();
+    // 卡片展示顺序（键 lineId_stationId）：每轮排序后更新，下一轮就按这个新顺序逐条查询
+    private final List<String> markerDisplayOrder = new ArrayList<>();
+    // 本轮已完成车辆取数的线路（键 lineId_stationId）：只有取过数的线路才知道它到底有没有车，
+    // 发车广播必须等"有车/无车"确定后再判断，避免刚清空车辆数据时误播
+    private final Set<String> markerProcessedLines = new HashSet<>();
+    // 卡片上仍是"上一轮数据"的线路（键 lineId_stationId）：这些卡片淡化显示，
+    // 本轮数据回来后逐条取消淡化，用于区分"新/旧"数据（集合引用交给适配器读取）
+    private final Set<String> markerStaleLines = new HashSet<>();
+    // 本轮真的取到车辆数据的线路：取数失败/超时的线路保持淡化，不能把旧数据当成新数据展示
+    private final Set<String> markerRefreshedLines = new HashSet<>();
+    // 当前 currentBusLineItems 是否已经是"标记方向的单向列表"：
+    // 是则每轮只需把新数据合并进去（保留旧的车/发车时间），否则要按标记重新裁剪
+    private boolean markerListActive = false;
     // 单条线路最长等待时间：超时不再等待该线路，直接处理下一条，避免一条慢线路拖住整轮刷新
     private static final long MARKER_LINE_TIMEOUT_MS = 5000;
     private Handler scheduleHandler;
@@ -139,6 +164,8 @@ public class StationDetailsFragment extends DialogFragment {
         transparentDivider.setBounds(0, 0, 0, 8);
         dividerItemDecoration.setDrawable(transparentDivider);
         recyclerView.addItemDecoration(dividerItemDecoration);
+        // 自定义条目动画：交换放慢 + 预动作回位（默认 250ms 太快看不清交换过程）
+        recyclerView.setItemAnimator(new BusStationItemAnimator());
         adapter = new BusStationAdapter();
         recyclerView.setAdapter(adapter);
 
@@ -281,8 +308,7 @@ public class StationDetailsFragment extends DialogFragment {
                 if (currentSelectedMarker != null && currentSelectedMarker.id == marker.id) {
                     showMarkerLinesDialog(marker);
                 } else {
-                    currentSelectedMarker = marker;
-                    queryWithMarker(marker);
+                    queryWithMarker(marker);   // 内部会设置选中标记并立刻把列表裁成标记方向
                 }
                 loadDirectionMarkers();
             });
@@ -392,37 +418,61 @@ public class StationDetailsFragment extends DialogFragment {
         }
     }
 
-    private void clearMarkerSelection() {
+    /**
+     * 彻底清理标记相关状态（不碰界面，退出页面/销毁时也能安全调用）。
+     * 批次号一起自增：所有在途的标记/站点回调都会因此作废，不会留下"旧标记"继续播报。
+     */
+    private void resetMarkerState() {
         currentSelectedMarker = null;
         markerRequestGeneration++;
+        stationDataGeneration++;
         markerLineIndex = -1;
         markerLoadingInProgress = false;
+        markerListActive = false;
         pendingDeparturePlans.clear();
-        if (scheduleHandler != null) {
-            scheduleHandler.removeCallbacksAndMessages(null);
-        }
+        markerPlanTimeByLine.clear();
+        markerDisplayOrder.clear();
+        markerProcessedLines.clear();
+        markerRefreshedLines.clear();
+        markerStaleLines.clear();
         lineDetailCache.clear();
         announcedVehicles.clear();
         announcedDepartures.clear();
+    }
+
+    private void clearMarkerSelection() {
+        resetMarkerState();
+        adapter.setStaleLineKeys(markerStaleLines);   // 退出标记模式：取消淡化
+        if (scheduleHandler != null) {
+            scheduleHandler.removeCallbacksAndMessages(null);
+        }
         adapter.clearHighlightAndGray();
         adapter.resetAllViewPagersToZero();
+        // 立刻回到"全部方向"的展示（否则要等到下一次刷新节拍才恢复，界面会停在标记方向列表上）
+        loadStationData();
     }
 
     /**
      * 点击自定义标记后的取数逻辑。
      * <p>
-     * 先走原站点接口拿到本站的线路/首末班等基础信息（保证与其它场景一致），
-     * 裁剪出标记对应的单向列表后，所有方向（含本站接口查不到的跨站台线路）都由
+     * 先把手里的旧状态全部清掉（含批次号自增，让点标记之前发出去的双向数据回调作废），
+     * 再用最近一次站点接口的原始数据<b>立刻</b>裁剪出标记方向的单向列表 ——
+     * 不等下一轮响应，避免"点了标记还继续显示双向数据"；
+     * 随后走原站点接口刷新基础信息，所有方向（含本站接口查不到的跨站台线路）都由
      * {@link #startMarkerVehicleLoading()} 走线路详情自行匹配离标记站点最近的那辆车。
      */
     private void queryWithMarker(DirectionMarker marker) {
-        announcedVehicles.clear();
-        announcedDepartures.clear();
-        pendingDeparturePlans.clear();
-        lineDetailCache.clear();
+        resetMarkerState();
+        adapter.setStaleLineKeys(markerStaleLines);
         if (marker.lineIds.isEmpty()) {
             Toast.makeText(requireContext(), "标记中没有线路", Toast.LENGTH_SHORT).show();
             return;
+        }
+        currentSelectedMarker = marker;
+        // 立刻按标记裁剪一次（用手里已有的原始双向数据），界面马上变成标记方向
+        if (latestStationResponse != null && !latestStationResponse.isEmpty()) {
+            currentBusLineItems = latestStationResponse;
+            markerListActive = buildMarkerFilteredList();
         }
         loadStationData();
     }
@@ -498,8 +548,29 @@ public class StationDetailsFragment extends DialogFragment {
     }
 
     @Override
+    public void onDestroyView() {
+        super.onDestroyView();
+        // 退出页面：彻底清理旧标记与在途请求。
+        // 不清的话，旧标记的取数/播报回调可能还在跑（甚至退出后继续播报），
+        // 下次进入页面也容易残留上一次的选中状态。
+        resetMarkerState();
+        currentBusLineItems = null;
+        latestStationResponse = null;
+        if (refreshHandler != null) {
+            refreshHandler.removeCallbacks(refreshRunnable);
+        }
+        if (scheduleHandler != null) {
+            scheduleHandler.removeCallbacksAndMessages(null);
+        }
+        if (busApiClient != null) {
+            busApiClient.cancelAllRequests();
+        }
+    }
+
+    @Override
     public void onDestroy() {
         super.onDestroy();
+        resetMarkerState();
         if (refreshHandler != null) {
             refreshHandler.removeCallbacks(refreshRunnable);
         }
@@ -513,6 +584,7 @@ public class StationDetailsFragment extends DialogFragment {
      * 若当前已选中自定义标记，会在数据就绪后切到对应方向并触发按距离阈值的报站。
      */
     public void loadStationData() {
+        final int stationGen = ++stationDataGeneration;   // 新一轮：此前发出去的回调作废
         try {
             busApiClient.queryStationInfo(currentStationName, new BusApiClient.ApiCallback<>() {
                 @Override
@@ -523,14 +595,17 @@ public class StationDetailsFragment extends DialogFragment {
                             return;
                         }
                         if (!isUiAlive()) return;
-                        currentBusLineItems = response.data;
+                        if (stationGen != stationDataGeneration) return;   // 已有更新的一轮，结果作废
+                        List<BusApiClient.StationLineInfo> freshItems = response.data;
+                        latestStationResponse = freshItems;   // 原始双向数据：点标记时可以立刻裁剪
 
-                        if (currentSelectedMarker != null && buildMarkerFilteredList()) {
-                            // 标记选中：已裁剪出单向列表，接着按“线路车辆详情”取最近车辆
+                        if (currentSelectedMarker != null && refreshMarkerItems(freshItems)) {
+                            // 标记选中：列表就是标记方向的单向列表，接着按“线路车辆详情”取最近车辆
                             startMarkerVehicleLoading();
                             return;
                         }
 
+                        currentBusLineItems = freshItems;
                         adapter.setData(currentBusLineItems);
 
                         StringBuilder lineIdsBuilder = new StringBuilder();
@@ -546,7 +621,8 @@ public class StationDetailsFragment extends DialogFragment {
                         }
 
                         if (lineIdsBuilder.length() > 0) {
-                            fetchVehicleDynamicData(lineIdsBuilder.toString(), stationIdsBuilder.toString(), currentBusLineItems);
+                            fetchVehicleDynamicData(lineIdsBuilder.toString(), stationIdsBuilder.toString(),
+                                    currentBusLineItems, stationGen);
                         }
                     } catch (Exception e) {
                         Log.e("-BusInfo-", "处理站点数据失败", e);
@@ -575,21 +651,30 @@ public class StationDetailsFragment extends DialogFragment {
     /**
      * 用站点接口返回的全部 lineId/stationId 拉取车辆动态，并合并进双向数据。
      * 未选中标记时的主链路；标记模式下仅作为线路详情不可用时的兜底。
+     *
+     * @param stationGen 本轮站点取数的批次号：中途选了标记 / 来了更新的一轮时，本轮回调直接作废
      */
-    private void fetchVehicleDynamicData(String lineIds, String stationIds, List<BusApiClient.StationLineInfo> busLineItems) {
-        fetchVehicleDynamicData(lineIds, stationIds, busLineItems, null);
+    private void fetchVehicleDynamicData(String lineIds, String stationIds,
+                                        List<BusApiClient.StationLineInfo> busLineItems,
+                                        int stationGen) {
+        fetchVehicleDynamicData(lineIds, stationIds, busLineItems, () -> {
+            if (stationGen != stationDataGeneration) return;   // 这次取数已过期：不刷界面、不播报
+            fetchPlanTimeForEmptyLines(busLineItems, stationGen);
+        });
     }
 
     /**
-     * @param onFinished 为空时保持默认行为（取完车辆直接走计划发车时间并刷新）；
-     *                   标记模式下传入自己的完成回调，由标记流程统一收尾，避免提前刷新导致数据被覆盖。
+     * @param onFinished 取完车辆后的收尾动作（必传）：非标记链路传"校验批次号 → 取计划发车时间"，
+     *                   标记模式传自己的完成回调，由标记流程统一收尾，避免提前刷新导致数据被覆盖。
      */
     private void fetchVehicleDynamicData(String lineIds, String stationIds,
                                          List<BusApiClient.StationLineInfo> busLineItems,
                                          Runnable onFinished) {
-        Runnable finishAction = (onFinished != null)
-                ? onFinished
-                : () -> fetchPlanTimeForEmptyLines(busLineItems);
+        if (onFinished == null) {
+            Log.w("-BusInfo-", "车辆动态缺少收尾回调，忽略本次结果");
+            return;
+        }
+        final Runnable finishAction = onFinished;
         try {
             busApiClient.queryStationVehicleDynamic(lineIds, stationIds, new BusApiClient.ApiCallback<>() {
                 @Override
@@ -642,7 +727,7 @@ public class StationDetailsFragment extends DialogFragment {
         }
     }
 
-    private void fetchPlanTimeForEmptyLines(List<BusApiClient.StationLineInfo> busLineItems) {
+    private void fetchPlanTimeForEmptyLines(List<BusApiClient.StationLineInfo> busLineItems, int stationGen) {
         try {
             Set<String> lineIdsWithoutVehicle = new HashSet<>();
             for (BusApiClient.StationLineInfo lineInfo : busLineItems) {
@@ -662,6 +747,7 @@ public class StationDetailsFragment extends DialogFragment {
                     public void onSuccess(BusApiClient.BusVehiclePlanResponse response) {
                         runOnUiThreadSafe(() -> {
                             if (!isUiAlive()) return;
+                            if (stationGen != stationDataGeneration) return;   // 这轮取数已过期（如中途选了标记）：丢弃
                             try {
                                 if (response == null || response.data == null) {
                                     Log.w("-BusInfo-", "计划发车时间数据为空");
@@ -679,8 +765,9 @@ public class StationDetailsFragment extends DialogFragment {
                                     }
                                 }
                                 adapter.setData(busLineItems);
-                                if (currentSelectedMarker != null) {
-                                    // 兜底：标记方向未匹配到、退回全量展示时，按整表判断报站与发车预报
+                                // 只有当前展示的确实是"标记方向的单向列表"才按标记播报；
+                                // 标记方向没匹配到、退回全量双向展示时不能播报（否则会按错方向播错站）
+                                if (currentSelectedMarker != null && markerListActive) {
                                     announceMarkerItems(busLineItems);
                                 }
                             } catch (Exception e) {
@@ -697,8 +784,9 @@ public class StationDetailsFragment extends DialogFragment {
             } else {
                 runOnUiThreadSafe(() -> {
                     if (!isUiAlive()) return;
+                    if (stationGen != stationDataGeneration) return;   // 这轮取数已过期：丢弃
                     adapter.setData(busLineItems);
-                    if (currentSelectedMarker != null) {
+                    if (currentSelectedMarker != null && markerListActive) {
                         announceMarkerItems(busLineItems);
                     }
                 });
@@ -706,6 +794,85 @@ public class StationDetailsFragment extends DialogFragment {
         } catch (Exception e) {
             Log.e("-BusInfo-", "查询计划发车时间异常", e);
         }
+    }
+
+    /**
+     * 标记模式下把站点接口的最新数据合并进当前列表（刷新节拍每轮调用一次）。
+     * <p>
+     * 列表已存在时<b>只更新展示用的静态字段</b>（线路名/起终点/首末班/类型），
+     * 上一轮的车辆与发车时间<b>保留</b>下来继续展示，列表对象和顺序都不重建：
+     * 一轮开始时卡片仍是上一轮内容（由 {@link #startMarkerVehicleLoading()} 统一置为淡化"待更新"态），
+     * 各线路本轮数据回来后逐条恢复，避免每轮整屏闪一次"暂无车辆信息"。
+     * 首次进入标记模式（列表为空）或标记方向在接口里一个都没对上时，退回
+     * {@link #buildMarkerFilteredList()} 重建（内部按标记方向裁剪，失败会提示并显示全部方向）。
+     *
+     * @return true 表示当前列表就是标记方向的单向列表
+     */
+    private boolean refreshMarkerItems(List<BusApiClient.StationLineInfo> freshItems) {
+        if (currentSelectedMarker == null) return false;
+        if (!markerListActive || currentBusLineItems == null || currentBusLineItems.isEmpty()) {
+            // 首次进入该标记 / 上一次没裁出标记方向：按标记方向重新裁剪出单向列表
+            currentBusLineItems = freshItems;
+            markerListActive = buildMarkerFilteredList();
+            return markerListActive;
+        }
+
+        // 新数据按 (lineId, stationId) 建索引，便于逐条把静态字段搬到旧对象上
+        Map<String, BusApiClient.LineDirection> freshDirections = new HashMap<>();
+        Map<String, String> freshNames = new HashMap<>();
+        if (freshItems != null) {
+            for (BusApiClient.StationLineInfo item : freshItems) {
+                if (item == null) continue;
+                indexFreshDirection(item.up, item.lineName, freshDirections, freshNames);
+                indexFreshDirection(item.down, item.lineName, freshDirections, freshNames);
+            }
+        }
+
+        int matched = 0;
+        for (BusApiClient.StationLineInfo item : currentBusLineItems) {
+            BusApiClient.LineDirection dir = markerDirectionOf(item);
+            if (dir == null || dir.lineId == null) continue;
+            String key = dir.lineId + "_" + dir.stationId;
+            BusApiClient.LineDirection fresh = freshDirections.get(key);
+            if (fresh == null) continue;   // 跨站台线路等接口里没有的方向：保持原样，车辆仍由线路详情匹配
+            matched++;
+            copyMarkerDisplayFields(fresh, dir);
+            String freshName = freshNames.get(key);
+            if (freshName != null) item.lineName = freshName;
+        }
+
+        if (matched == 0) {
+            // 标记方向在接口数据里一个都没对上（标记里存的 id 可能已失效）：退回重建逻辑
+            currentBusLineItems = freshItems;
+            markerListActive = buildMarkerFilteredList();
+            return markerListActive;
+        }
+        return true;
+    }
+
+    private void indexFreshDirection(BusApiClient.LineDirection dir, String lineName,
+                                     Map<String, BusApiClient.LineDirection> outDirections,
+                                     Map<String, String> outNames) {
+        if (dir == null || dir.lineId == null || dir.stationId == null) return;
+        String key = dir.lineId + "_" + dir.stationId;
+        outDirections.put(key, dir);
+        if (lineName != null) outNames.put(key, lineName);
+    }
+
+    /**
+     * 只把"展示用"的静态字段从新数据搬到旧对象上。
+     * vehicleInfo / planTime 故意不搬：它们由线路详情与批量计划接口在本轮重新匹配，
+     * 这样合并的瞬间卡片不会变成"暂无车辆信息"（旧值先留着，数据回来再替换）。
+     */
+    private void copyMarkerDisplayFields(BusApiClient.LineDirection from, BusApiClient.LineDirection to) {
+        if (from == null || to == null) return;
+        if (from.startStation != null) to.startStation = from.startStation;
+        if (from.endStation != null) to.endStation = from.endStation;
+        if (from.departureTime != null) to.departureTime = from.departureTime;
+        if (from.collectTime != null) to.collectTime = from.collectTime;
+        if (from.lineTypeName != null) to.lineTypeName = from.lineTypeName;
+        to.lineType = from.lineType;
+        to.price = from.price;
     }
 
     /**
@@ -783,9 +950,34 @@ public class StationDetailsFragment extends DialogFragment {
             return false;
         }
 
+        // 先按上一轮排好的名次摆放：本轮逐条查询的顺序也取自这个顺序（见 startMarkerVehicleLoading）
+        sortByRememberedMarkerOrder(filtered);
         currentBusLineItems = filtered;
         adapter.setData(filtered);
         return true;
+    }
+
+    /** 按上一轮记录的名次重排（没记录过的排在后面，保持原有相对顺序；排序稳定，不会抖动） */
+    private void sortByRememberedMarkerOrder(List<BusApiClient.StationLineInfo> items) {
+        if (items == null || items.size() < 2 || markerDisplayOrder.isEmpty()) return;
+        items.sort((a, b) -> Integer.compare(rememberedOrderIndex(a), rememberedOrderIndex(b)));
+    }
+
+    /** 数据在上一轮名次里的下标；没有记录时返回一个很大的值（排到最后） */
+    private int rememberedOrderIndex(BusApiClient.StationLineInfo item) {
+        BusApiClient.LineDirection dir = markerDirectionOf(item);
+        if (dir == null || dir.lineId == null) return Integer.MAX_VALUE;
+        int index = markerDisplayOrder.indexOf(dir.lineId + "_" + dir.stationId);
+        return index < 0 ? Integer.MAX_VALUE : index;
+    }
+
+    /**
+     * 标记模式下每张卡片只展示一个方向（{@link #buildMarkerFilteredList()} 里 up/down 只留其一），
+     * 这里取出该卡片当前展示的方向；都没有则返回 null。
+     */
+    private BusApiClient.LineDirection markerDirectionOf(BusApiClient.StationLineInfo item) {
+        if (item == null) return null;
+        return item.up != null ? item.up : item.down;
     }
 
     /**
@@ -799,6 +991,9 @@ public class StationDetailsFragment extends DialogFragment {
     private void startMarkerVehicleLoading() {
         markerRequestGeneration++;
         markerLineIndex = -1;
+        markerPlanTimeByLine.clear();
+        markerProcessedLines.clear();
+        markerRefreshedLines.clear();
 
         List<BusApiClient.StationLineInfo> items = currentBusLineItems;
         if (items == null || items.isEmpty()) {
@@ -810,8 +1005,6 @@ public class StationDetailsFragment extends DialogFragment {
         for (BusApiClient.StationLineInfo item : items) {
             BusApiClient.LineDirection dir = item.up;
             if (dir == null || dir.lineId == null) continue;
-            // 一律清掉站点接口返回的、可能方向错配的车辆数据，改由线路详情重新匹配
-            dir.vehicleInfo = null;
             dirs.add(dir);
         }
 
@@ -820,8 +1013,25 @@ public class StationDetailsFragment extends DialogFragment {
             return;
         }
 
+        // 新一轮开始：上一轮的车辆/发车时间先留着继续显示，只把整表置为淡化"待更新"，
+        // 哪条线路本轮的车辆数据回来就恢复它自己（见 onMarkerLineReady）——
+        // 不再像以前那样先清空车辆数据，否则一轮开始整屏会闪成"暂无车辆信息"
+        markAllMarkerLinesStale(dirs);
         markerLoadingInProgress = true;
+        // 计划发车时间用批量接口一次取回（与逐条车辆取数并行），不再每条线路各发一次
+        fetchMarkerPlanTimesBatch(dirs, markerRequestGeneration);
         advanceMarkerLine(dirs, 0, markerRequestGeneration);
+    }
+
+    /** 新一轮开始：所有线路标记为"仍是上一轮数据"（卡片淡化），各自本轮数据回来后再逐条恢复 */
+    private void markAllMarkerLinesStale(List<BusApiClient.LineDirection> dirs) {
+        markerStaleLines.clear();
+        for (BusApiClient.LineDirection dir : dirs) {
+            if (dir == null || dir.lineId == null) continue;
+            markerStaleLines.add(markerLineKey(dir));
+        }
+        adapter.setStaleLineKeys(markerStaleLines);
+        adapter.notifyAllLinesChanged();
     }
 
     /** 逐条线路推进：处理第 index 条线路，完成后自动接着处理下一条 */
@@ -856,68 +1066,177 @@ public class StationDetailsFragment extends DialogFragment {
     }
 
     /**
-     * 单条线路数据就绪：先刷新这条线路的卡片，再立刻判断「进站报站」与「发车预报」；
-     * 该线路没有在线车辆时补取它的计划发车时间（界面显示「下一班发车时间」+ 发车预报）。
+     * 单条线路数据就绪：先按最新名次重排列表（带动画）并刷新这条线路的卡片，
+     * 再判断「进站报站」；只有这条线路没有在线车辆时才判断「计划发车提醒」。
      */
     private void onMarkerLineReady(BusApiClient.LineDirection dir) {
         if (currentSelectedMarker == null || dir == null || !isUiAlive()) return;
-        notifyMarkerLineChanged(dir);
+        boolean hasVehicle = dir.vehicleInfo != null;
+        String lineKey = markerLineKey(dir);
+        // 只有"本轮车辆数据确实取到了"才认定这条线路的"有车/无车"是确定的：
+        // 取数失败或超时的情况下卡片保持淡化（数据显示的还是上一轮），也不拿旧数据去判断播报
+        boolean vehicleStateFresh = markerRefreshedLines.contains(lineKey);
+        if (vehicleStateFresh) {
+            markerProcessedLines.add(lineKey);
+            markerStaleLines.remove(lineKey);          // 取消淡化（下面刷新卡片时生效）
+        }
+        // 本轮批量取回的计划发车时间：只对"没有在线车辆"的线路生效
+        String planFromBatch = dir.lineId == null ? null : markerPlanTimeByLine.get(dir.lineId);
+        if (!hasVehicle && planFromBatch != null) {
+            dir.planTime = planFromBatch;
+        }
+        applyMarkerOrderAndRefresh(dir);
+        if (!vehicleStateFresh) return;
         announceForMarkerLine(dir);
-        if (dir.vehicleInfo == null) {
-            fetchMarkerPlanTime(dir);
-        } else {
+        // 有最近车辆不播发车广播；本轮批量数据还没到也不在这里判断（到位后会统一判断）
+        if (!hasVehicle && planFromBatch != null) {
             announceDepartureForMarkerLine(dir);
         }
     }
 
-    /** 取单条线路的计划发车时间（发车预报依赖它，取到后立即刷新该卡片并判断发车预报） */
-    private void fetchMarkerPlanTime(BusApiClient.LineDirection dir) {
-        if (dir == null || dir.lineId == null) return;
-        final String lineId = dir.lineId;
-        final String stationId = dir.stationId;
+    /** 线路键：lineId_stationId（与播报去重键同源） */
+    private String markerLineKey(BusApiClient.LineDirection dir) {
+        return dir == null ? "" : dir.lineId + "_" + dir.stationId;
+    }
+
+    /**
+     * 批量取本轮所有线路的计划发车时间。
+     * /bus/vehicle/plan 支持逗号分隔的多个 lineId，一次请求就能把整屏线路的
+     * 「下一班发车时间」全部拿回来，线路多时能省下 N-1 次请求（原来每条无车线路各发一次）。
+     */
+    private void fetchMarkerPlanTimesBatch(List<BusApiClient.LineDirection> dirs, int gen) {
+        if (dirs == null || dirs.isEmpty()) return;
+        Set<String> lineIds = new LinkedHashSet<>();   // 去重：同一线路的多个方向只查一次
+        for (BusApiClient.LineDirection dir : dirs) {
+            if (dir == null || dir.lineId == null) continue;
+            lineIds.add(dir.lineId);
+        }
+        if (lineIds.isEmpty()) return;
+        final String lineIdsParam = String.join(",", lineIds);
         try {
-            busApiClient.queryBusVehiclePlan(lineId, new BusApiClient.ApiCallback<>() {
+            busApiClient.queryBusVehiclePlan(lineIdsParam, new BusApiClient.ApiCallback<>() {
                 @Override
                 public void onSuccess(BusApiClient.BusVehiclePlanResponse response) {
-                    if (response == null || response.data == null || response.data.isEmpty()) {
-                        Log.w("-BusInfo-", "计划发车时间数据为空：" + lineId);
-                        return;
-                    }
-                    String startTime = null;
-                    for (BusApiClient.BusPlanTime planTime : response.data) {
-                        if (planTime != null && lineId.equals(planTime.lineId)) {
-                            startTime = planTime.startTime;
-                            break;
-                        }
-                    }
-                    if (startTime == null && response.data.get(0) != null) {
-                        startTime = response.data.get(0).startTime;
-                    }
-                    applyMarkerPlanTime(lineId, stationId, startTime);
+                    if (gen != markerRequestGeneration) return;   // 标记已切换 / 已开始新一轮
+                    if (!isUiAlive()) return;
+                    applyMarkerPlanTimes(response);
                 }
 
                 @Override
                 public void onError(BusApiClient.BusApiException e) {
-                    Log.e("-BusInfo-", "获取计划发车时间失败: " + e.getMessage(), e);
+                    Log.e("-BusInfo-", "批量获取计划发车时间失败: " + e.getMessage(), e);
                 }
             });
         } catch (Exception e) {
-            Log.e("-BusInfo-", "查询计划发车时间异常", e);
+            Log.e("-BusInfo-", "批量查询计划发车时间异常", e);
         }
     }
 
     /**
-     * 把计划发车时间写到当前列表对应方向上并立刻刷新、判断发车预报。
-     * 按 (lineId, stationId) 在当前列表里重新定位（而不是直接写回调捕获的对象），
-     * 这样即使响应晚于新一轮刷新返回也能正确生效，不会丢播报。
+     * 批量计划发车时间返回：写入各路线路。无车线路据此显示「下一班发车时间」并判断发车提醒；
+     * 有车线路只留数据（卡片显示的是车辆信息，也不播发车广播）。最后统一重排（发车时间参与名次）。
      */
-    private void applyMarkerPlanTime(String lineId, String stationId, String planTime) {
+    private void applyMarkerPlanTimes(BusApiClient.BusVehiclePlanResponse response) {
         if (currentSelectedMarker == null || !isUiAlive()) return;
-        BusApiClient.LineDirection target = findMarkerDirection(lineId, stationId);
-        if (target == null) return;
-        target.planTime = planTime;
-        notifyMarkerLineChanged(target);
-        announceDepartureForMarkerLine(target);
+        if (response == null || response.data == null) {
+            Log.w("-BusInfo-", "批量计划发车时间数据为空");
+            return;
+        }
+        for (BusApiClient.BusPlanTime planTime : response.data) {
+            if (planTime == null || planTime.lineId == null) continue;
+            String startTime = normalizePlanTime(planTime.startTime);
+            if (startTime == null) continue;
+            markerPlanTimeByLine.put(planTime.lineId, startTime);
+        }
+
+        List<BusApiClient.StationLineInfo> items = currentBusLineItems;
+        if (items == null) return;
+        List<BusApiClient.LineDirection> noVehicleDirs = new ArrayList<>();
+        for (BusApiClient.StationLineInfo item : items) {
+            BusApiClient.LineDirection dir = markerDirectionOf(item);
+            if (dir == null || dir.lineId == null) continue;
+            String plan = markerPlanTimeByLine.get(dir.lineId);
+            if (plan == null) continue;
+            dir.planTime = plan;
+            if (dir.vehicleInfo == null) noVehicleDirs.add(dir);
+        }
+
+        applyMarkerOrderAndRefresh(null);              // 发车时间影响无车线路的名次：重排 + 动画
+        for (BusApiClient.LineDirection dir : noVehicleDirs) {
+            notifyMarkerLineChanged(dir);              // 刷新该卡片的「下一班发车时间」
+            announceDepartureForMarkerLine(dir);
+        }
+    }
+
+    /**
+     * 标记模式「数据 → 界面」的统一出口：
+     * 1) 按最新名次规则（有车按距离由近到远、无车按发车时间由早到晚）重排列表，
+     *    用移动动画表现名次变化（{@link BusStationAdapter#applyOrder}）；
+     * 2) 刷新指定线路的卡片内容（传 null 表示本次不单独刷新某条）。
+     * 同时记下当前顺序，供下一轮按新顺序逐条查询。
+     */
+    private void applyMarkerOrderAndRefresh(BusApiClient.LineDirection changedDir) {
+        List<BusApiClient.StationLineInfo> items = currentBusLineItems;
+        if (items == null || items.isEmpty()) return;
+        List<BusApiClient.StationLineInfo> sorted = new ArrayList<>(items);
+        Collections.sort(sorted, this::compareMarkerItems);
+        adapter.applyOrder(sorted);                    // 列表顺序即变为 sorted（内含移动动画）
+        if (changedDir != null) {
+            notifyMarkerLineChanged(changedDir);       // 名次变化后按新位置刷新这条卡片
+        }
+        rememberMarkerOrder();
+    }
+
+    /** 记录当前列表顺序（lineId_stationId），下一轮就按这个新顺序逐条查询 */
+    private void rememberMarkerOrder() {
+        markerDisplayOrder.clear();
+        List<BusApiClient.StationLineInfo> items = currentBusLineItems;
+        if (items == null) return;
+        for (BusApiClient.StationLineInfo item : items) {
+            BusApiClient.LineDirection dir = markerDirectionOf(item);
+            if (dir == null || dir.lineId == null) continue;
+            markerDisplayOrder.add(dir.lineId + "_" + dir.stationId);
+        }
+    }
+
+    /**
+     * 卡片名次规则：
+     * 1) 有最近车辆的排前面（正在跑的车比"还没发车"更值得先看）；
+     * 2) 有车的按距离由近到远（距离未知排最后；距离 0 且是下一班表示已到站，按最近处理）；
+     * 3) 无车的按计划发车时间由早到晚（没有发车时间排最后）；
+     * 4) 完全并列时沿用上一轮名次，保证刷新过程中不会来回抖动。
+     */
+    private int compareMarkerItems(BusApiClient.StationLineInfo a, BusApiClient.StationLineInfo b) {
+        BusApiClient.LineDirection da = markerDirectionOf(a);
+        BusApiClient.LineDirection db = markerDirectionOf(b);
+        boolean hasVehicleA = da != null && da.vehicleInfo != null;
+        boolean hasVehicleB = db != null && db.vehicleInfo != null;
+        if (hasVehicleA != hasVehicleB) return hasVehicleA ? -1 : 1;
+
+        if (hasVehicleA) {
+            int distanceA = markerSortDistance(da.vehicleInfo);
+            int distanceB = markerSortDistance(db.vehicleInfo);
+            if (distanceA != distanceB) return Integer.compare(distanceA, distanceB);
+        } else {
+            int timeA = markerSortDepartureMinutes(da);
+            int timeB = markerSortDepartureMinutes(db);
+            if (timeA != timeB) return Integer.compare(timeA, timeB);
+        }
+        return Integer.compare(rememberedOrderIndex(a), rememberedOrderIndex(b));
+    }
+
+    /** 排序用距离：未知按最大值（排最后）；distance==0 且为下一班（nextNumber==0）表示已到站，按最近处理 */
+    private int markerSortDistance(BusApiClient.StationVehicleInfo vehicleInfo) {
+        if (vehicleInfo == null) return Integer.MAX_VALUE;
+        if (vehicleInfo.distance > 0) return vehicleInfo.distance;
+        return vehicleInfo.nextNumber == 0 ? 0 : Integer.MAX_VALUE;
+    }
+
+    /** 排序用计划发车时间（当天分钟数）：没有/解析不出按最大值（排最后） */
+    private int markerSortDepartureMinutes(BusApiClient.LineDirection dir) {
+        if (dir == null) return Integer.MAX_VALUE;
+        int[] hourMinute = TTSUtils.parseHourMinute(dir.planTime);
+        return hourMinute == null ? Integer.MAX_VALUE : hourMinute[0] * 60 + hourMinute[1];
     }
 
     /** 在当前展示列表里按 (lineId, stationId) 定位方向 */
@@ -955,8 +1274,14 @@ public class StationDetailsFragment extends DialogFragment {
                                                   Runnable onDone) {
         StringBuilder lineIds = new StringBuilder();
         StringBuilder stationIds = new StringBuilder();
+        // 记下请求前的车辆对象：兜底接口没返回这条线路的车时，要把"上一轮的旧车"清掉，
+        // 否则保留了旧数据的卡片会一直挂着一辆已经不存在的车
+        final Map<BusApiClient.LineDirection, BusApiClient.StationVehicleInfo> previous =
+                new IdentityHashMap<>();
         for (BusApiClient.LineDirection dir : dirs) {
-            if (dir == null || dir.lineId == null || dir.stationId == null) continue;
+            if (dir == null) continue;
+            previous.put(dir, dir.vehicleInfo);
+            if (dir.lineId == null || dir.stationId == null) continue;
             appendIds(lineIds, stationIds, dir.lineId, dir.stationId);
         }
         if (lineIds.length() == 0) {
@@ -966,6 +1291,13 @@ public class StationDetailsFragment extends DialogFragment {
         fetchVehicleDynamicData(lineIds.toString(), stationIds.toString(), currentBusLineItems,
                 () -> {
                     if (gen != markerRequestGeneration) return;
+                    for (Map.Entry<BusApiClient.LineDirection, BusApiClient.StationVehicleInfo> entry
+                            : previous.entrySet()) {
+                        BusApiClient.StationVehicleInfo old = entry.getValue();
+                        if (old != null && entry.getKey().vehicleInfo == old) {
+                            entry.getKey().vehicleInfo = null;   // 本轮没查到 → 清掉旧车
+                        }
+                    }
                     onDone.run();
                 });
     }
@@ -1028,14 +1360,16 @@ public class StationDetailsFragment extends DialogFragment {
                     if (gen != markerRequestGeneration) return;
                     try {
                         if (response == null || response.data == null || response.data.list == null) {
+                            // 接口没给出车辆列表（取数异常）：保留上一轮数据继续展示，等下一轮再来
+                            Log.w("-BusInfo-", "线路车辆数据为空：" + dir.lineName);
                             onDone.run();
                             return;
                         }
-                        BusApiClient.StationVehicleInfo nearest = findNearestVehicleToStation(
+                        // 本轮匹配结果直接覆盖（查不到车就置空）：旧数据只在等待期间显示，
+                        // 不能让上一轮的旧车一直挂在卡片上（如该车已出站/已跑完）
+                        dir.vehicleInfo = findNearestVehicleToStation(
                                 response.data.list, stations, target, dir);
-                        if (nearest != null) {
-                            dir.vehicleInfo = nearest;
-                        }
+                        markerRefreshedLines.add(markerLineKey(dir));   // 本轮车辆数据有效：这条线路可以取消淡化
                     } catch (Exception e) {
                         Log.e("-BusInfo-", "匹配最近车辆失败", e);
                     }
@@ -1099,6 +1433,14 @@ public class StationDetailsFragment extends DialogFragment {
 
     /**
      * 从这条线的全部车辆里挑出离标记站点最近的一辆：先比“还差几站”，同站数再比剩余距离。
+     * <p>
+     * ⚠️ 「已到站」必须同时满足“车辆停留的站就是标记站点”({@code stopsRemaining == 0}) 且
+     * 接口标记它在站上（{@code isArriveStation == 1}）。
+     * 车辆停靠本站后一旦出站，接口会把它改成“在途中、往下一站开”（{@code isArriveStation == 0}），
+     * 但 {@code vehicleOrder} 仍是本站序号、{@code distance} 变成了“到下一站的距离”，
+     * 若仍按 {@code stopsRemaining == 0} 当成“已到站”，卡片就会一直显示“已到站”，
+     * 也永远不会去查下一班的发车时间 —— 这里直接把这种“已出站的车”剔除，
+     * 于是该线路退回“没有最近车辆”，交给计划发车时间逻辑（卡片显示「下一班发车时间」+ 发车提醒）。
      */
     private BusApiClient.StationVehicleInfo findNearestVehicleToStation(
             List<BusApiClient.VehicleDynamicInfo> vehicles,
@@ -1114,7 +1456,8 @@ public class StationDetailsFragment extends DialogFragment {
             int passedIndex = vehicle.vehicleOrder - 1;      // 车辆已越过（或停靠）的站点下标
             if (passedIndex > targetIndex) continue;         // 已越过标记站点，不再考虑
             if (passedIndex >= stations.size()) continue;    // 越界保护
-            int stopsRemaining = targetIndex - passedIndex;  // 0 表示车辆已在标记站点
+            int stopsRemaining = targetIndex - passedIndex;  // 0 表示车辆停在/刚离开标记站点
+            if (stopsRemaining == 0 && vehicle.isArriveStation != 1) continue;  // 已出站（开往下一站），不再算本站的车
             int remainDistance = calcDistanceToStation(stations, vehicle.distance, passedIndex, targetIndex);
             if (stopsRemaining < bestStops
                     || (stopsRemaining == bestStops && remainDistance < bestDistance)) {
@@ -1262,12 +1605,15 @@ public class StationDetailsFragment extends DialogFragment {
      * 标记选中时的「计划发车提醒」判断（按单条线路调用）：
      * 读出该线路的计划发车时间（planTime，形如 HH:mm），记录下来并立即判断是否到点。
      * <p>
+     * ⚠️ 该线路已经有最近车辆时不播发车广播：卡片显示的是「最近一班/距离X站」，
+     * 说明车已经发出并在路上，此时再报「X 路 X 点 X 分 发车」会与报站互相干扰。
+     * <p>
      * 计划发车时间会被服务端滚动更新（22:00 那班一开走就变成下一班），因此不能只在
      * 「取数那一刻」比对 —— 记录下来交给 {@link #checkDepartureAnnouncements()} 每轮复查，
      * 否则正好跨过整点那一分钟时会漏播。
      */
     private void announceDepartureForMarkerLine(BusApiClient.LineDirection dir) {
-        if (dir == null) return;
+        if (dir == null || dir.vehicleInfo != null) return;
         String planHm = normalizePlanTime(dir.planTime);
         if (planHm == null) return;
         rememberDeparturePlanTime(dir.lineId, dir.stationId, planHm);
@@ -1317,6 +1663,10 @@ public class StationDetailsFragment extends DialogFragment {
         if (currentSelectedMarker == null || dir == null
                 || dir.lineId == null || dir.stationId == null) return;
         if (dir.startStation == null || dir.endStation == null) return;
+        // 已有最近车辆（车在路上）不播发车广播；
+        // 本轮车辆取数还没跑到这条线路（状态未知）时先不播，等它确定"有车/无车"后再判断
+        if (dir.vehicleInfo != null) return;
+        if (markerLoadingInProgress && !markerProcessedLines.contains(markerLineKey(dir))) return;
         if (planHm == null || !nowHourMinute().equals(planHm)) return;
 
         String departureKey = dir.lineId + "_" + dir.stationId + "_" + planHm;

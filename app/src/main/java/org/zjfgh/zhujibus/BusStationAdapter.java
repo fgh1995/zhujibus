@@ -18,7 +18,12 @@ import java.util.Map;
 import java.util.Set;
 
 public class BusStationAdapter extends RecyclerView.Adapter<BusStationAdapter.BusLineViewHolder> {
+    /** 卡片仍显示"上一轮数据"时的透明度：淡化显示，和已刷新的卡片形成对比 */
+    private static final float STALE_ALPHA = 0.5f;
+
     private List<BusApiClient.StationLineInfo> busLineItems = new ArrayList<>();
+    // 键 lineId_stationId：数据还没更新到本轮（仍是上一轮内容）的线路，卡片整体淡化
+    private Set<String> staleLineKeys = new HashSet<>();
     private List<DirectionPagerAdapter> childAdapters = new ArrayList<>();
     private DirectionPagerAdapter.OnDirectionLongClickListener directionLongClickListener;
     private Map<Integer, ViewPager2> viewPagerMap = new HashMap<>();
@@ -54,6 +59,28 @@ public class BusStationAdapter extends RecyclerView.Adapter<BusStationAdapter.Bu
     public void notifyLineChanged(int position) {
         if (position >= 0 && position < busLineItems.size()) {
             notifyItemChanged(position);
+        }
+    }
+
+    /**
+     * 按目标顺序重排列表，做出"动态榜单"效果：
+     * 逐项用 {@link #notifyItemMoved} 把条目挪到目标位置，交由 RecyclerView 的
+     * ItemAnimator 播放移动动画 —— 名次上升的卡片会滑动到前面，被挤下去的卡片顺次后移，
+     * 而不是整表刷新覆盖（那样看不到交换过程）。
+     * <p>
+     * 本方法只负责"换位"（列表顺序本身就变成目标顺序），内容刷新由调用方再调
+     * {@link #notifyLineChanged(int)}，避免移动动画被内容刷新的重绑打断。
+     */
+    public void applyOrder(List<BusApiClient.StationLineInfo> sortedItems) {
+        if (sortedItems == null || sortedItems.isEmpty() || busLineItems.isEmpty()) return;
+        int size = Math.min(sortedItems.size(), busLineItems.size());
+        for (int target = 0; target < size; target++) {
+            BusApiClient.StationLineInfo item = sortedItems.get(target);
+            int current = busLineItems.indexOf(item);
+            if (current < 0 || current == target) continue;
+            busLineItems.remove(current);
+            busLineItems.add(target, item);
+            notifyItemMoved(current, target);
         }
     }
 
@@ -149,7 +176,32 @@ public class BusStationAdapter extends RecyclerView.Adapter<BusStationAdapter.Bu
 
     @Override
     public void onBindViewHolder(@NonNull BusLineViewHolder holder, int position) {
-        holder.bind(busLineItems.get(position), directionLongClickListener, position);
+        BusApiClient.StationLineInfo item = busLineItems.get(position);
+        // 仍是上一轮数据的卡片整体淡化：新数据到了就恢复正常，方便一眼看出哪些还在更新
+        holder.itemView.setAlpha(isStaleItem(item) ? STALE_ALPHA : 1f);
+        holder.bind(item, directionLongClickListener, position);
+    }
+
+    /**
+     * 标记"当前展示的还是上一轮数据"的线路（键 lineId_stationId）。
+     * 传入的是同一个集合引用，所以集合内容变化后调 {@link #notifyAllLinesChanged()} 即可生效。
+     */
+    public void setStaleLineKeys(Set<String> keys) {
+        this.staleLineKeys = keys != null ? keys : new HashSet<>();
+    }
+
+    /** 整表重绑一次（数据本身没变，只是让淡化状态生效） */
+    public void notifyAllLinesChanged() {
+        if (!busLineItems.isEmpty()) {
+            notifyItemRangeChanged(0, busLineItems.size());
+        }
+    }
+
+    private boolean isStaleItem(BusApiClient.StationLineInfo item) {
+        if (item == null || staleLineKeys.isEmpty()) return false;
+        BusApiClient.LineDirection dir = item.up != null ? item.up : item.down;
+        if (dir == null || dir.lineId == null) return false;
+        return staleLineKeys.contains(dir.lineId + "_" + dir.stationId);
     }
 
     @Override

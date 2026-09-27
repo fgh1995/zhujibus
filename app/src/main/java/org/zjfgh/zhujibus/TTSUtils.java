@@ -67,7 +67,7 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
             .build();
 
     private static class PlaybackItem {
-        enum Type { WAV, TTS_CN, TTS_EN, MEDIA_PLAYER_WAV, FILE_WAV }
+        enum Type { WAV, TTS_CN, MEDIA_PLAYER_WAV, FILE_WAV }
         Type type;
         int rawResId;
         String text;
@@ -467,7 +467,7 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
                     PlaybackItem.Type.TTS_CN));
             items.add(new PlaybackItem(
                     buildDepartureAnnouncementTextEn(lineName, startStation, endStation, planTime),
-                    PlaybackItem.Type.TTS_EN));
+                    PlaybackItem.Type.TTS_CN));
             return;
         }
 
@@ -830,9 +830,9 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
             List<WavInfo> wavInfos = new ArrayList<>();
 
             for (PlaybackItem item : items) {
-                if (item.type == PlaybackItem.Type.TTS_CN || item.type == PlaybackItem.Type.TTS_EN) {
+                if (item.type == PlaybackItem.Type.TTS_CN || item.type == PlaybackItem.Type.TTS_CN) {
                     WavInfo ttsWav = synthesizeTtsToWav(item.text,
-                            item.type == PlaybackItem.Type.TTS_EN ? Locale.US : Locale.CHINESE);
+                            item.type == PlaybackItem.Type.TTS_CN ? Locale.US : Locale.CHINESE);
                     if (ttsWav != null && ttsWav.pcmData.length > 0) {
                         wavInfos.add(ttsWav);
                     }
@@ -1500,7 +1500,7 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
         if (lineName == null || lineName.isEmpty()) return;
         List<LineToken> tokens = tokenizeLineName(lineName);
         if (tokens == null) {
-            items.add(new PlaybackItem(lineName, PlaybackItem.Type.TTS_EN));
+            items.add(new PlaybackItem(lineName, PlaybackItem.Type.TTS_CN));
             return;
         }
         boolean hasRoute = false;
@@ -1515,7 +1515,7 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
                 case LETTER:
                     int eres = enLetterRes(t.letter);
                     if (eres != 0) items.add(new PlaybackItem(eres));
-                    else items.add(new PlaybackItem(String.valueOf(t.letter), PlaybackItem.Type.TTS_EN));
+                    else items.add(new PlaybackItem(String.valueOf(t.letter), PlaybackItem.Type.TTS_CN));
                     break;
             }
         }
@@ -1560,9 +1560,9 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
             // 英文语音包缺失/下载中：改用站名英文（缺省取拼音）由英文 TTS 合成
             String enName = VoicePackManager.getInstance(context).getStationEnglish(stationName);
             if (enName == null || enName.isEmpty()) {
-                items.add(new PlaybackItem(stationName, PlaybackItem.Type.TTS_EN));
+                items.add(new PlaybackItem(stationName, PlaybackItem.Type.TTS_CN));
             } else {
-                items.add(new PlaybackItem(enName, PlaybackItem.Type.TTS_EN));
+                items.add(new PlaybackItem(enName, PlaybackItem.Type.TTS_CN));
             }
         }
     }

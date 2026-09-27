@@ -29,6 +29,8 @@ dependencyResolutionManagement {
         // 官方源（兜底）
         google()
         mavenCentral()
+        // JitPack 仓库（GitHub 上的开源库，如 EZLedView-SNAPSHOT）
+        maven { url 'https://jitpack.io' }
     }
 }
 

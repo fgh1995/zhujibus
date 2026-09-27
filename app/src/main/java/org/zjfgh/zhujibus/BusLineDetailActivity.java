@@ -59,8 +59,6 @@ import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 
-import android.graphics.Color;
-
 
 import io.sgr.geometry.utils.GeometryUtils;
 
@@ -147,10 +145,6 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     //   fragment 内部使用独立 Handler 每秒刷新，不需要 Activity 干预。
 
     TextView errorIndicator;
-    TextView networkModeText;
-    TextView modeTips;
-    LinearLayout modeSwitch;
-    TextView networkStatusIndicator;
     private ValueAnimator errorBlinkAnimator;
     private ValueAnimator gpsBlinkAnimator;
     private boolean isGpsSignalNormal = false;
@@ -662,10 +656,9 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             // GPS 模式：显示卫星数（缓存值）
             int used = GpsWarmingUp.getSatelliteCount();
             int total = GpsWarmingUp.getTotalSatelliteCount();
-            if (networkModeText != null) {
-                networkModeText.setText("GPS " + String.format(Locale.getDefault(), "%02d", used)
-                        + "/" + String.format(Locale.getDefault(), "%02d", total));
-                networkModeText.setTextColor(0xFFFF0000);
+            if (navigationMainFragment != null) {
+                navigationMainFragment.setModeText("GPS " + String.format(Locale.getDefault(), "%02d", used)
+                        + "/" + String.format(Locale.getDefault(), "%02d", total), 0xFFFF0000);
             }
             // GPS 模式默认认为信号正常（GPS 未启动时 updateNetworkStatusIndicator 会置灰）
             isGpsSignalNormal = true;
@@ -674,10 +667,9 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 navigationMainFragment.setGpsMode(true);
             }
         } else {
-            // 网络模式：模式文字标"网络"（红色高亮），网络 状态灯变绿/灰
-            if (networkModeText != null) {
-                networkModeText.setText("网络");
-                networkModeText.setTextColor(0xFFFF0000);
+            // 网络模式：模式文字标"网络"（蓝色高亮），网络 状态灯变绿/灰
+            if (navigationMainFragment != null) {
+                navigationMainFragment.setModeText("网络", 0xFF00FFFF);
             }
             isGpsSignalNormal = false;
             updateNetworkStatusIndicator(false);
@@ -718,9 +710,9 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private final GpsWarmingUp.SatelliteCountListener satelliteCountListener = (usedCount, totalCount) -> {
         runOnUiThread(() -> {
             // GPS 模式：显示卫星数
-            if (currentAnnounceMode == AnnounceMode.GPS && networkModeText != null) {
-                networkModeText.setText("GPS " + String.format(Locale.getDefault(), "%02d", usedCount)
-                        + "/" + String.format(Locale.getDefault(), "%02d", totalCount));
+            if (currentAnnounceMode == AnnounceMode.GPS && navigationMainFragment != null) {
+                navigationMainFragment.setModeText("GPS " + String.format(Locale.getDefault(), "%02d", usedCount)
+                        + "/" + String.format(Locale.getDefault(), "%02d", totalCount), 0xFFFF0000);
             }
         });
     };
@@ -1581,7 +1573,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         routeNumber.setTextColor(0xFF00FF00);
         routeNumber.setGravity(0);
         routeNumber.setScrollSpeed(180f);
-        Typeface dottedSongti = Typeface.createFromAsset(getAssets(), "fonts/ZiTiGuanJiaBoDian-2.ttf");
+        Typeface dottedSongti = Typeface.createFromAsset(getAssets(), "fonts/DottedSongtiCircleRegular.otf");
         routeNumber.setTypeface(dottedSongti);
         int maxWidth = (int) (150 * getResources().getDisplayMetrics().density);
         int textWidth = (int) routeNumber.getTextWidth();
@@ -1618,16 +1610,17 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             endStationEnNameView.setText(enName != null ? enName : "");
         }
         tips = findViewById(R.id.tips);
-        tips.setTypeface(dottedSongti);
         tips.setGravity(1);
+        tips.setTypeface(dottedSongti);
         enTips = findViewById(R.id.en_tips);
-        enTips.setTypeface(dottedSongti);
         enTips.setGravity(1);
+        enTips.setTypeface(dottedSongti);
         startTipsAnimation();
         nextStationInfo = findViewById(R.id.next_station_info);
-        nextStationInfo.setTypeface(dottedSongti);
         nextStationInfo.setTextColor(0xFFFF0000);
         nextStationInfo.setTextSize(30f);
+        // 欢迎语同样使用圆点点阵效果（与线路号/站名保持一致）
+        nextStationInfo.setTypeface(dottedSongti);
         nextStationInfo.setText("欢迎乘坐 " + lineName + " 公交车" + "    " + "Welcome aboard the " + TTSUtils.getEnLineName(lineName));
         nextStationInfo.setScrollSpeed(180f);
         accessibilityIcon = findViewById(R.id.accessibility_icon);
@@ -1656,24 +1649,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             }
         });
 
-        networkModeText = findViewById(R.id.mode_text);
-        modeTips = findViewById(R.id.mode_tips);
-        modeSwitch = findViewById(R.id.mode_switch);
-        networkStatusIndicator = findViewById(R.id.network_status_indicator);
-
-        View.OnClickListener modeSwitchListener = v -> {
-            if (currentAnnounceMode == AnnounceMode.GPS) {
-                currentAnnounceMode = AnnounceMode.NETWORK;
-            } else {
-                currentAnnounceMode = AnnounceMode.GPS;
-            }
-            updateAnnounceModeState();
-        };
-        modeSwitch.setOnClickListener(modeSwitchListener);
         updateAnnounceModeDisplay();
-        modeTips.setTypeface(dottedSongti);
-        // mode_text 仍使用点阵字体（数字不等宽），通过固定宽度避免内容变化时整体跳动
-        networkModeText.setTypeface(dottedSongti);
         // ⭐ gpsSpeedText 已迁移到 NavigationMainFragment，字体设置在 fragment.onViewCreated() 中完成
 
         // 语音包状态条
@@ -1689,6 +1665,17 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
 
     private void setupListeners() {
         navigationMainFragment.setSwapOrientation(v -> swapDirection());
+        // 报站模式切换 UI 已迁移到 NavigationMainFragment：把状态切换逻辑交给 Fragment 的按钮，
+        // 并让 Fragment 视图就绪后回调一次以刷新初始显示。
+        navigationMainFragment.setAnnounceModeToggleListener(() -> {
+            if (currentAnnounceMode == AnnounceMode.GPS) {
+                currentAnnounceMode = AnnounceMode.NETWORK;
+            } else {
+                currentAnnounceMode = AnnounceMode.GPS;
+            }
+            updateAnnounceModeState();
+        });
+        navigationMainFragment.setModeDisplayReadyListener(() -> updateAnnounceModeDisplay());
     }
     // 添加一个辅助方法来处理线路名称
     private String formatLineNameForEnglish(String lineName) {
@@ -3208,8 +3195,8 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                     refreshCountdownSec--;
                     if (refreshCountdownSec <= 0) {
                         // 倒数到 0 → 主动触发刷新，统一刷新节奏
-                        if (networkModeText != null) {
-                            networkModeText.setText("网络 --");
+                        if (navigationMainFragment != null) {
+                            navigationMainFragment.setModeText("网络 --", 0xFFFF0000);
                         }
                         if (realTimeManager != null) {
                             realTimeManager.refreshNow();
@@ -3227,11 +3214,11 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     }
 
     private void renderRefreshCountdownText() {
-        if (networkModeText == null) return;
+        if (navigationMainFragment == null) return;
         if (networkRefreshFailed) {
-            networkModeText.setText("失败 " + String.format(Locale.getDefault(), "%02d", refreshCountdownSec));
+            navigationMainFragment.setModeText("失败 " + String.format(Locale.getDefault(), "%02d", refreshCountdownSec), 0xFFFF0000);
         } else {
-            networkModeText.setText("网络 " + String.format(Locale.getDefault(), "%02d", refreshCountdownSec));
+            navigationMainFragment.setModeText("网络 " + String.format(Locale.getDefault(), "%02d", refreshCountdownSec), 0xFFFF0000);
         }
     }
 
@@ -3398,23 +3385,23 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     }
 
     private void updateNetworkStatusIndicator(boolean isOnline) {
-        if (networkStatusIndicator == null) {
+        if (navigationMainFragment == null) {
             return;
         }
         stopGpsBlinkAnimation();
         if (currentAnnounceMode == AnnounceMode.GPS) {
             // GPS 模式：信号好=绿色，差=闪烁
             if (isOnline && isGpsSignalNormal) {
-                networkStatusIndicator.setTextColor(0xFF00FF00);
+                navigationMainFragment.setNetworkStatusIndicatorColor(0xFF00FF00);
             } else {
                 startGpsBlinkAnimation();
             }
         } else {
             // 网络模式：在线=蓝色，离线=灰
             if (isOnline) {
-                networkStatusIndicator.setTextColor(0xFF37D4F4);
+                navigationMainFragment.setNetworkStatusIndicatorColor(0xFF37D4F4);
             } else {
-                networkStatusIndicator.setTextColor(0xFF555555);
+                navigationMainFragment.setNetworkStatusIndicatorColor(0xFF555555);
             }
         }
     }
@@ -3430,8 +3417,8 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         gpsBlinkAnimator.addUpdateListener(animation -> {
             float progress = (float) animation.getAnimatedValue();
             float alpha = progress < 0.5f ? 1f : 0f;
-            if (networkStatusIndicator != null) {
-                networkStatusIndicator.setAlpha(alpha);
+            if (navigationMainFragment != null) {
+                navigationMainFragment.setNetworkStatusIndicatorAlpha(alpha);
             }
         });
         gpsBlinkAnimator.start();
@@ -3442,8 +3429,8 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             gpsBlinkAnimator.cancel();
             gpsBlinkAnimator = null;
         }
-        if (networkStatusIndicator != null) {
-            networkStatusIndicator.setAlpha(1f);
+        if (navigationMainFragment != null) {
+            navigationMainFragment.setNetworkStatusIndicatorAlpha(1f);
         }
     }
 
@@ -3583,9 +3570,9 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             GpsWarmingUp.addListener(gpsActivityListener);
             GpsWarmingUp.addSatelliteListener(satelliteCountListener);
             // GPS 模式：显示缓存的卫星数
-            if (networkModeText != null) {
-                networkModeText.setText("GPS " + String.format(Locale.getDefault(), "%02d", GpsWarmingUp.getSatelliteCount())
-                        + "/" + String.format(Locale.getDefault(), "%02d", GpsWarmingUp.getTotalSatelliteCount()));
+            if (navigationMainFragment != null) {
+                navigationMainFragment.setModeText("GPS " + String.format(Locale.getDefault(), "%02d", GpsWarmingUp.getSatelliteCount())
+                        + "/" + String.format(Locale.getDefault(), "%02d", GpsWarmingUp.getTotalSatelliteCount()), 0xFFFF0000);
             }
         }
     }
