@@ -62,6 +62,41 @@
                     android:textSize="12sp"
                     android:textStyle="bold" />
             </LinearLayout>
+
+            <!-- ===== 左上角：当前地区 / 人工搜索入口 ===== -->
+            <LinearLayout
+                android:id="@+id/ll_region"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="top|start"
+                android:layout_marginTop="12dp"
+                android:layout_marginStart="12dp"
+                android:background="@drawable/status_pill_bg"
+                android:elevation="4dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="8dp"
+                android:paddingTop="2dp"
+                android:paddingEnd="8dp"
+                android:paddingBottom="2dp">
+
+                <TextView
+                    android:id="@+id/tv_region"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="选择地区"
+                    android:textColor="@android:color/white"
+                    android:textSize="12sp"
+                    android:textStyle="bold" />
+
+                <ImageView
+                    android:layout_width="12dp"
+                    android:layout_height="12dp"
+                    android:layout_marginStart="4dp"
+                    android:contentDescription="@string/app_name"
+                    android:src="@drawable/nav_arrow_down"
+                    android:tint="@android:color/white" />
+            </LinearLayout>
         </FrameLayout>
 
         <LinearLayout
@@ -281,6 +316,7 @@
                 </LinearLayout>
             </LinearLayout>
             <LinearLayout
+                android:id="@+id/ll_notice_board"
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
                 android:background="@drawable/white_bg_rounded"
@@ -308,6 +344,7 @@
             </LinearLayout>
 
             <LinearLayout
+                android:id="@+id/ll_nearby_bus"
                 android:gravity="center_vertical"
                 android:orientation="vertical"
                 android:background="@drawable/white_bg_rounded"

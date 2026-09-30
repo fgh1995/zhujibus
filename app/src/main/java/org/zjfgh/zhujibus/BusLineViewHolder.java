@@ -9,6 +9,7 @@ import androidx.recyclerview.widget.RecyclerView;
 public class BusLineViewHolder extends RecyclerView.ViewHolder {
     TextView tvLineBadge;
     TextView tvLineName;
+    TextView tvRegion;
     TextView tvStartStation;
     TextView tvEndStation;
 
@@ -16,6 +17,7 @@ public class BusLineViewHolder extends RecyclerView.ViewHolder {
         super(itemView);
         tvLineBadge = itemView.findViewById(R.id.tv_line_badge);
         tvLineName = itemView.findViewById(R.id.tv_line_name_station);
+        tvRegion = itemView.findViewById(R.id.tv_region);
         tvStartStation = itemView.findViewById(R.id.tv_start_station);
         tvEndStation = itemView.findViewById(R.id.tv_end_station);
     }

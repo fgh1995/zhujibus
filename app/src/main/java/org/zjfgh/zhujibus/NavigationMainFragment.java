@@ -44,6 +44,8 @@ public class NavigationMainFragment extends Fragment {
     private TextView navDateText;
     private HorizontalScrollTextView navRouteNo;
     private TextView navSwapOrientation;
+    /** 是否支持双向换乘（控制换向按钮可见性）；与环线标记 isLoopLine 解耦 */
+    private boolean canSwapDirection = false;
     private HorizontalScrollTextView navNextStation;
     private HorizontalScrollTextView navDirection;
     private TextView gpsSpeedText;
@@ -60,8 +62,12 @@ public class NavigationMainFragment extends Fragment {
     private TextView modeText;
     private TextView modeTips;
     private TextView networkStatusIndicator;
+    /** 最近一次状态点颜色，用于让模式文字与左侧点颜色保持一致 */
+    private int lastIndicatorColor = 0xFF00FFFF;
     private OnAnnounceModeToggleListener announceModeToggleListener;
     private OnModeDisplayReadyListener modeDisplayReadyListener;
+    /** 非诸暨线路：锁定为 GPS 模式（视图创建前也可能被调用，故存标志位延迟应用） */
+    private boolean announceModeLockedToGps = false;
 
     // ---- 地图导航管理 ----
     private AmapNavigationView navigation;
@@ -179,6 +185,8 @@ public class NavigationMainFragment extends Fragment {
             if (modeSwitch != null && announceModeToggleListener != null) {
                 modeSwitch.setOnClickListener(v -> announceModeToggleListener.onAnnounceModeToggle());
             }
+            // 视图就绪：若已锁定为 GPS（非诸暨线路），此处生效“仅支持GPS”文字与禁用
+            applyAnnounceModeLock();
             // 视图就绪：通知 Activity 刷新一次报站模式显示（首帧字体/状态对齐）
             if (modeDisplayReadyListener != null) {
                 modeDisplayReadyListener.onModeDisplayReady();
@@ -226,13 +234,7 @@ public class NavigationMainFragment extends Fragment {
             if (swapOrientationListener != null && navSwapOrientation != null) {
                 navSwapOrientation.setOnClickListener(swapOrientationListener);
             }
-            if (navSwapOrientation != null) {
-                if (isLoopLine) {
-                    navSwapOrientation.setVisibility(View.GONE);
-                } else {
-                    navSwapOrientation.setVisibility(View.VISIBLE);
-                }
-            }
+            applySwapVisibility();
 
             // 6. 初始化高德地图
             initMapWhenReady(savedInstanceState);
@@ -342,18 +344,42 @@ public class NavigationMainFragment extends Fragment {
         }
     }
 
-    /** 设置模式文字（如 "网络" / "GPS 12/24"）及颜色 */
+    /** 设置模式文字（如 "网络" / "GPS 12/24"）；颜色参数仅为兼容签名，实际颜色始终与左侧状态点保持一致 */
     public void setModeText(CharSequence text, int color) {
         if (modeText != null) {
             modeText.setText(text);
-            modeText.setTextColor(color);
+            modeText.setTextColor(lastIndicatorColor);
         }
     }
 
-    /** 设置网络状态指示灯颜色（绿/蓝/灰） */
+    /**
+     * 锁定为 GPS 模式（非诸暨/高德线路专用）：网络模式无实时数据源，禁用“切换模式”按钮，
+     * 并将提示文字改为“仅支持GPS”。调用方需自行把 AnnounceMode 切到 GPS 并刷新显示。
+     */
+    public void lockAnnounceModeToGps() {
+        announceModeLockedToGps = true;
+        applyAnnounceModeLock();
+    }
+
+    /** 应用锁定状态：视图已就绪则立即生效，否则等 onViewCreated 调用 */
+    private void applyAnnounceModeLock() {
+        if (!announceModeLockedToGps) return;
+        if (modeTips != null) modeTips.setText("仅支持GPS");
+        announceModeToggleListener = null;
+        if (modeSwitch != null) {
+            modeSwitch.setClickable(false);
+            modeSwitch.setOnClickListener(null);
+        }
+    }
+
+    /** 设置网络状态指示灯颜色（绿/蓝/灰），同时同步模式文字颜色保持一致 */
     public void setNetworkStatusIndicatorColor(int color) {
+        lastIndicatorColor = color;
         if (networkStatusIndicator != null) {
             networkStatusIndicator.setTextColor(color);
+        }
+        if (modeText != null) {
+            modeText.setTextColor(color);
         }
     }
 
@@ -366,12 +392,18 @@ public class NavigationMainFragment extends Fragment {
 
     public void setLoopLine(boolean isLoopLine) {
         this.isLoopLine = isLoopLine;
+        applySwapVisibility();
+    }
+
+    /** 设置是否支持双向换乘（仅双向线路可换向），独立控制换向按钮可见性 */
+    public void setCanSwapDirection(boolean canSwap) {
+        this.canSwapDirection = canSwap;
+        applySwapVisibility();
+    }
+
+    private void applySwapVisibility() {
         if (navSwapOrientation != null) {
-            if (isLoopLine) {
-                navSwapOrientation.setVisibility(View.GONE);
-            } else {
-                navSwapOrientation.setVisibility(View.VISIBLE);
-            }
+            navSwapOrientation.setVisibility(canSwapDirection ? View.VISIBLE : View.GONE);
         }
     }
 
@@ -463,6 +495,16 @@ public class NavigationMainFragment extends Fragment {
         if (navigation != null) navigation.drawRoute(mapPoints);
     }
 
+    /** 在地图上叠加站点位置（红=官方，蓝=高德覆盖；有偏移时画橙色连线） */
+    public void drawStationMarkers(List<LatLng> officialPoints, List<String> names, List<LatLng> amapPoints) {
+        if (navigation != null) navigation.drawStationMarkers(officialPoints, names, amapPoints);
+    }
+
+    /** 清除地图上的站点对比 marker */
+    public void clearStationMarkers() {
+        if (navigation != null) navigation.clearStationMarkers();
+    }
+
     public void notifyHostResumed(boolean resumed) {
         isHostResumed = resumed;
     }
@@ -538,13 +580,7 @@ public class NavigationMainFragment extends Fragment {
         }
 
         // 7. 如果支持双向，更新换向按钮
-        if (navSwapOrientation != null) {
-            if (isLoopLine) {
-                navSwapOrientation.setVisibility(View.GONE);
-            } else {
-                navSwapOrientation.setVisibility(View.VISIBLE);
-            }
-        }
+        applySwapVisibility();
 
         Log.d(TAG, "setLineData 完成: " + stations.size() + " 个站点");
     }
@@ -841,5 +877,6 @@ public class NavigationMainFragment extends Fragment {
         modeText = null;
         modeTips = null;
         networkStatusIndicator = null;
+        announceModeLockedToGps = false;
     }
 }

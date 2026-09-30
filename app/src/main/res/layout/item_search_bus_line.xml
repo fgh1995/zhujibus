@@ -34,6 +34,20 @@
                 android:textStyle="bold"
                 tools:text="13" />
 
+            <!-- 地区样式（如「嵊州」「诸暨」），无地区时隐藏 -->
+            <TextView
+                android:id="@+id/tv_region"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/bg_region_chip"
+                android:textColor="#1FAACE"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:visibility="gone"
+                tools:text="嵊州"
+                tools:visibility="visible" />
+
             <!-- 线路名称 -->
             <TextView
                 android:id="@+id/tv_line_name_station"

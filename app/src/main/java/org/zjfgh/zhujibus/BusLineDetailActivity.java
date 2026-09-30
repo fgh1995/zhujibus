@@ -1,6 +1,7 @@
 package org.zjfgh.zhujibus;
 
 import android.annotation.SuppressLint;
+import android.app.Dialog;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Rect;
@@ -20,6 +21,15 @@ import androidx.fragment.app.FragmentTransaction;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 
+import com.amap.api.services.busline.BusLineItem;
+import com.amap.api.services.busline.BusLineQuery;
+import com.amap.api.services.busline.BusLineResult;
+import com.amap.api.services.busline.BusLineSearch;
+import com.amap.api.services.busline.BusStationItem;
+import com.amap.api.services.core.AMapException;
+import com.amap.api.services.core.LatLonPoint;
+import com.amap.api.services.core.ServiceSettings;
+
 import android.animation.ValueAnimator;
 import android.os.Handler;
 import android.text.Html;
@@ -37,6 +47,8 @@ import android.widget.Button;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
+import android.widget.RadioButton;
+import android.widget.RadioGroup;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
@@ -56,8 +68,13 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.HashSet;
+import java.util.concurrent.atomic.AtomicInteger;
 
 
 import io.sgr.geometry.utils.GeometryUtils;
@@ -67,6 +84,11 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private String lineName;
     private String startStation;
     private String endStation;
+
+    /** 数据源：true=高德（非诸暨线路），false=诸暨官方接口 */
+    private boolean fromAmap = false;
+    private String amapLineId;
+    private String amapCity;
     private HorizontalScrollTextView endStationNameView;  // ⭐ 保存终点站View引用，供POV面板读取
     private HorizontalScrollTextView endStationEnNameView; // ⭐ 终点站英文名视图
     private BusApiClient busApiClient;
@@ -343,6 +365,573 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         }
     }
 
+    // ==================== 高德坐标来源切换（仅诸暨市可用） ====================
+
+    // 按方向缓存高德坐标覆盖点（key = currentDirection：1=上行，2=下行），切换方向时直接应用
+    private final Map<Integer, List<LatLonPoint>> amapCoordCache = new HashMap<>();
+    // 按方向缓存官方原始坐标快照（首次进入该方向、覆盖应用前采集），用于地图叠加对比，
+    // 避免切回已覆盖方向时共享 stationList 被改写导致官方坐标失真
+    private final Map<Integer, List<LatLonPoint>> officialCoordSnapshot = new HashMap<>();
+    private boolean amapCoordEnabled = false;
+    private BusRegion amapCoordRegion;
+    private String amapCoordCity;
+
+    /** 当前是否处于高德坐标覆盖模式（供 MoreFragment 按钮初始状态） */
+    public boolean isAmapCoordActive() {
+        return amapCoordEnabled;
+    }
+
+    /** 高德坐标来源按钮：已启用则恢复诸暨官方，未启用则一次性匹配上下行并缓存 */
+    public void toggleAmapCoordSource() throws AMapException {
+        if (realTimeManager == null) {
+            Toast.makeText(this, "尚未加载线路，无法切换坐标源", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (amapCoordEnabled) {
+            realTimeManager.revertAmapCoordOverride();
+            amapCoordEnabled = false;
+            amapCoordCache.clear();
+            redrawCurrentLine();
+            refreshStationMarkers();
+            if (moreFragment != null) moreFragment.setAmapCoordActive(false);
+            Toast.makeText(this, "已恢复诸暨官方坐标", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        enableAmapCoord();
+    }
+
+    private void redrawCurrentLine() {
+        BusApiClient.BusLineDirection dir = getCurrentLineDirection();
+        if (busLineView != null && dir != null && dir.stationList != null) {
+            busLineView.setStations(dir.stationList);
+        }
+    }
+
+    /**
+     * 一次性匹配并缓存上下行两个方向的高德坐标；当前方向立即应用，切换方向时直接套用缓存。
+     * 主路径（省流）：base 概要拿 lineId/方向 -> 对匹配到的 lineId 用 all 取详情（站点+坐标）；
+     * 按站名匹配套用，匹配不上的站点保持原接口坐标（不再按站名反查）。
+     */
+    private void enableAmapCoord() {
+        if (cachedResponse == null || cachedResponse.data == null) {
+            Toast.makeText(this, "线路数据未加载", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        final String lineName = cachedResponse.data.lineName;
+        amapCoordRegion = new RegionManager(this).getSelectedRegion();
+        amapCoordCity = amapCoordRegion != null ? amapCoordRegion.adCode : "330681";
+        // 必须用 adcode 检索（高德按城市名检索结果一致，但 adcode 更稳）；
+        // 同名异市线路(绍兴38路/嵊州38路)会一并返回，后面再按「诸暨」关键词过滤。
+        final String city = amapCoordCity;
+        // 地域关键词：所选区域是区/县（districtName 与地级市不同）时，高德线路名形如「诸暨38路」，
+        // 用它剔除同名异市线路；地级市本级(无区县后缀)时置空，不按关键词过滤。
+        final String amapRegionKw;
+        if (amapCoordRegion != null && amapCoordRegion.districtName != null
+                && amapCoordRegion.cityName != null
+                && !amapCoordRegion.districtName.equals(amapCoordRegion.cityName)) {
+            amapRegionKw = amapCoordRegion.districtName.replaceAll("[市州县区]$", "");
+        } else {
+            amapRegionKw = null;
+        }
+        Toast.makeText(this, "正在匹配高德上下行坐标…", Toast.LENGTH_SHORT).show();
+        Log.i(TAG, "高德坐标覆盖开始：lineName=" + lineName + " city=" + city);
+
+        List<BusApiClient.BusLineDirection> dirs = new ArrayList<>();
+        if (cachedResponse.data.up != null) dirs.add(cachedResponse.data.up);
+        if (cachedResponse.data.down != null) dirs.add(cachedResponse.data.down);
+        if (dirs.isEmpty()) {
+            Toast.makeText(this, "无可用方向", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        final AtomicInteger dirPending = new AtomicInteger(dirs.size());
+        // 直接查拿到的 站名->坐标（主路径数据来源），匹配不上的站保持原接口坐标
+        final Map<String, LatLonPoint> directCoordMap = new HashMap<>();
+        // 括号宽度归一化后的 站名->坐标（保留消歧文字，主兜底）
+        final Map<String, LatLonPoint> parenNormCoordMap = new HashMap<>();
+        // 去掉括号后的 站名->坐标（二次兜底，仅在无同名碰撞时使用）
+        final Map<String, LatLonPoint> stripCoordMap = new HashMap<>();
+
+        // 第1步：base 概要，只拿 lineId 与起终点（省流量），用于识别/匹配方向
+        BusLineQuery sumQ = new BusLineQuery(lineName, BusLineQuery.SearchType.BY_LINE_NAME, city);
+        sumQ.setPageSize(20);
+        sumQ.setPageNumber(1);
+        sumQ.setExtensions("base");
+        final BusLineSearch sumSearch;
+        try {
+            sumSearch = new BusLineSearch(this, sumQ);
+        } catch (AMapException e) {
+            Log.e(TAG, "高德坐标覆盖[概要] 构造搜索失败", e);
+            // 降级：直接查不可用，所有站保持原接口坐标
+            fetchMatchedDirectionDetails(null, city, directCoordMap, parenNormCoordMap, stripCoordMap,
+                    () -> startResolveDirections(dirs, directCoordMap, parenNormCoordMap, stripCoordMap, dirPending));
+            return;
+        }
+        sumSearch.setOnBusLineSearchListener((sumResult, sumRCode) -> {
+            List<String> lineIds;
+            if (sumRCode != 1000 || sumResult == null || sumResult.getBusLines() == null) {
+                Log.w(TAG, "高德坐标覆盖[概要] 失败 rCode=" + sumRCode + "，降级为逐站反查");
+                lineIds = null;
+            } else {
+                List<BusLineItem> items = sumResult.getBusLines();
+                // 诊断：把高德返回的全部候选线路（名称/所属城市码/起终点）打出来，核对是否选对线路
+                for (BusLineItem it : items) {
+                    if (it == null) continue;
+                    Log.i(TAG, "高德坐标覆盖[候选] name=" + it.getBusLineName()
+                            + " cityCode=" + it.getCityCode()
+                            + " 起点=" + it.getOriginatingStation()
+                            + " 终点=" + it.getTerminalStation());
+                }
+                // 按「诸暨」地域关键词过滤，剔除绍兴38路/嵊州38路等同名异市线路
+                List<BusLineItem> localItems = new ArrayList<>();
+                for (BusLineItem it : items) {
+                    if (it == null) continue;
+                    String nm = it.getBusLineName();
+                    if (amapRegionKw != null && (nm == null || !nm.contains(amapRegionKw))) continue;
+                    localItems.add(it);
+                }
+                if (localItems.isEmpty()) {
+                    Log.w(TAG, "高德坐标覆盖[概要] 无本区(" + amapRegionKw + ")候选，退回全部候选");
+                    localItems = items;
+                }
+                lineIds = pickMatchingLineIds(localItems, lineName);
+                // 按起终点严格筛选真正对应诸暨官方线路的 lineId（不擅自容错字符差异）
+                List<String> realIds = filterByEndpoints(localItems, lineIds);
+                Log.i(TAG, "高德坐标覆盖[概要] lineName=" + lineName + " 总方向数=" + items.size()
+                        + " 本区候选=" + localItems.size()
+                        + " 同名候选=" + lineIds.size() + " 端点命中=" + realIds.size());
+                // 自动匹配不足（命中为空或少于方向数）时，交由用户手动选择，不擅自决定
+                if (realIds.isEmpty() || realIds.size() < dirs.size()) {
+                    Log.w(TAG, "高德坐标覆盖[概要] 自动匹配不足(命中 " + realIds.size() + "/"
+                            + dirs.size() + ")，转人工选择");
+                    promptUserToSelectLines(localItems, city, directCoordMap, parenNormCoordMap,
+                            stripCoordMap, dirs, dirPending);
+                    return;
+                }
+                lineIds = realIds;
+            }
+            // 第2步：对匹配到的 lineId 用 all 取详情，填充 directCoordMap
+            fetchMatchedDirectionDetails(lineIds, city, directCoordMap, parenNormCoordMap, stripCoordMap,
+                    () -> startResolveDirections(dirs, directCoordMap, parenNormCoordMap, stripCoordMap, dirPending));
+        });
+        sumSearch.searchBusLineAsyn();
+    }
+
+    private void startResolveDirections(List<BusApiClient.BusLineDirection> dirs,
+                                       Map<String, LatLonPoint> directCoordMap,
+                                       Map<String, LatLonPoint> parenNormCoordMap,
+                                       Map<String, LatLonPoint> stripCoordMap,
+                                       AtomicInteger dirPending) {
+        Log.i(TAG, "高德坐标覆盖[详情] 直接命中坐标站数=" + directCoordMap.size()
+                + "，括号归一化候选=" + parenNormCoordMap.size()
+                + "，去括号候选=" + stripCoordMap.size()
+                + "，开始按方向解析（未匹配站保持原坐标）");
+        for (BusApiClient.BusLineDirection d : dirs) {
+            final int dirIndex = (cachedResponse.data.up == d) ? 1 : 2;
+            resolveDirectionCoords(d, dirIndex, directCoordMap, parenNormCoordMap, stripCoordMap, dirPending);
+        }
+    }
+
+    /** 从概要里挑出与诸暨线路同名的那些方向（去掉括号后完全相等优先；否则包含匹配；再否则全部） */
+    private List<String> pickMatchingLineIds(List<BusLineItem> items, String zhujiLineName) {
+        List<String> exact = new ArrayList<>();
+        List<String> contains = new ArrayList<>();
+        List<String> all = new ArrayList<>();
+        if (items == null) return all;
+        for (BusLineItem it : items) {
+            if (it == null || it.getBusLineId() == null) continue;
+            String n = it.getBusLineName();
+            all.add(it.getBusLineId());
+            if (n == null) continue;
+            String core = n.replaceAll("\\s*\\([^()]*\\)\\s*", "").trim();
+            if (core.equals(zhujiLineName)) {
+                exact.add(it.getBusLineId());
+            } else if (n.contains(zhujiLineName) || zhujiLineName.contains(core)) {
+                contains.add(it.getBusLineId());
+            }
+        }
+        return exact.isEmpty() ? (contains.isEmpty() ? all : contains) : exact;
+    }
+
+    /**
+     * 按起终点站筛选真正对应诸暨官方线路的那些高德 lineId，剔除同名但不同走向的其它线路。
+     * 高德同名搜索常会返回其它线路（如本例的 客运中心→后璋），必须用起终点对齐才可靠。
+     */
+    private List<String> filterByEndpoints(List<BusLineItem> items, List<String> candidateIds) {
+        if (cachedResponse == null || cachedResponse.data == null
+                || cachedResponse.data.up == null || cachedResponse.data.down == null) {
+            return candidateIds;
+        }
+        Set<String> cand = new HashSet<>(candidateIds);
+        String upS = endpointName(cachedResponse.data.up, true);
+        String upE = endpointName(cachedResponse.data.up, false);
+        String dnS = endpointName(cachedResponse.data.down, true);
+        String dnE = endpointName(cachedResponse.data.down, false);
+        List<String> result = new ArrayList<>();
+        for (BusLineItem it : items) {
+            if (it == null || it.getBusLineId() == null || !cand.contains(it.getBusLineId())) continue;
+            String o = normalizeParen(it.getOriginatingStation());
+            String t = normalizeParen(it.getTerminalStation());
+            if (o == null || t == null) continue;
+            if ((o.equals(upS) && t.equals(upE)) || (o.equals(dnS) && t.equals(dnE))) {
+                result.add(it.getBusLineId());
+            }
+        }
+        return result;
+    }
+
+    /**
+     * 自动按起终点匹配不足时，按官方「上行 / 下行」两个方向分别给出单选组，
+     * 每组在候选 A-B / B-A 中选一个高德方向；默认按单端点匹配预选，可改。不擅自决定用哪条线。
+     */
+    private void promptUserToSelectLines(final List<BusLineItem> items, final String city,
+                                        final Map<String, LatLonPoint> directCoordMap,
+                                        final Map<String, LatLonPoint> parenNormCoordMap,
+                                        final Map<String, LatLonPoint> stripCoordMap,
+                                        final List<BusApiClient.BusLineDirection> dirs,
+                                        final AtomicInteger dirPending) {
+        if (items == null || items.isEmpty()) {
+            Toast.makeText(this, "无可用高德候选线路", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        // 候选方向标签：线路名 + 始发站 → 终点站
+        final List<String> labels = new ArrayList<>();
+        for (BusLineItem it : items) {
+            String nm = it.getBusLineName() != null ? it.getBusLineName() : "(无名)";
+            String s = normalizeParen(it.getOriginatingStation());
+            String e = normalizeParen(it.getTerminalStation());
+            labels.add(nm + "\n    " + (s != null ? s : "?") + " → " + (e != null ? e : "?"));
+        }
+        // 官方上下行端点
+        String upS = endpointName(cachedResponse.data.up, true);
+        String upE = endpointName(cachedResponse.data.up, false);
+        String dnS = endpointName(cachedResponse.data.down, true);
+        String dnE = endpointName(cachedResponse.data.down, false);
+        // 默认：候选的始发站或终点站任一与官方端点确切相等（单端点匹配，不忽略字符差异）
+        final int defUp = findDefaultIndex(items, upS, upE);
+        final int defDn = findDefaultIndex(items, dnS, dnE);
+
+        // 现代化居中弹窗：上行 / 下行 两个单选组（样式与地区选择弹窗一致）
+        Dialog dirDialog = new Dialog(this);
+        dirDialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        View dirDialogView = LayoutInflater.from(this).inflate(R.layout.dialog_direction_select, null);
+        TextView tUp = dirDialogView.findViewById(R.id.tv_up_endpoints);
+        tUp.setText((upS != null ? upS : "?") + " → " + (upE != null ? upE : "?"));
+        TextView tDn = dirDialogView.findViewById(R.id.tv_dn_endpoints);
+        tDn.setText((dnS != null ? dnS : "?") + " → " + (dnE != null ? dnE : "?"));
+        RadioGroup gUp = dirDialogView.findViewById(R.id.rg_up);
+        RadioGroup gDn = dirDialogView.findViewById(R.id.rg_dn);
+        for (int i = 0; i < items.size(); i++) {
+            // 必须显式设置唯一 id，否则动态创建的 RadioButton 默认都是 NO_ID(-1)，
+            // 导致 RadioGroup 无法互斥切换（表现为可多选/不选）。
+            RadioButton rb1 = new RadioButton(this);
+            rb1.setId(View.generateViewId());
+            rb1.setText(labels.get(i));
+            rb1.setTag(i);
+            if (i == defUp) rb1.setChecked(true);
+            gUp.addView(rb1);
+            RadioButton rb2 = new RadioButton(this);
+            rb2.setId(View.generateViewId());
+            rb2.setText(labels.get(i));
+            rb2.setTag(i);
+            if (i == defDn) rb2.setChecked(true);
+            gDn.addView(rb2);
+        }
+        MaterialButton btnCancel = dirDialogView.findViewById(R.id.btn_dir_cancel);
+        MaterialButton btnConfirm = dirDialogView.findViewById(R.id.btn_dir_confirm);
+        btnConfirm.setOnClickListener(v -> {
+            int selUp = radioSelected(gUp);
+            int selDn = radioSelected(gDn);
+            List<String> sel = new ArrayList<>();
+            if (selUp >= 0 && items.get(selUp).getBusLineId() != null) sel.add(items.get(selUp).getBusLineId());
+            if (selDn >= 0 && selDn != selUp && items.get(selDn).getBusLineId() != null) {
+                sel.add(items.get(selDn).getBusLineId());
+            }
+            if (sel.isEmpty()) {
+                Toast.makeText(BusLineDetailActivity.this, "未选择任何线路", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            Log.i(TAG, "高德坐标覆盖[手动选择] 上行选=" + selUp + " 下行选=" + selDn
+                    + " 共取 " + sel.size() + " 条: " + sel);
+            dirDialog.dismiss();
+            fetchMatchedDirectionDetails(sel, city, directCoordMap, parenNormCoordMap, stripCoordMap,
+                    () -> startResolveDirections(dirs, directCoordMap, parenNormCoordMap, stripCoordMap, dirPending));
+        });
+        btnCancel.setOnClickListener(v -> {
+            dirDialog.dismiss();
+            Toast.makeText(BusLineDetailActivity.this, "已取消高德坐标覆盖", Toast.LENGTH_SHORT).show();
+        });
+        dirDialog.setContentView(dirDialogView);
+        Window dirWindow = dirDialog.getWindow();
+        if (dirWindow != null) {
+            dirWindow.setBackgroundDrawableResource(android.R.color.transparent);
+            int dirWidth = (int) (getResources().getDisplayMetrics().widthPixels * 0.88);
+            dirWindow.setLayout(dirWidth, ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
+        dirDialog.setCanceledOnTouchOutside(false);
+        dirDialog.show();
+    }
+
+    /** 在候选中找默认项：始发站或终点站任一与给定端点确切相等；无则取首项。 */
+    private static int findDefaultIndex(List<BusLineItem> items, String s, String e) {
+        for (int i = 0; i < items.size(); i++) {
+            String cs = normalizeParen(items.get(i).getOriginatingStation());
+            String ce = normalizeParen(items.get(i).getTerminalStation());
+            if ((s != null && s.equals(cs)) || (e != null && e.equals(ce))) return i;
+        }
+        return 0;
+    }
+
+    /** 取单选组中选中的候选下标（取 RadioButton 的 tag）。 */
+    private static int radioSelected(RadioGroup group) {
+        int id = group.getCheckedRadioButtonId();
+        if (id == -1) return -1;
+        View v = group.findViewById(id);
+        if (v != null && v.getTag() instanceof Integer) return (Integer) v.getTag();
+        return -1;
+    }
+
+    /** dp 转 px，用于对话框内边距。 */
+    private int dp(int dp) {
+        return (int) (dp * getResources().getDisplayMetrics().density + 0.5f);
+    }
+
+    private static String endpointName(BusApiClient.BusLineDirection dir, boolean start) {
+        if (dir.stationList == null || dir.stationList.isEmpty()) return null;
+        int idx = start ? 0 : dir.stationList.size() - 1;
+        return normalizeParen(dir.stationList.get(idx).stationName);
+    }
+
+    /** 统一括号宽度：半角 () 转全角 （），保留括号内消歧文字，用于对齐高德与诸暨官方站名 */
+    private static String normalizeParen(String name) {
+        if (name == null) return null;
+        return name.replace('(', '（').replace(')', '）').trim();
+    }
+
+    /** 去掉站名中的括号消歧片段（全角/半角），仅作为最终兜底匹配 */
+    private static String stripParen(String name) {
+        if (name == null) return null;
+        String n = name.replaceAll("\\s*[（(][^（）()]*[)）]\\s*", "").trim();
+        return n.isEmpty() ? name : n;
+    }
+
+    private static String safeStationName(BusStationItem st) {
+        return st != null ? st.getBusStationName() : null;
+    }
+
+    /** 对匹配到的 lineId 逐个用 all 取详情，把 站名->坐标 写入 outMap（主路径数据来源）；
+     * 同时写入两路兜底 map：括号宽度归一化名（parenNormCoordMap）、去括号名（stripCoordMap）。 */
+    private void fetchMatchedDirectionDetails(List<String> lineIds, String city,
+                                              Map<String, LatLonPoint> outMap,
+                                              Map<String, LatLonPoint> parenNormCoordMap,
+                                              Map<String, LatLonPoint> stripCoordMap,
+                                              Runnable onDone) {
+        if (lineIds == null || lineIds.isEmpty()) {
+            onDone.run();
+            return;
+        }
+        final AtomicInteger pending = new AtomicInteger(lineIds.size());
+        for (final String lid : lineIds) {
+            BusLineQuery dq = new BusLineQuery(lid, BusLineQuery.SearchType.BY_LINE_ID, city);
+            dq.setPageSize(20);
+            dq.setPageNumber(1);
+            dq.setExtensions("all");
+            final BusLineSearch ds;
+            try {
+                ds = new BusLineSearch(this, dq);
+            } catch (AMapException e) {
+                Log.e(TAG, "高德坐标覆盖[详情] 构造搜索失败 lineId=" + lid, e);
+                if (pending.decrementAndGet() == 0) onDone.run();
+                continue;
+            }
+            ds.setOnBusLineSearchListener((dres, drCode) -> {
+                if (drCode == 1000 && dres != null && dres.getBusLines() != null
+                        && !dres.getBusLines().isEmpty()) {
+                    BusLineItem d = dres.getBusLines().get(0);
+                    List<BusStationItem> sts = d.getBusStations();
+                    int got = 0;
+                    if (sts != null) {
+                        for (BusStationItem st : sts) {
+                            LatLonPoint p = st.getLatLonPoint();
+                            String sname = st.getBusStationName();
+                            if (sname != null && p != null) {
+                                outMap.put(sname, p);
+                                got++;
+                                String pn = normalizeParen(sname);
+                                if (pn != null && !pn.equals(sname)) {
+                                    parenNormCoordMap.putIfAbsent(pn, p);
+                                }
+                                String sn = stripParen(sname);
+                                if (sn != null && !sn.equals(sname)) {
+                                    stripCoordMap.putIfAbsent(sn, p);
+                                }
+                            }
+                        }
+                    }
+                    Log.i(TAG, "高德坐标覆盖[详情] lineId=" + lid
+                            + " 站点数=" + (sts == null ? 0 : sts.size()) + " 入库坐标=" + got);
+                } else {
+                    Log.w(TAG, "高德坐标覆盖[详情] lineId=" + lid + " 失败 rCode=" + drCode);
+                }
+                if (pending.decrementAndGet() == 0) onDone.run();
+            });
+            ds.searchBusLineAsyn();
+        }
+    }
+
+    /**
+     * 解析单个方向所有站点的高德坐标，匹配优先级：
+     * ① 精确名；② 统一括号宽度（全角<->半角，保留消歧文字）；③ 去括号（仅当本方向内无同名碰撞）。
+     * 仍匹配不上的站点保持原接口坐标（不反查），并打印未匹配站名。
+     */
+    private void resolveDirectionCoords(BusApiClient.BusLineDirection d, int dirIndex,
+                                        Map<String, LatLonPoint> directCoordMap,
+                                        Map<String, LatLonPoint> parenNormCoordMap,
+                                        Map<String, LatLonPoint> stripCoordMap,
+                                        AtomicInteger dirPending) {
+        if (d.stationList == null || d.stationList.isEmpty()) {
+            amapCoordCache.put(dirIndex, new ArrayList<>());
+            if (dirPending.decrementAndGet() == 0) onAllDirectionsResolved();
+            return;
+        }
+        final int n = d.stationList.size();
+        final List<LatLonPoint> points = new ArrayList<>(Collections.nCopies(n, (LatLonPoint) null));
+        int directHit = 0, parenHit = 0, stripHit = 0, unmatchedCount = 0;
+        List<String> unmatchedNames = new ArrayList<>();
+        // 归一化匹配开关：false=仅精确名匹配；true=启用括号/去括号兜底（默认开，用于对齐高德半角括号与省后缀写法）
+        final boolean normalizeEnabled = true;
+        for (int i = 0; i < n; i++) {
+            final String name = d.stationList.get(i).stationName;
+            if (name == null || name.isEmpty()) continue;
+            LatLonPoint p = directCoordMap.get(name);
+            if (p != null) {
+                points.set(i, p);
+                directHit++;
+                continue;
+            }
+            // 归一化兜底：括号宽度归一化（全角↔半角）+ 去括号（覆盖高德本身无括号的情形）
+            if (normalizeEnabled) {
+                // 第1层：括号宽度归一化（保留消歧文字，如 千禧路(大侣西路口)）
+                String pn = normalizeParen(name);
+                p = (pn != null) ? parenNormCoordMap.get(pn) : null;
+                if (p != null) {
+                    points.set(i, p);
+                    parenHit++;
+                    continue;
+                }
+                // 第2层：去括号（仅当本方向内无同名碰撞，避免 南/北、不同路口 被合成一点）；
+                // 同时覆盖两种情形：① 高德本身带括号（查 stripCoordMap）；② 高德无括号、官方有括号
+                //    （如 大东南（千禧路）↔高德 大东南，查 directCoordMap 原始名）。
+                String sn = stripParen(name);
+                if (sn != null && !sn.equals(name)) {
+                    p = stripCoordMap.get(sn);
+                    if (p == null) p = directCoordMap.get(sn);
+                    if (p != null) {
+                        boolean collide = false;
+                        for (int j = 0; j < n; j++) {
+                            if (j == i) continue;
+                            String o = d.stationList.get(j).stationName;
+                            if (o != null && sn.equals(stripParen(o))) {
+                                collide = true;
+                                break;
+                            }
+                        }
+                        if (!collide) {
+                            points.set(i, p);
+                            stripHit++;
+                            continue;
+                        }
+                    }
+                }
+            }
+            unmatchedCount++;
+            unmatchedNames.add(name);
+        }
+        int coveredDir = directHit + parenHit + stripHit;
+        Log.d(TAG, "高德坐标覆盖[方向 " + dirIndex + "] 覆盖 " + coveredDir + "/" + n
+                + " 站（精确 " + directHit + " 括号 " + parenHit + " 去括号 " + stripHit
+                + " 未匹配 " + unmatchedCount + "）");
+        if (unmatchedCount > 0) {
+            // 打印未匹配的官方站名，以及高德返回的原始站名（用于核对搜索结果是否选对了线路）
+            Log.d(TAG, "高德坐标覆盖[方向 " + dirIndex + "] 未匹配官方站名: " + unmatchedNames);
+            Log.d(TAG, "高德坐标覆盖[方向 " + dirIndex + "] 高德原始站名(" + directCoordMap.size()
+                    + "): " + new ArrayList<>(directCoordMap.keySet()));
+        }
+        amapCoordCache.put(dirIndex, points);
+        if (dirPending.decrementAndGet() == 0) onAllDirectionsResolved();
+    }
+
+    /** 两个方向都解析完成后：标记启用，立即应用当前方向 */
+    private void onAllDirectionsResolved() {
+        amapCoordEnabled = true;
+        final int applied = applyCurrentAmapCoordInternal();
+        int covered = 0, total = 0;
+        for (List<LatLonPoint> ps : amapCoordCache.values()) {
+            total += ps.size();
+            for (LatLonPoint p : ps) if (p != null) covered++;
+        }
+        Log.d(TAG, "高德坐标双向缓存完成：覆盖 " + covered + "/" + total
+                + " 站，当前方向应用 " + applied + " 站");
+        List<LatLonPoint> curPts = amapCoordCache.get(currentDirection);
+        int curTotal = (curPts == null) ? 0 : curPts.size();
+        int curKeep = curTotal - applied;
+        String tip = "已应用高德坐标（本方向覆盖 " + applied + "/" + curTotal + " 站"
+                + (curKeep > 0 ? "，" + curKeep + " 站保持原坐标" : "") + "）";
+        runOnUiThread(() -> Toast.makeText(BusLineDetailActivity.this, tip, Toast.LENGTH_SHORT).show());
+    }
+
+
+    /** 把当前方向的缓存坐标套用到 realTimeManager（切换方向时调用，无需重新查询） */
+    private int applyCurrentAmapCoordInternal() {
+        if (!amapCoordEnabled) return 0;
+        List<LatLonPoint> pts = amapCoordCache.get(currentDirection);
+        if (pts == null || realTimeManager == null) return 0;
+        int applied = realTimeManager.applyAmapCoordOverride(pts);
+        redrawCurrentLine();
+        refreshStationMarkers();
+        if (moreFragment != null) moreFragment.setAmapCoordActive(true);
+        return applied;
+    }
+
+    /**
+     * 在地图上叠加显示站点位置用于对比：
+     * 红色=官方原始坐标（始终显示），蓝色=高德覆盖坐标（仅启用高德坐标时叠加）；
+     * 同站两点平面偏移 > 2m 时画橙色连线高亮差异。
+     */
+    private void refreshStationMarkers() {
+        if (navigationMainFragment == null || realTimeManager == null) return;
+        BusApiClient.BusLineDirection dir = getCurrentLineDirection();
+        if (dir == null || dir.stationList == null) return;
+
+        List<LatLonPoint> officialPts = officialCoordSnapshot.get(currentDirection);
+        if (officialPts == null && realTimeManager != null) {
+            officialPts = realTimeManager.getOfficialStationCoords(); // 兜底
+        }
+        if (officialPts == null) officialPts = new ArrayList<>();
+        int n = Math.min(officialPts.size(), dir.stationList.size());
+
+        List<com.amap.api.maps.model.LatLng> officialLatLng = new ArrayList<>();
+        List<String> names = new ArrayList<>();
+        for (int i = 0; i < n; i++) {
+            LatLonPoint p = officialPts.get(i);
+            officialLatLng.add(p != null
+                    ? new com.amap.api.maps.model.LatLng(p.getLatitude(), p.getLongitude()) : null);
+            names.add(dir.stationList.get(i).stationName);
+        }
+
+        List<com.amap.api.maps.model.LatLng> amapLatLng = null;
+        if (amapCoordEnabled) {
+            List<LatLonPoint> ap = amapCoordCache.get(currentDirection);
+            if (ap != null) {
+                amapLatLng = new ArrayList<>();
+                for (LatLonPoint p : ap) {
+                    amapLatLng.add(p != null
+                            ? new com.amap.api.maps.model.LatLng(p.getLatitude(), p.getLongitude()) : null);
+                }
+            }
+        }
+        navigationMainFragment.drawStationMarkers(officialLatLng, names, amapLatLng);
+    }
+
     private static final double STATION_PROXIMITY_THRESHOLD_METERS = 50.0;
     // 距离比"进站后的最小距离"增大多少米，才算"车辆已越过最近点、开始驶离站点"。
     // 用"最小距离 + 余量"而不是"上一帧 < 当前帧"，是为了抗 GPS 抖动造成的单帧回跳。
@@ -611,7 +1200,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             if (navigationMainFragment != null) {
                 navigationMainFragment.setGpsMode(false);
             }
-            if (realTimeManager != null) {
+            if (realTimeManager != null && !fromAmap) {
                 realTimeManager.startTracking(getCurrentDirectionId(), this);
             }
             if (busLineView != null) {
@@ -1396,9 +1985,32 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         }
     }
 
+    /** 是否普通公交：诸暨线路恒为 true；高德线路仅当 lineTypeName 明确为「普通公交」时为 true，其余类型（地铁/机场大巴等）为 false */
+    private boolean isNormalBusLine() {
+        if (!fromAmap) return true;
+        BusApiClient.BusLineDirection dir = getCurrentDirectionData();
+        String t = dir != null ? dir.lineTypeName : null;
+        return t == null || "普通公交".equals(t);
+    }
+
+    /** 依据线路类型设置 LED 欢迎语：非普通公交只去掉中文「公交车」，英文欢迎语保留 */
+    private void applyWelcomeText() {
+        if (nextStationInfo == null || lineName == null) return;
+        if (isNormalBusLine()) {
+            nextStationInfo.setText("欢迎乘坐 " + lineName + " 公交车"
+                    + "    " + "Welcome aboard the " + TTSUtils.getEnLineName(lineName));
+        } else {
+            nextStationInfo.setText("欢迎乘坐 " + lineName
+                    + "    " + "Welcome aboard the " + TTSUtils.getEnLineName(lineName));
+        }
+    }
+
     private void updatePriceTips(BusApiClient.BusLineDirection lineDirection) {
-        String[] priceTips = buildPriceTips(lineDirection);
-        String[] priceTipsEn = buildPriceTipsEn(lineDirection);
+        // 非诸暨（高德/fromAmap）地区：不清楚当地票价/刷卡策略，直接去掉票价与上下车刷卡提示，仅保留两条基础提示。
+        // 诸暨线路：非普通公交（地铁/机场大巴等）也不显示票价与刷卡提示。
+        boolean showPriceTips = !fromAmap && isNormalBusLine();
+        String[] priceTips = showPriceTips ? buildPriceTips(lineDirection) : null;
+        String[] priceTipsEn = showPriceTips ? buildPriceTipsEn(lineDirection) : null;
         Log.d(TAG, "票价提示: totalPrice=" + (lineDirection == null ? "null" : lineDirection.totalPrice)
                 + ", lineType=" + (lineDirection == null ? -1 : lineDirection.lineType)
                 + ", lineTypeName=" + (lineDirection == null ? "null" : lineDirection.lineTypeName)
@@ -1510,6 +2122,10 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             lineName = intent.getStringExtra("line_name");
             startStation = intent.getStringExtra("start_station");
             endStation = intent.getStringExtra("end_station");
+            // 高德（非诸暨）线路：详情页需按 lineId 二次查询，而非走诸暨官方接口
+            fromAmap = intent.getBooleanExtra("from_amap", false);
+            amapLineId = intent.getStringExtra("amap_line_id");
+            amapCity = intent.getStringExtra("amap_city");
             initViews(savedInstanceState);
             setupListeners();
             if (lineName == null) {
@@ -1621,7 +2237,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         nextStationInfo.setTextSize(30f);
         // 欢迎语同样使用圆点点阵效果（与线路号/站名保持一致）
         nextStationInfo.setTypeface(dottedSongti);
-        nextStationInfo.setText("欢迎乘坐 " + lineName + " 公交车" + "    " + "Welcome aboard the " + TTSUtils.getEnLineName(lineName));
+        applyWelcomeText();
         nextStationInfo.setScrollSpeed(180f);
         accessibilityIcon = findViewById(R.id.accessibility_icon);
         accessibilityIcon.setVisibility(View.GONE);
@@ -1667,15 +2283,23 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         navigationMainFragment.setSwapOrientation(v -> swapDirection());
         // 报站模式切换 UI 已迁移到 NavigationMainFragment：把状态切换逻辑交给 Fragment 的按钮，
         // 并让 Fragment 视图就绪后回调一次以刷新初始显示。
-        navigationMainFragment.setAnnounceModeToggleListener(() -> {
-            if (currentAnnounceMode == AnnounceMode.GPS) {
-                currentAnnounceMode = AnnounceMode.NETWORK;
-            } else {
-                currentAnnounceMode = AnnounceMode.GPS;
-            }
+        if (fromAmap) {
+            // 高德（非诸暨）线路：网络模式无实时数据源，禁用切换并提示「仅支持GPS」，强制 GPS 模式
+            navigationMainFragment.lockAnnounceModeToGps();
+            navigationMainFragment.setModeDisplayReadyListener(() -> updateAnnounceModeDisplay());
+            currentAnnounceMode = AnnounceMode.GPS;
             updateAnnounceModeState();
-        });
-        navigationMainFragment.setModeDisplayReadyListener(() -> updateAnnounceModeDisplay());
+        } else {
+            navigationMainFragment.setAnnounceModeToggleListener(() -> {
+                if (currentAnnounceMode == AnnounceMode.GPS) {
+                    currentAnnounceMode = AnnounceMode.NETWORK;
+                } else {
+                    currentAnnounceMode = AnnounceMode.GPS;
+                }
+                updateAnnounceModeState();
+            });
+            navigationMainFragment.setModeDisplayReadyListener(() -> updateAnnounceModeDisplay());
+        }
     }
     // 添加一个辅助方法来处理线路名称
     private String formatLineNameForEnglish(String lineName) {
@@ -1759,6 +2383,10 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 intent.putExtra("start_station", startStation);
                 intent.putExtra("end_station", endStation);
                 intent.putExtra("direction", currentDirection);
+                // 透传高德来源参数，供后续 POV 接入高德数据（当前 POV 仍走诸暨通道，等待实现）
+                intent.putExtra("from_amap", fromAmap);
+                intent.putExtra("amap_line_id", amapLineId);
+                intent.putExtra("amap_city", amapCity);
                 startActivity(intent);
             });
         }
@@ -2102,11 +2730,17 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private void initData() {
         busApiClient = new BusApiClient();
 
-        // 查询线路通知
-        queryLineNotification();
+        // 查询线路通知（高德线路无对应官方公告，跳过）
+        if (!fromAmap) {
+            queryLineNotification();
+        }
 
-        // 查询公交线路详情
-        queryBusLineDetail();
+        // 查询公交线路详情：高德来源走二次 lineId 查询，其余走诸暨官方接口
+        if (fromAmap && amapLineId != null && !amapLineId.isEmpty()) {
+            queryAmapBusLineDetail();
+        } else {
+            queryBusLineDetail();
+        }
     }
 
     private void queryLineNotification() {
@@ -2172,6 +2806,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 public void onSuccess(BusApiClient.BusLineDetailResponse response) {
                     try {
                         cachedResponse = response;
+                        officialCoordSnapshot.clear();
 
                         if (response == null || response.data == null) {
                             Log.e(TAG + "-BusInfo-", "公交线路-无数据");
@@ -2206,10 +2841,11 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
 
                         runOnUiThread(() -> {
                             try {
-                                if (isTwoWayLine) {
-                                    navigationMainFragment.setLoopLine(false);
-                                } else {
-                                    navigationMainFragment.setLoopLine(true);
+                                // 诸暨沿用原规则：单向线路视为环线展示（高德分支已单独判定）
+                                boolean isLoop = !isTwoWayLine;
+                                navigationMainFragment.setLoopLine(isLoop);
+                                navigationMainFragment.setCanSwapDirection(isTwoWayLine);
+                                if (isLoop) {
                                     navigationMainFragment.updateRouteNo(lineName + "（环线）");
                                 }
 
@@ -2233,6 +2869,242 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         }
     }
 
+    /**
+     * 高德（非诸暨）线路详情：按 lineId 二次查询（BY_LINE_ID, extensions=all），
+     * 将 BusLineItem 映射进统一的 BusLineDetailResponse 模型（data.up/down），
+     * 使下游 showDirection / realTimeManager / busLineView / NavigationMainFragment 无需改动即可复用。
+     * <p>单向线路不展示环线标记（环线需起终点站名相同才判定），满足「单向≠环线」的需求；
+     * 双向线路（起终点站名不同）合成下行=上行反序，支持换向。
+     * 实时车位置为诸暨专属接口，高德线路无对应源，故不启动实时追踪（配不到的数据先空着）。</p>
+     */
+    private void queryAmapBusLineDetail() {
+        try {
+            try {
+                ServiceSettings.updatePrivacyShow(this, true, true);
+                ServiceSettings.updatePrivacyAgree(this, true);
+            } catch (Throwable t) {
+                Log.e(TAG, "高德隐私协议设置失败", t);
+            }
+
+            // 高德按「线路名」(BY_LINE_NAME) 查询才会一次返回往返两个方向；
+            // BY_LINE_ID 只返回当前这一个方向（之前日志看到 size()=1 正是这个原因）。
+            // 用线路基础名（去掉 "(起点--终点)" 后缀）查询，extensions="all" 时每个方向都带完整站点与坐标。
+            // lineName 不可用时退回按 ID 查询（仅单方向）。
+            String queryName = (lineName != null) ? lineName.replaceAll("\\(.*\\)", "").trim() : "";
+            BusLineQuery query;
+            if (!queryName.isEmpty()) {
+                query = new BusLineQuery(queryName, BusLineQuery.SearchType.BY_LINE_NAME, amapCity);
+            } else {
+                query = new BusLineQuery(amapLineId, BusLineQuery.SearchType.BY_LINE_ID, amapCity);
+            }
+            query.setPageSize(20);
+            // 高德搜索 SDK 自 5.2.1 起页码从 1 开始（当前 9.5.0），传 0 会返回空结果
+            query.setPageNumber(1);
+            // extensions="all" 才会返回站点列表（getBusStations）与路线坐标（getDirectionsCoordinates）
+            query.setExtensions("all");
+
+            final BusLineSearch search;
+            try {
+                search = new BusLineSearch(this, query);
+            } catch (AMapException e) {
+                Log.e(TAG + "-BusInfo-", "高德详情搜索构造失败", e);
+                runOnUiThread(() -> Toast.makeText(this, "高德线路加载失败", Toast.LENGTH_SHORT).show());
+                return;
+            }
+
+            search.setOnBusLineSearchListener((result, rCode) -> {
+                if (rCode != 1000 || result == null || result.getBusLines() == null || result.getBusLines().isEmpty()) {
+                    Log.e(TAG + "-BusInfo-", "高德线路详情查询失败 rCode=" + rCode + " amapLineId=" + amapLineId);
+                    runOnUiThread(() -> Toast.makeText(BusLineDetailActivity.this, "高德线路加载失败", Toast.LENGTH_SHORT).show());
+                    return;
+                }
+                // 高德按线路名查询会一次返回该线路往返两个方向（各自带完整站点与坐标），
+                // 分别作为上行/下行；仅 1 个则为单向（环线或单方向）。
+                List<BusLineItem> lines = result.getBusLines();
+                // 关键日志：确认高德返回的方向数量及每个方向的 id/起终点
+                Log.i(TAG + "-BusInfo-", "高德返回方向数量 busLines.size()=" + lines.size()
+                        + " amapLineId=" + amapLineId);
+                for (int k = 0; k < lines.size(); k++) {
+                    BusLineItem it = lines.get(k);
+                    Log.i(TAG + "-BusInfo-", "  方向[" + k + "] id=" + safe(it.getBusLineId())
+                            + " name=" + safe(it.getBusLineName())
+                            + " 起点=" + safe(it.getOriginatingStation())
+                            + " 终点=" + safe(it.getTerminalStation())
+                            + " 站点数=" + (it.getBusStations() != null ? it.getBusStations().size() : 0));
+                }
+
+                BusLineItem upItem, downItem;
+                if (lines.size() >= 2) {
+                    upItem = lines.get(0);
+                    downItem = lines.get(1);
+                } else {
+                    upItem = lines.get(0);
+                    downItem = null;
+                }
+                cachedResponse = buildAmapResponse(upItem, downItem);
+                if (cachedResponse == null || cachedResponse.data == null) {
+                    Log.e(TAG + "-BusInfo-", "高德线路映射结果为空");
+                    return;
+                }
+
+                // 环线判定：只有一个方向且其起终点站名相同；否则有下行即双向，可换向。
+                // 单向非环线不显示环线标记、也不可换向。
+                boolean hasDown = downItem != null;
+                String oSt = upItem.getOriginatingStation();
+                String tSt = upItem.getTerminalStation();
+                boolean isLoop = !hasDown && oSt != null && tSt != null && oSt.equals(tSt);
+                isTwoWayLine = !isLoop && hasDown;
+
+                // 默认方向：优先用点击的 amapLineId 命中具体方向，其次用传入起终点匹配，再否则上行。
+                if (amapLineId != null && downItem != null && amapLineId.equals(downItem.getBusLineId())) {
+                    currentDirection = 2;
+                } else if (startStation != null && endStation != null && isTwoWayLine) {
+                    BusApiClient.BusLineDirection up = cachedResponse.data.up;
+                    BusApiClient.BusLineDirection down = cachedResponse.data.down;
+                    if (up != null && startStation.equals(up.startStation) && endStation.equals(up.endStation)) {
+                        currentDirection = 1;
+                    } else if (down != null && startStation.equals(down.startStation) && endStation.equals(down.endStation)) {
+                        currentDirection = 2;
+                    } else {
+                        currentDirection = 1;
+                    }
+                } else {
+                    currentDirection = 1;
+                }
+
+                // 同步 lineID，供换向后 POV 跳转等场景使用
+                lineID = getCurrentDirectionId();
+
+                runOnUiThread(() -> {
+                    try {
+                        if (navigationMainFragment != null) {
+                            navigationMainFragment.setLoopLine(isLoop);
+                            navigationMainFragment.setCanSwapDirection(isTwoWayLine);
+                            if (isLoop) {
+                                navigationMainFragment.updateRouteNo(lineName + "（环线）");
+                            }
+                        }
+                        showDirection();
+                    } catch (Exception e) {
+                        Log.e(TAG, "更新高德线路UI失败", e);
+                    }
+                });
+            });
+            search.searchBusLineAsyn();
+        } catch (Exception e) {
+            Log.e(TAG, "查询高德线路详情异常", e);
+        }
+    }
+
+    /**
+     * 将高德单个 BusLineItem（一个方向）映射为统一的 BusLineDirection。
+     * 高德搜索同一条线路会分别返回上行/下行两个 BusLineItem，各自带完整的站点与路线坐标，
+     * 直接映射即可，无需反排合成。
+     */
+    private BusApiClient.BusLineDirection mapAmapItemToDirection(BusLineItem item, String dirIdSuffix) {
+        if (item == null) return null;
+
+        // 高德 getBusStations() 已按途经顺序（起点 -> 终点）返回，直接 1 基编号，不做反排。
+        List<BusApiClient.BusLineStation> stations = mapAmapStations(item.getBusStations());
+        String geometry = buildGeometry(item.getDirectionsCoordinates());
+        String first = formatAmapTime(item.getFirstBusTime());
+        String last = formatAmapTime(item.getLastBusTime());
+        float price = 0f;
+        try {
+            price = item.getTotalPrice();
+        } catch (Throwable ignore) {
+        }
+        // 高德 getDistance() 返回单位即为公里（实测 ~16.207 对应 16 公里线路），
+        // lineLength 约定为公里整数，直接四舍五入即可。
+        int lengthM = 0;
+        try {
+            lengthM = (int) Math.round(item.getDistance());
+        } catch (Throwable ignore) {
+        }
+
+        BusApiClient.BusLineDirection dir = new BusApiClient.BusLineDirection();
+        // 用高德该方向真实线路 ID（BY_LINE_NAME 会返回两个独立方向的各自 ID），便于 POV/坐标匹配；
+        // 取不到时退回合成 ID。
+        String realId = safe(item.getBusLineId());
+        dir.id = realId.isEmpty() ? ((amapLineId != null ? amapLineId : "") + dirIdSuffix) : realId;
+        dir.startStation = safe(item.getOriginatingStation());
+        dir.endStation = safe(item.getTerminalStation());
+        dir.startFirst = first;
+        dir.startLast = last;
+        dir.totalPrice = price;
+        dir.lineLength = lengthM;
+        dir.hasCj = 0;
+        dir.geometry = geometry;
+        dir.stationList = stations;
+        // 高德线路类型（中文，如「普通公交」「地铁」「机场大巴」等）；非诸暨线路据此判断是否普通公交
+        String busType = "";
+        try {
+            busType = item.getBusLineType();
+        } catch (Throwable ignore) {
+        }
+        dir.lineTypeName = safe(busType);
+        return dir;
+    }
+
+    /** 将两个方向的高德 BusLineItem 组装为统一的 BusLineDetailResponse（无下行时 down=null）。 */
+    private BusApiClient.BusLineDetailResponse buildAmapResponse(BusLineItem upItem, BusLineItem downItem) {
+        BusApiClient.BusLineDetailResponse resp = new BusApiClient.BusLineDetailResponse();
+        resp.code = "200";
+        resp.data = new BusApiClient.BusLineDetailData();
+        resp.data.lineName = lineName != null ? lineName : safe(upItem.getBusLineName());
+        resp.data.areaCode = safe(upItem.getCityCode());
+        resp.data.up = mapAmapItemToDirection(upItem, "_1");
+        resp.data.down = (downItem != null) ? mapAmapItemToDirection(downItem, "_2") : null;
+        return resp;
+    }
+
+    /** 高德站点列表 -> 统一 BusLineStation 列表（坐标取高德 GCJ-02，与地图一致）。 */
+    private static List<BusApiClient.BusLineStation> mapAmapStations(List<BusStationItem> src) {
+        List<BusApiClient.BusLineStation> out = new ArrayList<>();
+        if (src == null) return out;
+        int order = 0;
+        for (BusStationItem st : src) {
+            if (st == null) continue;
+            BusApiClient.BusLineStation s = new BusApiClient.BusLineStation();
+            s.stationName = st.getBusStationName();
+            s.id = String.valueOf(order + 1);
+            s.stationOrder = order + 1;
+            LatLonPoint p = st.getLatLonPoint();
+            double lat = p != null ? p.getLatitude() : 0;
+            double lon = p != null ? p.getLongitude() : 0;
+            s.lat = lat;
+            s.lng = lon;
+            // poiOrigin* 作为「官方原始坐标」供地图叠加；高德来源即其自身坐标
+            s.poiOriginLat = lat;
+            s.poiOriginLon = lon;
+            out.add(s);
+            order++;
+        }
+        return out;
+    }
+
+    /** 将高德路线坐标点（GCJ-02）拼成 geometry 字符串：lng,lat;lng,lat;... */
+    private static String buildGeometry(List<LatLonPoint> pts) {
+        if (pts == null || pts.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder();
+        for (LatLonPoint p : pts) {
+            if (p == null) continue;
+            sb.append(p.getLongitude()).append(',').append(p.getLatitude()).append(';');
+        }
+        return sb.toString();
+    }
+
+    /** 高德首/末班车时间为 Date 类型，格式化为 "HH:mm:ss" 以兼容现有解析逻辑。 */
+    private static String formatAmapTime(Date date) {
+        if (date == null) return "";
+        SimpleDateFormat sdf = new SimpleDateFormat("HH:mm:ss", Locale.CHINA);
+        return sdf.format(date);
+    }
+
+    private static String safe(String s) {
+        return s != null ? s : "";
+    }
+
     private void swapDirection() {
         if (!isTwoWayLine) return;
 
@@ -2252,7 +3124,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         updateStartEndStations();
         showDirection();
 
-        nextStationInfo.setText("欢迎乘坐 " + lineName + " 公交车" + "    " + "Welcome aboard the " + TTSUtils.getEnLineName(lineName));
+        applyWelcomeText();
 
         if (currentAnnounceMode == AnnounceMode.GPS) {
             GpsWarmingUp.removeListener(gpsActivityListener);
@@ -2263,7 +3135,9 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             gpsCurrentStationIndex = -1;
             committedStationIndex = -1;
             realTimeManager.stopTracking();
-            realTimeManager.startTracking(getCurrentDirectionId(), this);
+            if (!fromAmap) {
+                realTimeManager.startTracking(getCurrentDirectionId(), this);
+            }
             GpsWarmingUp.addListener(gpsActivityListener);
             GpsWarmingUp.addSatelliteListener(satelliteCountListener);
             Location lastLocation = GpsWarmingUp.getLastKnownLocation();
@@ -2341,6 +3215,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         //    避免后面的 UI 更新（地图、站点列表等）一旦抛异常就把轮播文案一起跳过。
         updatePriceTips(lineDirection);
         startTipsAnimation();
+        applyWelcomeText();
 
         if (navigationMainFragment != null) {
             navigationMainFragment.setLineData(lineDirection, isTwoWayLine, currentDirection);
@@ -2547,9 +3422,29 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 busLineView.setOnGpsArrivalListener(this::scrollToStation);
 
                 realTimeManager = new BusRealTimeManager(handler, lineDirection.stationList);
-                realTimeManager.startTracking(lineDirection.id, BusLineDetailActivity.this);
+                // 实时车位置为诸暨专属接口；高德来源无对应实时源，不启动追踪（配不到的数据先空着）
+                if (!fromAmap) {
+                    realTimeManager.startTracking(lineDirection.id, BusLineDetailActivity.this);
+                }
+                // 首次进入该方向（覆盖应用前）快照官方原始坐标，供地图对比叠加；
+                // 之后切回已覆盖方向时不再被就地改写影响
+                if (!officialCoordSnapshot.containsKey(currentDirection) && lineDirection.stationList != null) {
+                    List<LatLonPoint> snap = new ArrayList<>();
+                    for (BusApiClient.BusLineStation s : lineDirection.stationList) {
+                        snap.add(new LatLonPoint(s.poiOriginLat, s.poiOriginLon));
+                    }
+                    officialCoordSnapshot.put(currentDirection, snap);
+                }
+                // 若已启用高德坐标覆盖：直接套用该方向缓存，无需重新查询
+                if (amapCoordEnabled) {
+                    List<LatLonPoint> pts = amapCoordCache.get(currentDirection);
+                    if (pts != null) realTimeManager.applyAmapCoordOverride(pts);
+                }
+                // 在地图上叠加站点位置（官方 + 高德覆盖对比）
+                refreshStationMarkers();
                 // 初始加载：启动 10 秒刷新倒计时（GPS 模式由 toggle 切到 GPS 时再处理）
-                if (currentAnnounceMode == AnnounceMode.NETWORK) {
+                // 高德来源无实时车接口，不启动网络刷新
+                if (!fromAmap && currentAnnounceMode == AnnounceMode.NETWORK) {
                     startNetworkRefreshCountdown();
                 }
 
@@ -2631,6 +3526,12 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
      */
     private void checkLineVoicepackStatus() {
         if (llVoicepackStatus == null || tvVoicepackStatus == null) return;
+        // 非诸暨（高德/fromAmap）地区：不展示语音包缺失/状态提示，整个状态条隐藏
+        if (fromAmap) {
+            llVoicepackStatus.setVisibility(View.GONE);
+            if (btnVoicepackDetail != null) btnVoicepackDetail.setVisibility(View.GONE);
+            return;
+        }
         if (realTimeManager == null || realTimeManager.getStationList() == null) return;
 
         List<String> names = new ArrayList<>();
@@ -2824,11 +3725,6 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         card.addView(tvNames);
 
         parent.addView(card);
-    }
-
-    /** dp → px */
-    private int dp(int value) {
-        return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
     }
 
     /** 用顿号拼接站名列表 */
@@ -3561,7 +4457,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         if (navigationMainFragment != null) {
             navigationMainFragment.notifyHostResumed(true);
         }
-        if (currentAnnounceMode == AnnounceMode.NETWORK && realTimeManager != null) {
+        if (currentAnnounceMode == AnnounceMode.NETWORK && realTimeManager != null && !fromAmap) {
             realTimeManager.startTracking(getCurrentDirectionId(), this);
             // onResume → 重新进入网络模式，重启倒计时
             startNetworkRefreshCountdown();

@@ -11,7 +11,7 @@ android {
         minSdk 24
         targetSdk 35
         versionCode 102045
-        versionName "1.2.45"
+        versionName "1.2.46-beta1"
         //wsServerAddress = `http://zhujibus.360967.xyz/ws`
         //githubAddSpeed = `https://gh-proxy.org`
         //remote={"has_notice":true,"notice":"1.2.43版本开始分离本体和语音包，并改为在线获取，请卸载旧版本并安装新版本，如果没有下载语音包，将调用系统TTS合成。目前发现城市公交票价信息和距离信息缺失，该问题为交通运输局平台的问题，可能导致排班中的到达时间计算错误。教程请在B站搜索用户：\"oho19950813\"。本软件仅支持浙江省诸暨市公交查询，查询时需要联网，网络模式下选择站点后，即可开始播报最近车辆，GPS导航模式下，需要前往当地乘坐对应公交，或者使用第三方定位模拟方可体验。感谢您的使用，接口版权归诸暨市交通局所有。","has_update":true,"update_log":"1. 更换LED点阵字体。\n2.调整UI。\n3.其他BUG修复。"}
@@ -72,8 +72,10 @@ dependencies {
     implementation libs.okhttp       // OkHttp
     implementation libs.jackson.databind // Jackson
     implementation libs.kotlinx.coroutines.android
-    // 高德导航 SDK（包含地图+导航功能）
+    // 导航 3D 地图包
     implementation libs.amapNavi3dmap
+    // 高德搜索 SDK（地区/公交检索，含 Inputtips、BusLineSearch 等）
+    implementation libs.amapSearch
     implementation libs.glide
     implementation libs.gridlayout
     implementation libs.sdp

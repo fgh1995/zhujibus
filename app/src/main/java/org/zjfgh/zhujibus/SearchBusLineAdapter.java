@@ -12,15 +12,15 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class SearchBusLineAdapter extends RecyclerView.Adapter<BusLineViewHolder> {
-    private final List<BusApiClient.BusLineInfo> busLines = new ArrayList<>();
+    private final List<SearchLineResult> busLines = new ArrayList<>();
     private OnItemClickListener listener;
 
     public interface OnItemClickListener {
-        void onItemClick(BusApiClient.BusLineInfo line);
+        void onItemClick(SearchLineResult line);
     }
 
     @SuppressLint("NotifyDataSetChanged")
-    public void setData(List<BusApiClient.BusLineInfo> newData) {
+    public void setData(List<SearchLineResult> newData) {
         busLines.clear();
         busLines.addAll(newData);
         notifyDataSetChanged();
@@ -40,13 +40,18 @@ public class SearchBusLineAdapter extends RecyclerView.Adapter<BusLineViewHolder
 
     @Override
     public void onBindViewHolder(@NonNull BusLineViewHolder holder, int position) {
-        BusApiClient.BusLineInfo line = busLines.get(position);
+        SearchLineResult line = busLines.get(position);
 
-        // 提取线路数字（假设格式为"13路"）
-        String lineNumber = line.lineName.replaceAll("[^0-9]", "");
-        holder.tvLineBadge.setText(lineNumber.isEmpty() ? "?" : lineNumber);
+        holder.tvLineBadge.setText(line.getBadge());
 
         holder.tvLineName.setText(line.lineName);
+        // 地区单独展示（如「嵊州」「诸暨」），无地区时隐藏 chip，不连写在线路名里
+        if (line.region == null || line.region.isEmpty()) {
+            holder.tvRegion.setVisibility(View.GONE);
+        } else {
+            holder.tvRegion.setText(line.region);
+            holder.tvRegion.setVisibility(View.VISIBLE);
+        }
         holder.tvStartStation.setText(line.startStation);
         holder.tvEndStation.setText(line.endStation);
 

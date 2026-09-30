@@ -67,6 +67,10 @@
             android:exported="false"
             android:theme="@style/Theme.诸暨公交" />
         <activity
+            android:name=".RegionSearchActivity"
+            android:exported="false"
+            android:theme="@style/Theme.诸暨公交" />
+        <activity
             android:name=".MainActivity"
             android:exported="true">
             <intent-filter>

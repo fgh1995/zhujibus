@@ -13,6 +13,8 @@ import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import io.sgr.geometry.Coordinate;
 import io.sgr.geometry.utils.GeometryUtils;
 import android.text.SpannableString;
@@ -22,6 +24,7 @@ import android.text.style.ForegroundColorSpan;
 import android.text.style.StyleSpan;
 import android.util.Log;
 import android.view.Gravity;
+import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
@@ -33,13 +36,18 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.cardview.widget.CardView;
+
+import com.google.android.material.button.MaterialButton;
 import androidx.recyclerview.widget.DividerItemDecoration;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import com.amap.api.services.core.AMapException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -54,6 +62,14 @@ import java.util.regex.Pattern;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
+
+import com.amap.api.services.busline.BusLineItem;
+import com.amap.api.services.busline.BusLineQuery;
+import com.amap.api.services.busline.BusLineResult;
+import com.amap.api.services.busline.BusLineSearch;
+import com.amap.api.services.busline.BusStationItem;
+import com.amap.api.services.core.LatLonPoint;
+import com.amap.api.services.core.ServiceSettings;
 
 public class MainActivity extends AppCompatActivity {
     private static final String TAG = "MainActivity";
@@ -74,6 +90,34 @@ public class MainActivity extends AppCompatActivity {
     private double currentLongitude = 29.713397;
     private TextView tvNoData;
     private boolean locationObtained = false;
+
+    // ===== 地区定位 / 选择 =====
+    private RegionManager regionManager;
+    private RegionLocator regionLocator;
+    private boolean regionLocatorStarted = false;
+    private boolean regionPromptShown = false;
+    private final Handler regionFallbackHandler = new Handler(Looper.getMainLooper());
+    /** 兜底：定位迟迟解析不到或失败时，仍提示用户手动选择地区（需求 1） */
+    private final Runnable regionFallback = () -> {
+        if (regionPromptShown || regionManager.isManualMode()) return;
+        if (regionManager.getSelectedRegion() != null) return;
+        runOnUiThread(this::showRegionFallbackDialog);
+    };
+    private TextView tvRegion;          // 左上角地区胶囊文字
+    private final ActivityResultLauncher<android.content.Intent> regionSearchLauncher =
+            registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
+                if (result.getResultCode() == RESULT_OK && result.getData() != null) {
+                    BusRegion r = result.getData().getParcelableExtra("region");
+                    if (r != null) {
+                        regionManager.setSelectedRegion(r);
+                        regionManager.setManualMode(false);
+                        // 注意：不更新 promptedAdCode，去重基准仍是「真实定位地区」，
+                        // 避免用户手动选了与定位不同的地区后，真实定位地区每次解析都重复弹窗。
+                        updateRegionChip(r);
+                        onRegionConfirmed(r);
+                    }
+                }
+            });
 
     private LinearLayout llUpdateNotice;
     private LinearLayout llNotice;
@@ -101,6 +145,9 @@ public class MainActivity extends AppCompatActivity {
     private LinearLayout llVoicepackCleanup;
     private TextView tvVoicepackCleanupText;
     private TextView tvVoicepackCleanupClose;
+    private LinearLayout llVoicepackDownload;
+    private LinearLayout llNoticeBoard;
+    private LinearLayout llNearbyBus;
     /** 本页面已展示过的清理事件时间戳，避免同一事件重复提示 */
     private long lastDisplayedCleanupTime = 0L;
 
@@ -119,17 +166,25 @@ public class MainActivity extends AppCompatActivity {
             llNotice = findViewById(R.id.ll_notice);
             hstvUpdateNotice = findViewById(R.id.hstv_update_notice);
             hstvNotice = findViewById(R.id.hstv_notice);
+            llVoicepackDownload = findViewById(R.id.ll_voicepack_download);
+            llNoticeBoard = findViewById(R.id.ll_notice_board);
+            llNearbyBus = findViewById(R.id.ll_nearby_bus);
+            setupRegionUi();
             // ⭐ 关键修复：先挂一个空 adapter，避免首次 layout 时报 "No adapter attached"
             // 数据加载完后会被真正的 StationRouteAdapter 替换
             recyclerView.setAdapter(new BusStationAdapter());
             client = new BusApiClient();
             if (PermissionUtils.hasLocationPermission(this)) {
                 startGpsIfNeeded();
+                ensureRegionLocating();
             } else {
                 PermissionUtils.requestLocationPermission(this, new PermissionUtils.PermissionCallback() {
                     @Override
                     public void onPermissionGranted() {
-                        runOnUiThread(() -> startGpsIfNeeded());
+                        runOnUiThread(() -> {
+                            startGpsIfNeeded();
+                            ensureRegionLocating();
+                        });
                     }
 
                     @Override
@@ -164,10 +219,105 @@ public class MainActivity extends AppCompatActivity {
             });
             loadAnnouncements();
             loadRemoteConfig();
+            // 临时验证：搜索 35 路并打印日志（确认搜索 SDK 可用后删除）
+            testSearchBusLine();
         } catch (Exception e) {
             Log.e("MainActivity", "初始化失败", e);
             Toast.makeText(this, "应用初始化失败", Toast.LENGTH_LONG).show();
         }
+    }
+
+    /** 临时验证：搜索 35 路并打印线路名/方向坐标/站点坐标，确认搜索 SDK 可用（验证后可删除本方法及其调用） */
+    private void testSearchBusLine() throws AMapException {
+        try {
+            ServiceSettings.updatePrivacyShow(this, true, true);
+            ServiceSettings.updatePrivacyAgree(this, true);
+        } catch (Throwable t) {
+            Log.e("BusLineTest", "搜索隐私协议设置失败", t);
+        }
+        BusRegion sel = regionManager.getSelectedRegion();
+        String searchCity = (sel != null && sel.adCode != null && !sel.adCode.isEmpty()) ? sel.adCode : "绍兴市";
+        Log.i("BusLineTest", "使用 adCode 查询: " + searchCity);
+        final String city = searchCity;
+        BusLineQuery query = new BusLineQuery("10路", BusLineQuery.SearchType.BY_LINE_NAME, city);
+        query.setPageSize(10);
+        // 高德搜索 SDK 自 5.2.1 起页码从 1 开始（当前 9.5.0），传 0 会返回空结果
+        query.setPageNumber(1);
+        BusLineSearch search = new BusLineSearch(this, query);
+        search.setOnBusLineSearchListener(new BusLineSearch.OnBusLineSearchListener() {
+            @Override
+            public void onBusLineSearched(BusLineResult result, int rCode) {
+                if (rCode != 1000 || result == null) {
+                    Log.w("BusLineTest", "公交线路搜索失败 rCode=" + rCode + " city=" + city);
+                    return;
+                }
+                List<BusLineItem> lines = result.getBusLines();
+                if (lines == null || lines.isEmpty()) {
+                    Log.w("BusLineTest", "未搜索到 35 路（city=" + city + "）");
+                    return;
+                }
+                Log.i("BusLineTest", "搜索到 " + lines.size() + " 条 35 路，city=" + city);
+                // 按线路名搜索只返回概要(站点数为0)，需用 lineId 二次查询拿完整站点/坐标
+                for (BusLineItem line : lines) {
+                    final String lineId = line.getBusLineId();
+                    Log.i("BusLineTest", "概要: " + line.getBusLineName()
+                            + " 公司=" + line.getBusCompany()
+                            + " 方向=" + line.getOriginatingStation() + " -> " + line.getTerminalStation()
+                            + " city=" + city
+                            + " lineId=" + lineId);
+                    BusLineQuery detailQuery = new BusLineQuery(lineId, BusLineQuery.SearchType.BY_LINE_ID, city);
+                    detailQuery.setPageSize(10);
+                    // 高德搜索 SDK 自 5.2.1 起页码从 1 开始（当前 9.5.0），传 0 会返回空结果
+                    detailQuery.setPageNumber(1);
+                    // extensions="all" 才会返回站点列表（getBusStations），默认 base 只返回基础数据
+                    detailQuery.setExtensions("all");
+                    BusLineSearch detailSearch = null;
+                    try {
+                        detailSearch = new BusLineSearch(MainActivity.this, detailQuery);
+                    } catch (AMapException e) {
+                        throw new RuntimeException(e);
+                    }
+                    detailSearch.setOnBusLineSearchListener(new BusLineSearch.OnBusLineSearchListener() {
+                        @Override
+                        public void onBusLineSearched(BusLineResult detailResult, int dRCode) {
+                            if (dRCode != 1000 || detailResult == null) {
+                                Log.w("BusLineTest", "线路详情查询失败 rCode=" + dRCode + " lineId=" + lineId);
+                                return;
+                            }
+                            List<BusLineItem> detailLines = detailResult.getBusLines();
+                            if (detailLines == null || detailLines.isEmpty()) {
+                                Log.w("BusLineTest", "线路详情为空 lineId=" + lineId);
+                                return;
+                            }
+                            BusLineItem d = detailLines.get(0);
+                            Log.i("BusLineTest", "详情 " + d.getBusLineName()
+                                    + " 距离=" + d.getDistance() + "km"
+                                    + " 首班=" + d.getFirstBusTime() + " 末班=" + d.getLastBusTime()
+                                    + " 站点数=" + (d.getBusStations() == null ? 0 : d.getBusStations().size()));
+                            List<BusStationItem> stations = d.getBusStations();
+                            if (stations != null) {
+                                for (int i = 0; i < stations.size(); i++) {
+                                    BusStationItem st = stations.get(i);
+                                    LatLonPoint p = st.getLatLonPoint();
+                                    String coord = p == null ? "null" : (p.getLongitude() + "," + p.getLatitude());
+                                    Log.i("BusLineTest", "  站点[" + i + "] " + st.getBusStationName() + " 坐标=" + coord);
+                                }
+                            }
+                            List<LatLonPoint> dirs = d.getDirectionsCoordinates();
+                            if (dirs != null) {
+                                for (int i = 0; i < dirs.size(); i++) {
+                                    LatLonPoint p = dirs.get(i);
+                                    Log.i("BusLineTest", "  方向点[" + i + "] " + p.getLongitude() + "," + p.getLatitude());
+                                }
+                            }
+                        }
+                    });
+                    detailSearch.searchBusLineAsyn();
+                }
+            }
+        });
+        search.searchBusLineAsyn();
+        Log.i("BusLineTest", "已发起 35 路搜索，city=" + city);
     }
 
     private final LocationListener gpsListener = new LocationListener() {
@@ -207,6 +357,13 @@ public class MainActivity extends AppCompatActivity {
             voicepackConfigListener = null;
         }
         GpsWarmingUp.removeListener(gpsListener);
+        // 取消地区提示兜底计时
+        regionFallbackHandler.removeCallbacks(regionFallback);
+        // 关闭地区定位
+        if (regionLocator != null) {
+            regionLocator.stop();
+            regionLocator = null;
+        }
         // 关闭 WebSocket 连接
         if (webSocketManager != null) {
             webSocketManager.close();
@@ -225,6 +382,8 @@ public class MainActivity extends AppCompatActivity {
         if (!voicepackDownloading) {
             refreshVoicepackStatus();
         }
+        // 回到首页确保地区定位在运行（用于检测城市变化）
+        ensureRegionLocating();
     }
 
     @Override
@@ -242,6 +401,216 @@ public class MainActivity extends AppCompatActivity {
                 Log.e("MainActivity", "GPS初始化失败", e);
             }
         }
+    }
+
+    // ==================== 地区定位 / 选择 ====================
+
+    /**
+     * 初始化左上角地区胶囊（展示已选地区 + 作为人工搜索入口）。
+     */
+    private void setupRegionUi() {
+        regionManager = new RegionManager(this);
+        View regionView = findViewById(R.id.ll_region);
+        tvRegion = findViewById(R.id.tv_region);
+        if (regionView != null) {
+            regionView.setOnClickListener(v -> openRegionSearch());
+            // 长按：重置地区提示，下次定位自动重新弹窗（置强制提示标志，不立即弹窗）
+            regionView.setOnLongClickListener(v -> {
+                regionManager.setPromptedAdCode("");
+                regionManager.setManualMode(false);
+                regionManager.setForcePromptNext(true);
+                Toast.makeText(MainActivity.this, "已重置地区提示，下次将重新询问", Toast.LENGTH_SHORT).show();
+                return true;
+            });
+        }
+        updateRegionChip(regionManager.getSelectedRegion());
+    }
+
+    /**
+     * 启动地区定位（幂等）。仅在尚未启动且已授予定位权限时执行。
+     */
+    private void ensureRegionLocating() {
+        if (regionLocatorStarted) return;
+        if (!PermissionUtils.hasLocationPermission(this)) return;
+        regionLocatorStarted = true;
+        regionLocator = new RegionLocator();
+        regionLocator.start(this, new RegionLocator.Callback() {
+            @Override
+            public void onRegionResolved(BusRegion region) {
+                runOnUiThread(() -> handleLocatedRegion(region));
+            }
+
+            @Override
+            public void onError(int code, String msg) {
+                Log.w("MainActivity", "地区定位失败: " + msg);
+                // 定位失败且尚未选择地区：立即给出手动选择提示（需求 1 的兜底）
+                if (!regionPromptShown && !regionManager.isManualMode()
+                        && regionManager.getSelectedRegion() == null) {
+                    runOnUiThread(() -> showRegionFallbackDialog());
+                }
+            }
+        });
+        // 12s 内仍未解析到地区，也给出提示，避免首屏永远无提示
+        regionFallbackHandler.removeCallbacks(regionFallback);
+        regionFallbackHandler.postDelayed(regionFallback, 12_000);
+    }
+
+    /**
+     * 处理一次定位到的地区：仅当「真实定位地区」与上次提示过的不同才弹窗。
+     * - 已选地区与定位一致：不提示，并记录当前真实定位地区；
+     * - 真实定位地区与上次提示过的相同（用户已自行选过其它地区也不打扰）：不重复弹窗；
+     * - 真实地区发生变化：弹窗询问。
+     * 不再按 manualMode 永久屏蔽，避免「手动选择后每次进入都弹窗」或「换城市却不提示」。
+     */
+    private void handleLocatedRegion(BusRegion located) {
+        BusRegion selected = regionManager.getSelectedRegion();
+
+        // 长按重置后置位：下次定位检测强制重新弹窗（跨重启生效）
+        if (regionManager.isForcePromptNext()) {
+            regionManager.setForcePromptNext(false);
+            regionManager.setPromptedAdCode(located.adCode);
+            showRegionConfirmDialog(located);
+            updateRegionChip(selected);
+            return;
+        }
+
+        // 已选地区与定位一致：无需提示，记录当前真实定位地区
+        if (selected != null && selected.adCode.equals(located.adCode)) {
+            regionManager.setPromptedAdCode(located.adCode);
+            updateRegionChip(selected);
+            return;
+        }
+
+        // 真实定位地区与上次提示过的相同：不重复弹窗（无论是否手动模式、用户是否另选了地区）
+        if (located.adCode.equals(regionManager.getPromptedAdCode())) {
+            updateRegionChip(selected);
+            return;
+        }
+
+        // 真实地区发生变化：弹窗询问，并记录本次已提示（防止连续/重复弹窗）
+        regionManager.setPromptedAdCode(located.adCode);
+        showRegionConfirmDialog(located);
+        updateRegionChip(selected);
+    }
+
+    /**
+     * 弹窗：询问用户是否使用当前定位地区作为公交查询地区（需求 1、2）。
+     * 采用现代化居中弹窗（icon + 标题 + 正文 + 两个按钮）。
+     */
+    private void showRegionConfirmDialog(BusRegion r) {
+        if (isFinishing() || isDestroyed()) return;
+        regionPromptShown = true;
+        regionFallbackHandler.removeCallbacks(regionFallback);
+        String msg = "检测到您位于 " + r.toShortString()
+                + "，是否使用「" + r.regionName + "」作为公交查询地区？";
+        showModernRegionDialog("定位到新地区", msg,
+                "使用该地区", v -> {
+                    regionManager.setSelectedRegion(r);
+                    regionManager.setPromptedAdCode(r.adCode);
+                    regionManager.setManualMode(false);
+                    updateRegionChip(r);
+                    onRegionConfirmed(r);
+                },
+                "手动选择", v -> {
+                    // 需求 3：取消后切换为人工搜索模式，不再自动弹窗
+                    regionManager.setManualMode(true);
+                    regionManager.setPromptedAdCode(r.adCode);
+                    updateRegionChip(regionManager.getSelectedRegion());
+                    Toast.makeText(MainActivity.this, "已切换为手动选择地区", Toast.LENGTH_SHORT).show();
+                });
+    }
+
+    /**
+     * 兜底提示：未能自动定位到所在地区时，引导用户手动选择（需求 1 的兜底）。
+     */
+    private void showRegionFallbackDialog() {
+        if (isFinishing() || isDestroyed()) return;
+        regionPromptShown = true;
+        regionFallbackHandler.removeCallbacks(regionFallback);
+        showModernRegionDialog("选择公交查询地区",
+                "未能自动定位到所在地区，您可以手动选择，或稍后重试。",
+                "手动选择", v -> openRegionSearch(),
+                "稍后", v -> {});
+    }
+
+    /**
+     * 现代化「居中」弹窗：顶部定位图标 + 标题 + 正文 + 主/次按钮（非底部弹窗）。
+     */
+    private void showModernRegionDialog(String title, String msg,
+            String positiveText, View.OnClickListener positiveAction,
+            String negativeText, View.OnClickListener negativeAction) {
+        Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        View view = LayoutInflater.from(this).inflate(R.layout.dialog_region_confirm, null);
+        ((TextView) view.findViewById(R.id.tv_region_title)).setText(title);
+        ((TextView) view.findViewById(R.id.tv_region_msg)).setText(msg);
+        MaterialButton btnPositive = view.findViewById(R.id.btn_positive);
+        MaterialButton btnNegative = view.findViewById(R.id.btn_negative);
+        btnPositive.setText(positiveText);
+        btnNegative.setText(negativeText);
+        btnPositive.setOnClickListener(v -> {
+            if (positiveAction != null) positiveAction.onClick(v);
+            dialog.dismiss();
+        });
+        btnNegative.setOnClickListener(v -> {
+            if (negativeAction != null) negativeAction.onClick(v);
+            dialog.dismiss();
+        });
+        dialog.setContentView(view);
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawableResource(android.R.color.transparent);
+            int width = (int) (getResources().getDisplayMetrics().widthPixels * 0.86);
+            window.setLayout(width, ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
+        dialog.setCanceledOnTouchOutside(false);
+        dialog.show();
+    }
+
+    /**
+     * 打开人工搜索地区页面（需求 3：左上角人工搜索入口）。
+     */
+    private void openRegionSearch() {
+        try {
+            regionSearchLauncher.launch(new android.content.Intent(this, RegionSearchActivity.class));
+        } catch (Exception e) {
+            Log.e("MainActivity", "打开地区搜索失败", e);
+            Toast.makeText(this, "打开搜索失败", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    /**
+     * 刷新左上角地区胶囊文字。
+     */
+    private void updateRegionChip(BusRegion selected) {
+        if (tvRegion == null) return;
+        if (selected != null) {
+            tvRegion.setText(selected.toShortString());
+        } else {
+            tvRegion.setText("选择地区");
+        }
+        applyRegionModules(selected);
+    }
+
+    /** 非诸暨市（adCode 非 330681 开头）：首页隐藏 语音包下载 / 通知公告 / 附近公交 三个模块 */
+    private void applyRegionModules(BusRegion region) {
+        boolean zhuji = region != null && region.adCode != null && region.adCode.startsWith("330681");
+        int v = zhuji ? android.view.View.VISIBLE : android.view.View.GONE;
+        if (llVoicepackDownload != null) llVoicepackDownload.setVisibility(v);
+        if (llNoticeBoard != null) llNoticeBoard.setVisibility(v);
+        if (llNearbyBus != null) llNearbyBus.setVisibility(v);
+    }
+
+    /**
+     * 地区确认后的回调（需求 5 的扩展点）。
+     * 后续可根据 {@link BusRegion#regionName}（区县级名称，如"诸暨市"）
+     * 调用高德 BusLineSearch 搜索该地区对应公交；
+     * 务必使用区县级名称而非地级市名，才能正确命中诸暨/上虞等区县的公交公司线路。
+     */
+    private void onRegionConfirmed(BusRegion region) {
+        Log.i("MainActivity", "已确认公交查询地区：" + region.toShortString()
+                + " adCode=" + region.adCode + " 检索名=" + region.regionName);
+        Toast.makeText(this, "公交查询地区：" + region.toShortString(), Toast.LENGTH_SHORT).show();
     }
 
     private void loadNearbyStations() {

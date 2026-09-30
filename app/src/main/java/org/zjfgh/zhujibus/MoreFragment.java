@@ -19,6 +19,8 @@ import androidx.annotation.Nullable;
 import androidx.fragment.app.Fragment;
 import androidx.gridlayout.widget.GridLayout;
 
+import com.amap.api.services.core.AMapException;
+
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
@@ -40,6 +42,7 @@ public class MoreFragment extends Fragment {
     private long timeDisplayEndTime = 0;
     private TextView cardReaderTime;
     private Runnable timeUpdateRunnable;
+    private View amapCoordCard; // 高德坐标切换按钮，用于切换高亮态
 
     public static MoreFragment newInstance() {
         return new MoreFragment();
@@ -93,6 +96,11 @@ public class MoreFragment extends Fragment {
     private List<FunctionItem> getFunctionList() {
         List<FunctionItem> list = new ArrayList<>();
         list.add(new FunctionItem("刷卡机", "card_reader", R.drawable.icon_card_reader));
+        // 仅诸暨市显示"站点坐标来源：高德"切换按钮（其他城市坐标本就来自高德）
+        BusRegion region = new RegionManager(requireContext()).getSelectedRegion();
+        if (region != null && region.adCode.startsWith("330681")) {
+            list.add(new FunctionItem("使用高德站点坐标", "amap_coord", R.drawable.ic_directions));
+        }
         return list;
     }
 
@@ -127,8 +135,22 @@ public class MoreFragment extends Fragment {
 
             // 设置点击事件
             card.setOnClickListener(v -> {
-                handleFunctionClick(item);
+                try {
+                    handleFunctionClick(item);
+                } catch (AMapException e) {
+                    throw new RuntimeException(e);
+                }
             });
+
+            // 记录高德坐标按钮，用于切换高亮态
+            if ("amap_coord".equals(item.getId())) {
+                amapCoordCard = card;
+                boolean active = getActivity() instanceof BusLineDetailActivity
+                        && ((BusLineDetailActivity) getActivity()).isAmapCoordActive();
+                // 默认与「刷卡机」按钮完全一致（背景/文字/图标同 button_card.xml）；
+                // 激活时仅将文字与图标颜色变为 #1FAACE，背景保持不变。
+                applyAmapCoordActive(active);
+            }
 
             return card;
 
@@ -141,13 +163,41 @@ public class MoreFragment extends Fragment {
     /**
      * 处理功能点击
      */
-    private void handleFunctionClick(FunctionItem item) {
-        switch (item.getId()) {
-            case "card_reader":
-                // 跳转刷卡机
-                showCardReaderDialogAtViewView();
-                break;
-        }
+    private void handleFunctionClick(FunctionItem item) throws AMapException {
+    switch (item.getId()) {
+        case "card_reader":
+            // 跳转刷卡机
+            showCardReaderDialogAtViewView();
+            break;
+        case "amap_coord":
+            // 切换站点坐标来源（高德 / 诸暨官方）
+            if (getActivity() instanceof BusLineDetailActivity) {
+                ((BusLineDetailActivity) getActivity()).toggleAmapCoordSource();
+            }
+            break;
+    }
+    }
+
+    /** 由 BusLineDetailActivity 在切换坐标源后回调，更新按钮高亮态 */
+    public void setAmapCoordActive(boolean active) {
+        applyAmapCoordActive(active);
+    }
+
+    /**
+     * 应用高德坐标按钮的视觉状态：
+     * - 默认（未激活）：背景、文字、图标均与「刷卡机」按钮一致（白字/白图标，背景 nav_panel_bg）。
+     * - 激活：仅把文字与图标颜色变为 #1FAACE，背景保持不变。
+     */
+    private void applyAmapCoordActive(boolean active) {
+        if (amapCoordCard == null) return;
+        final int activeColor = Color.parseColor("#1FAACE");
+        final int defaultColor = Color.parseColor("#FFFFFF");
+        int color = active ? activeColor : defaultColor;
+        ImageView icon = amapCoordCard.findViewById(R.id.button_card_icon);
+        TextView text = amapCoordCard.findViewById(R.id.button_card_text);
+        if (text != null) text.setTextColor(color);
+        if (icon != null) icon.setColorFilter(color);
+        amapCoordCard.setAlpha(1.0f); // 背景始终与刷卡机一致，不做透明度变化
     }
 
     private void showCardReaderDialogAtViewView() {

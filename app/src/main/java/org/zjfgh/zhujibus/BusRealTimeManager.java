@@ -6,6 +6,8 @@ import android.util.Log;
 import java.util.ArrayList;
 import java.util.List;
 
+import com.amap.api.services.core.LatLonPoint;
+
 public class BusRealTimeManager {
     private static final long REFRESH_INTERVAL = 10 * 1000; // 15秒刷新一次
     private Handler handler;
@@ -29,6 +31,77 @@ public class BusRealTimeManager {
 
     public List<BusApiClient.BusLineStation> getStationList() {
         return stationList;
+    }
+
+    /** 高德坐标覆盖备份（首次覆盖前保存官方坐标，用于恢复）。非 null 表示当前处于高德坐标模式 */
+    private List<BusApiClient.BusLineStation> amapOverrideBackup;
+
+    /**
+     * 用高德站点坐标覆盖官方坐标（按站点序号匹配）。
+     * 高德与诸暨官方坐标同为 GCJ-02，可直接替换；GPS 报站与地图均读取本列表。
+     */
+    public int applyAmapCoordOverride(List<LatLonPoint> amapPoints) {
+        if (stationList == null || amapPoints == null) return 0;
+        if (amapOverrideBackup == null) {
+            amapOverrideBackup = new ArrayList<>();
+            for (BusApiClient.BusLineStation s : stationList) {
+                BusApiClient.BusLineStation b = new BusApiClient.BusLineStation();
+                b.poiOriginLat = s.poiOriginLat;
+                b.poiOriginLon = s.poiOriginLon;
+                b.lat = s.lat;
+                b.lng = s.lng;
+                amapOverrideBackup.add(b);
+            }
+        }
+        int n = Math.min(stationList.size(), amapPoints.size());
+        int applied = 0;
+        for (int i = 0; i < n; i++) {
+            LatLonPoint p = amapPoints.get(i);
+            if (p == null) continue;
+            BusApiClient.BusLineStation s = stationList.get(i);
+            s.poiOriginLat = p.getLatitude();
+            s.poiOriginLon = p.getLongitude();
+            s.lat = p.getLatitude();
+            s.lng = p.getLongitude();
+            applied++;
+        }
+        return applied;
+    }
+
+    /** 恢复为诸暨官方坐标 */
+    public void revertAmapCoordOverride() {
+        if (amapOverrideBackup == null) return;
+        int n = Math.min(stationList.size(), amapOverrideBackup.size());
+        for (int i = 0; i < n; i++) {
+            BusApiClient.BusLineStation s = stationList.get(i);
+            BusApiClient.BusLineStation b = amapOverrideBackup.get(i);
+            s.poiOriginLat = b.poiOriginLat;
+            s.poiOriginLon = b.poiOriginLon;
+            s.lat = b.lat;
+            s.lng = b.lng;
+        }
+        amapOverrideBackup = null;
+    }
+
+    /** 当前是否处于高德坐标覆盖模式 */
+    public boolean isAmapCoordOverrideActive() {
+        return amapOverrideBackup != null;
+    }
+
+    /**
+     * 返回官方原始站点坐标（覆盖前的），用于地图叠加对比。
+     * 覆盖激活时取 {@link #amapOverrideBackup} 备份，否则取当前列表（即官方坐标）。
+     * 顺序与 stationList 一致。
+     */
+    public List<LatLonPoint> getOfficialStationCoords() {
+        List<BusApiClient.BusLineStation> src =
+                (amapOverrideBackup != null) ? amapOverrideBackup : stationList;
+        List<LatLonPoint> res = new ArrayList<>();
+        if (src == null) return res;
+        for (BusApiClient.BusLineStation s : src) {
+            res.add(new LatLonPoint(s.poiOriginLat, s.poiOriginLon));
+        }
+        return res;
     }
 
     public void startTracking(String lineId, RealTimeUpdateListener listener) {

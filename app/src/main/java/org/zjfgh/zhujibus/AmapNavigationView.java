@@ -122,6 +122,9 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
     // ⭐ 沿线方向箭头 marker 列表（参考 CSDN 方案：Marker + setRotation）
     private final List<Marker> arrowMarkers = new ArrayList<>();
     private BitmapDescriptor arrowMarkerIcon;
+    // ⭐ 站点对比叠加：官方点（红）/ 高德覆盖点（蓝）marker，以及两者偏移连线
+    private final List<Marker> stationMarkers = new ArrayList<>();
+    private final List<Polyline> stationOffsetLines = new ArrayList<>();
     // ⭐ 当前地图缩放级别（用于箭头密度自适应）
     private float currentZoom = 14f;
     private boolean isCompassMode = true;
@@ -235,6 +238,8 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
      */
     public static final float TARGET_ZOOM = 15f;   // 适中缩放（不要太贴地）
     public static final float TARGET_TILT = 0f;    // 完全俯视（2D视角）
+    /** GPS 模式相对导航缩放再放大一级（+1 缩放层级，zoom 越大越贴近地面） */
+    private static final float GPS_ZOOM_BONUS = 1f;
     private float navigationZoom = TARGET_ZOOM;
     private float navigationTilt = TARGET_TILT;
 
@@ -426,13 +431,15 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
             Log.d(TAG, "[MAP] applyNavigationCameraPerspective skipped: not in GPS mode");
             return;
         }
+        // ⭐ GPS 模式：在导航缩放基础上再放大一级（zoom + GPS_ZOOM_BONUS），视野更贴近车辆
+        float gpsZoom = navigationZoom + GPS_ZOOM_BONUS;
         try {
             // ⭐ 导航视角：只设置 zoom、tilt，不设置 target 和 bearing
             //    target 和 bearing 会通过定位回调自动更新（跟随车移动和旋转）
             CameraPosition currentPos = aMap.getCameraPosition();
             CameraPosition cp = new CameraPosition.Builder()
                     .target(currentPos.target)  // 保持当前位置
-                    .zoom(navigationZoom)       // 可由不同页面单独配置
+                    .zoom(gpsZoom)              // 可由不同页面单独配置，GPS 模式额外 +1 级
                     .tilt(navigationTilt)       // 可由不同页面单独配置
                     .bearing(currentPos.bearing) // 保持当前方向
                     .build();
@@ -443,7 +450,7 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
             aMap.getUiSettings().setRotateGesturesEnabled(false);    // 禁止旋转手势
             // ⚠️ 不禁止缩放手势，让用户可以调整视野范围
             
-            Log.d(TAG, "[MAP] 导航视角已应用：zoom=" + navigationZoom + ", tilt=" + navigationTilt + ", 锁车态已启用");
+            Log.d(TAG, "[MAP] 导航视角已应用：zoom=" + gpsZoom + ", tilt=" + navigationTilt + ", 锁车态已启用");
         } catch (Throwable t) {
             Log.e(TAG, "applyNavigationCameraPerspective failed: " + t.getMessage(), t);
         }
@@ -1194,6 +1201,62 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
             try { m.remove(); } catch (Throwable ignore) {}
         }
         arrowMarkers.clear();
+    }
+
+    /**
+     * 在地图上叠加站点位置用于对比：
+     * officialPoints 画红色官方点；amapPoints 非 null/非空时叠加蓝色高德覆盖点；
+     * 同一站点两者平面偏移 > 2m 时画一条橙色连线高亮差异。每次调用先清空旧的。
+     *
+     * @param names 与 officialPoints 同序的站名（用于 marker title），可空。
+     */
+    public void drawStationMarkers(List<LatLng> officialPoints, List<String> names, List<LatLng> amapPoints) {
+        clearStationMarkers();
+        if (aMap == null || officialPoints == null) return;
+        boolean hasAmap = amapPoints != null && !amapPoints.isEmpty();
+        int n = officialPoints.size();
+        for (int i = 0; i < n; i++) {
+            LatLng o = officialPoints.get(i);
+            if (o == null) continue;
+            String name = (names != null && i < names.size()) ? names.get(i) : null;
+            Marker om = aMap.addMarker(new MarkerOptions()
+                    .position(o)
+                    .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED))
+                    .title(name != null ? name + "（官方）" : "官方")
+                    .anchor(0.5f, 0.5f)
+                    .zIndex(2f));
+            stationMarkers.add(om);
+            if (hasAmap && i < amapPoints.size()) {
+                LatLng g = amapPoints.get(i);
+                if (g != null) {
+                    Marker gm = aMap.addMarker(new MarkerOptions()
+                            .position(g)
+                            .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_BLUE))
+                            .title(name != null ? name + "（高德）" : "高德")
+                            .anchor(0.5f, 0.5f)
+                            .zIndex(2f));
+                    stationMarkers.add(gm);
+                    float dist = AMapUtils.calculateLineDistance(o, g);
+                    if (dist > 2f) {
+                        Polyline pl = aMap.addPolyline(new PolylineOptions()
+                                .add(o, g).color(0xFFFFA500).width(3f).zIndex(1f));
+                        stationOffsetLines.add(pl);
+                    }
+                }
+            }
+        }
+    }
+
+    /** 清除所有站点对比 marker 与偏移连线 */
+    public void clearStationMarkers() {
+        for (Marker m : stationMarkers) {
+            try { m.remove(); } catch (Throwable ignore) {}
+        }
+        stationMarkers.clear();
+        for (Polyline p : stationOffsetLines) {
+            try { p.remove(); } catch (Throwable ignore) {}
+        }
+        stationOffsetLines.clear();
     }
 
     private double computeAzimuth(LatLng a, LatLng b) {
