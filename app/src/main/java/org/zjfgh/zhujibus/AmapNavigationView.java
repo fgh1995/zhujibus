@@ -62,6 +62,9 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 高德地图 3D 导航管理器（高德导航 SDK + 高德定位 SDK）
@@ -240,6 +243,10 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
     public static final float TARGET_TILT = 0f;    // 完全俯视（2D视角）
     /** GPS 模式相对导航缩放再放大一级（+1 缩放层级，zoom 越大越贴近地面） */
     private static final float GPS_ZOOM_BONUS = 1f;
+    /** GPS 模式导航视角参数（经典 3D 跟随视角）
+     *  ⚠️ TARGET_TILT=0 为完全俯视，等同网络模式，必须有倾斜角才有“导航模式”透视效果 */
+    private static final float GPS_NAV_ZOOM = 15f;   // 适中缩放
+    private static final float GPS_NAV_TILT = 50f;   // 3D 透视倾斜（约 50°）
     private float navigationZoom = TARGET_ZOOM;
     private float navigationTilt = TARGET_TILT;
 
@@ -357,6 +364,14 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
                 aMap.setOnMapLoadedListener(() -> {
                     Log.d(TAG, "[MAP] onMapLoaded —— 地图瓦片加载成功，开始应用导航视角");
                     isMapLoaded = true;
+                    // ⭐ GPS 模式可能在地图就绪前（aMap==null）就被 setGpsMode(true) 设置过，
+                    //    那时 3D 参数/罗盘/锁车逻辑被提前 return 跳过，这里先补设再应用一次
+                    if (isGpsMode) {
+                        navigationZoom = GPS_NAV_ZOOM;
+                        navigationTilt = GPS_NAV_TILT;
+                        setCompassMode(true);
+                        isCarLocked = true;
+                    }
                     applyNavigationCameraPerspective();
                     if (onMapReadyCallback != null) {
                         onMapReadyCallback.run();
@@ -696,6 +711,16 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
             );
         }
 
+        // ⭐ GPS 模式且导航SDK未启动（例如非诸暨线路未选目标站点）时，
+        //    直接用真实GPS绘制车标并跟随（锁车态）；导航SDK启动后改由其回调绘制，避免重复。
+        //    模拟期间由 doSimStep 绘制，这里跳过，避免真实GPS干扰车标。
+        if (isGpsMode && !gpsNavigationStarted && !simulating && carOverlay != null && aMap != null) {
+            LatLng carPos = new LatLng(aMapLocation.getLatitude(), aMapLocation.getLongitude());
+            float bearing = aMapLocation.getBearing();
+            if (bearing < 0 || bearing > 360) bearing = 0f;
+            carOverlay.draw(aMap, carPos, bearing);
+        }
+
         // ⭐ 注意：导航SDK启动后，不再使用 AMapLocationClient 的定位数据绘制车标
         // 而是使用导航SDK的 onLocationChange(AMapNaviLocation) 回调
         // （applyNavigationCameraPerspective 已在 setGpsMode(true) 立即调用，无需在此重复）
@@ -1025,18 +1050,34 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
                 builder.include(p);
             }
             LatLngBounds bounds = builder.build();
-            CameraUpdate update = CameraUpdateFactory.newLatLngBounds(bounds, 100);
-            aMap.animateCamera(update);
+            if (isGpsMode) {
+                // ⭐ GPS 模式：不缩放至整条路线（否则退回俯视网络视角），
+                //    改为以路线中心为目标、保持 3D 导航视角（跟随车辆）
+                double centerLat = 0, centerLng = 0;
+                for (LatLng p : points) {
+                    centerLat += p.latitude;
+                    centerLng += p.longitude;
+                }
+                int n = points.size();
+                LatLng routeCenter = new LatLng(centerLat / n, centerLng / n);
+                float gpsZoom = navigationZoom + GPS_ZOOM_BONUS;
+                aMap.moveCamera(CameraUpdateFactory.newCameraPosition(
+                        new CameraPosition(routeCenter, gpsZoom, navigationTilt, 0f)));
+                Log.d(TAG, "[ROUTE] GPS模式：相机置于路线中心（3D视角），不fit整条路线");
+            } else {
+                CameraUpdate update = CameraUpdateFactory.newLatLngBounds(bounds, 100);
+                aMap.animateCamera(update);
 
-            // ⭐ 延迟记录自适应后的 zoom（animateCamera 是异步的，等动画完成后再读）
-            mainHandler.postDelayed(() -> {
-                try {
-                    if (aMap != null && !isGpsMode) {
-                        lastNetworkAdaptiveZoom = aMap.getCameraPosition().zoom;
-                        Log.d(TAG, "[ZOOM] 记录网络模式自适应 zoom=" + lastNetworkAdaptiveZoom);
-                    }
-                } catch (Throwable ignore) {}
-            }, 500);  // 500ms 后读取（动画时长通常 300-500ms）
+                // ⭐ 延迟记录自适应后的 zoom（animateCamera 是异步的，等动画完成后再读）
+                mainHandler.postDelayed(() -> {
+                    try {
+                        if (aMap != null && !isGpsMode) {
+                            lastNetworkAdaptiveZoom = aMap.getCameraPosition().zoom;
+                            Log.d(TAG, "[ZOOM] 记录网络模式自适应 zoom=" + lastNetworkAdaptiveZoom);
+                        }
+                    } catch (Throwable ignore) {}
+                }, 500);  // 500ms 后读取（动画时长通常 300-500ms）
+            }
         } catch (Exception e) {
             Log.e(TAG, "drawRoute bounds failed: " + e.getMessage());
         }
@@ -1088,6 +1129,110 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
             } catch (Throwable t) {
                 Log.e(TAG, "[NAVI] stopGpsNavigation failed: " + t.getMessage());
             }
+        }
+    }
+
+    // ==================== GPS 位置模拟（沿公交路线插值，用于模拟报站） ====================
+    private ScheduledExecutorService simExecutor;
+    private volatile boolean simulating = false;
+    private int simSegIndex = 0;
+    private double simSegFrac = 0.0;
+    private float simSpeedKmh = 30f;
+
+    public boolean isSimulating() {
+        return simulating;
+    }
+
+    /**
+     * 开始沿当前公交路线（routePoints）模拟 GPS 位置变化，循环行驶。
+     * 位置通过统一的 notifyLocationUpdated 出口注入，与真实 GPS 走相同下游（车标 + 报站）。
+     * @param speedKmh 模拟行驶速度（km/h），<=0 时按 30 处理
+     */
+    public void startLocationSimulation(float speedKmh) {
+        if (simulating) return;
+        if (routePoints == null || routePoints.size() < 2) {
+            Log.w(TAG, "[SIM] 未载入公交路线，无法模拟");
+            return;
+        }
+        simulating = true;
+        simSpeedKmh = speedKmh > 0 ? speedKmh : 30f;
+        simSegIndex = 0;
+        simSegFrac = 0.0;
+        simExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "gps-sim");
+            t.setDaemon(true);
+            return t;
+        });
+        // ⭐ 与真实 GPS 保持一致：1Hz（1000ms），避免更高频率造成差异
+        simExecutor.scheduleAtFixedRate(this::simTick, 0, 1000, TimeUnit.MILLISECONDS);
+        Log.d(TAG, "[SIM] 开始模拟位置变化 速度=" + simSpeedKmh + "km/h (1Hz)");
+    }
+
+    /** 停止模拟位置变化 */
+    public void stopLocationSimulation() {
+        if (!simulating) return;
+        simulating = false;
+        if (simExecutor != null) {
+            simExecutor.shutdownNow();
+            simExecutor = null;
+        }
+        Log.d(TAG, "[SIM] 停止模拟位置变化");
+    }
+
+    private void simTick() {
+        mainHandler.post(this::doSimStep);
+    }
+
+    private void doSimStep() {
+        if (!simulating || routePoints == null || routePoints.size() < 2) return;
+        int n = routePoints.size();
+        // 1 秒内应行驶的距离（米），与真实 GPS 1Hz 对齐
+        double stepMeters = (simSpeedKmh / 3.6) * 1.0;
+        while (stepMeters > 0 && simSegIndex < n - 1) {
+            LatLng p1 = routePoints.get(simSegIndex);
+            LatLng p2 = routePoints.get(simSegIndex + 1);
+            double segLen = computeDistanceMeters(p1, p2);
+            if (segLen <= 0) {
+                simSegIndex++;
+                simSegFrac = 0;
+                continue;
+            }
+            double remain = segLen * (1 - simSegFrac);
+            if (stepMeters >= remain) {
+                stepMeters -= remain;
+                simSegIndex++;
+                simSegFrac = 0;
+            } else {
+                simSegFrac += stepMeters / segLen;
+                stepMeters = 0;
+            }
+        }
+        // 到终点后回到起点循环，便于持续演示报站
+        if (simSegIndex >= n - 1) {
+            simSegIndex = 0;
+            simSegFrac = 0;
+        }
+        LatLng p1 = routePoints.get(simSegIndex);
+        LatLng p2 = routePoints.get(Math.min(simSegIndex + 1, n - 1));
+        double lat = p1.latitude + (p2.latitude - p1.latitude) * simSegFrac;
+        double lng = p1.longitude + (p2.longitude - p1.longitude) * simSegFrac;
+        float bearing = computeBearing(p1, p2);
+        float speed = simSpeedKmh / 3.6f;
+        Location loc = new Location("gps_sim");
+        loc.setLatitude(lat);
+        loc.setLongitude(lng);
+        loc.setTime(System.currentTimeMillis());
+        loc.setElapsedRealtimeNanos(System.nanoTime());
+        loc.setSpeed(speed);
+        loc.setBearing(bearing);
+        loc.setAccuracy(5f);
+        // 关键：报站引擎由 GpsWarmingUp 驱动（gpsActivityListener -> handleGpsLocation），
+        // 而非 AMapNavi 的 notifyLocationUpdated（后者在线路详情页并未挂监听，只会动车标）。
+        // 因此把合成位置注入 GpsWarmingUp，走与真实 GPS 完全一致的下游（报站判断 + 地图定位）。
+        GpsWarmingUp.postToGpsThread(() -> GpsWarmingUp.updateLocation(loc));
+        // 同时驱动车标（地图视觉）
+        if (isGpsMode && carOverlay != null && aMap != null) {
+            carOverlay.draw(aMap, new LatLng(lat, lng), bearing);
         }
     }
 
@@ -1341,6 +1486,10 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
                 carLockHandler.removeCallbacksAndMessages(null);  // 清除所有锁车任务
                 // ⭐ 不再调用 startAmapLocation() —— locationClient 已在 initAmapLocation 时常驻启动
                 // 模式切换时只切换 isGpsMode 标志位，onLocationChanged 内部据此过滤
+
+                // ⭐ 设置 3D 导航视角参数（tilt>0 才有透视效果，否则等同网络俯视）
+                navigationZoom = GPS_NAV_ZOOM;
+                navigationTilt = GPS_NAV_TILT;
 
                 // ⭐ 立即应用导航视角（zoom/tilt/锁车态）—— 不等首次定位，让用户立刻看到 3D 锁车视角
                 // 首次定位到达后，onLocationChanged 仍然会启动导航SDK的算路+导航
@@ -1996,6 +2145,9 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
 
     public void onDestroy() {
         stopAmapLocation();
+        // ⭐ 停止模拟位置线程：避免页面销毁后 simExecutor 仍在跑，持续通过 GpsWarmingUp
+        //    注入模拟位置，导致下次进入页面直接处于模拟状态（模拟线程泄漏）
+        stopLocationSimulation();
 
         clearBusMarkers();
         if (busIconDescriptor != null) {
@@ -2061,6 +2213,8 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
      */
     public void onDestroyWithoutNavi() {
         stopAmapLocation();
+        // ⭐ 停止模拟位置线程（同 onDestroy，避免 POV 面板关闭后模拟线程泄漏）
+        stopLocationSimulation();
 
         clearBusMarkers();
         if (busIconDescriptor != null) {

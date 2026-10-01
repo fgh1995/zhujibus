@@ -12,6 +12,7 @@ import android.graphics.RectF;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.AttributeSet;
+import android.util.Log;
 import android.util.SparseArray;
 import android.view.MotionEvent;
 import android.view.VelocityTracker;
@@ -25,6 +26,8 @@ import java.util.HashSet;
 import java.util.List;
 
 public class IBusCloudLineView extends View {
+
+    private static final String TAG = "IBusCloudLineView";
 
     // 数据
     private List<BusApiClient.BusLineStation> stations;
@@ -334,6 +337,8 @@ public class IBusCloudLineView extends View {
     }
 
     public void setGpsMode(boolean isGpsMode) {
+        Log.d(TAG, "setGpsMode(" + isGpsMode + ") this=" + System.identityHashCode(this)
+                + " stations=" + (stations != null ? stations.size() : "null"));
         this.isGpsMode = isGpsMode;
         if (isGpsMode) {
             resetAllStations();
@@ -491,6 +496,8 @@ public class IBusCloudLineView extends View {
                 float x = event.getX();
                 float y = event.getY();
                 float moveDistance = (float) Math.sqrt(Math.pow(x - touchDownX, 2) + Math.pow(y - touchDownY, 2));
+                Log.d(TAG, "ACTION_UP isGpsMode=" + isGpsMode + " moveDistance=" + moveDistance
+                        + " stations=" + (stations != null ? stations.size() : "null"));
 
                 if (moveDistance < 10f && stations != null && !isGpsMode) {
                     for (int i = 0; i < stations.size(); i++) {

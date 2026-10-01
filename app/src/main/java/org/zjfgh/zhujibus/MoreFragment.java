@@ -101,6 +101,8 @@ public class MoreFragment extends Fragment {
         if (region != null && region.adCode.startsWith("330681")) {
             list.add(new FunctionItem("使用高德站点坐标", "amap_coord", R.drawable.ic_directions));
         }
+        // 模拟报站：沿当前公交路线注入合成 GPS 位置，用于测试报站（再次点击停止）
+        list.add(new FunctionItem("模拟报站", "simulate_report", R.drawable.ic_location));
         return list;
     }
 
@@ -173,6 +175,12 @@ public class MoreFragment extends Fragment {
             // 切换站点坐标来源（高德 / 诸暨官方）
             if (getActivity() instanceof BusLineDetailActivity) {
                 ((BusLineDetailActivity) getActivity()).toggleAmapCoordSource();
+            }
+            break;
+        case "simulate_report":
+            // 模拟位置变化 / 模拟报站（再次点击停止）
+            if (getActivity() instanceof BusLineDetailActivity) {
+                ((BusLineDetailActivity) getActivity()).toggleGpsSimulation();
             }
             break;
     }

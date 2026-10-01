@@ -313,4 +313,31 @@ public class GpsWarmingUp {
         }
         gpsHandler.post(r);
     }
+
+    /**
+     * 暂停真实 GPS 定位（仅停止定位客户端，保留后台线程，便于模拟位置继续走同一下游）。
+     * 与 stopWarmingUp 不同：不退出 gpsHandlerThread，postToGpsThread 仍可正常工作。
+     */
+    public static void pauseLocation() {
+        if (locationClient != null) {
+            try {
+                locationClient.stopLocation();
+                Log.d(TAG, "高德定位已暂停（模拟位置期间）");
+            } catch (Throwable t) {
+                Log.e(TAG, "pauseLocation failed: " + t.getMessage());
+            }
+        }
+    }
+
+    /** 恢复真实 GPS 定位（pauseLocation 的配对调用） */
+    public static void resumeLocation() {
+        if (locationClient != null && isWarmingUp) {
+            try {
+                locationClient.startLocation();
+                Log.d(TAG, "高德定位已恢复");
+            } catch (Throwable t) {
+                Log.e(TAG, "resumeLocation failed: " + t.getMessage());
+            }
+        }
+    }
 }

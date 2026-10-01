@@ -175,6 +175,13 @@ public class NavigationMainFragment extends Fragment {
             routeSummary = view.findViewById(R.id.route_summary);
             ticket = view.findViewById(R.id.ticket);
             iBusCloudLineView = view.findViewById(R.id.i_bus_cloud_line_view); // 获取 IBusCloudLineView
+            // ⭐ 补应用视图创建前保存的 GPS/网络模式：
+            //    Activity（尤其非诸暨"仅支持GPS"线路）可能在 Fragment onViewCreated 之前就调用
+            //    setGpsMode(true)，当时 iBusCloudLineView==null 被丢弃，导致站点条一直处于
+            //    网络模式、GPS 车标永远不绘制。这里绑定后立即补应用一次。
+            if (iBusCloudLineView != null) {
+                iBusCloudLineView.setGpsMode(isGpsMode);
+            }
 
             // 8. 绑定报站模式切换（mode_switch 已从 Activity 迁移过来）
             modeSwitch = view.findViewById(R.id.mode_switch);
@@ -290,6 +297,10 @@ public class NavigationMainFragment extends Fragment {
                     if (isHostResumed && navigation != null) {
                         navigation.onResume();
                     }
+                    // ⭐ 补应用地图创建前保存的 GPS/网络模式：
+                    //    Activity 常在地图异步就绪前调用 setGpsMode(true)，当时 navigation==null 被丢弃，
+                    //    导致地图一直停留在默认网络模式（2D 俯视、无车标跟随）。
+                    navigation.setGpsMode(isGpsMode);
                 } catch (Throwable t) {
                     Log.e(TAG, "delayed onCreate failed: " + t.getMessage(), t);
                 }
@@ -307,6 +318,8 @@ public class NavigationMainFragment extends Fragment {
     }
 
     public void setGpsMode(boolean gpsMode) {
+        Log.d(TAG, "setGpsMode(" + gpsMode + ") this.isGpsMode=" + this.isGpsMode
+                + " nav=" + (navigation != null) + " iBus=" + (iBusCloudLineView != null));
         this.isGpsMode = gpsMode;
         if (navigation != null) navigation.setGpsMode(gpsMode);
         if (iBusCloudLineView != null) {
@@ -358,6 +371,11 @@ public class NavigationMainFragment extends Fragment {
      */
     public void lockAnnounceModeToGps() {
         announceModeLockedToGps = true;
+        Log.d(TAG, "lockAnnounceModeToGps() called");
+        // ⭐ 锁定时立即进入 GPS 模式（非诸暨/高德线路强制 GPS，不依赖权限门控）。
+        //    否则 fragment.isGpsMode 一直处于 false，iBusCloudLineView 也保持非 GPS，
+        //    导致站点条可点击变红、且不绘制 GPS 车标。
+        setGpsMode(true);
         applyAnnounceModeLock();
     }
 

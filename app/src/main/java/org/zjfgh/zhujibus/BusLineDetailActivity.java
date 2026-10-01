@@ -381,6 +381,34 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         return amapCoordEnabled;
     }
 
+    /**
+     * 更多功能：模拟位置变化（模拟报站）。
+     * 沿当前公交路线注入合成 GPS 位置，驱动车标与报站；需 GPS 报站模式。再次点击停止。
+     */
+    public void toggleGpsSimulation() {
+        AmapNavigationView nav = (navigationMainFragment != null) ? navigationMainFragment.getNavigation() : null;
+        if (nav == null) {
+            Toast.makeText(this, "导航未就绪，无法模拟", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (nav.isSimulating()) {
+            nav.stopLocationSimulation();
+            // 完全恢复真实 GPS（停止时一并恢复，避免残留暂停状态影响后续定位）
+            GpsWarmingUp.resumeLocation();
+            Toast.makeText(this, "已停止位置模拟", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        // 模拟报站依赖 GPS 模式，自动切到 GPS（与切换模式对话行为一致）
+        if (currentAnnounceMode != AnnounceMode.GPS) {
+            currentAnnounceMode = AnnounceMode.GPS;
+            updateAnnounceModeState();
+        }
+        // 模拟期间完全停止真实 GPS 回调（1Hz 也会瞬时干扰报站/视角），保留后台线程
+        GpsWarmingUp.pauseLocation();
+        nav.startLocationSimulation(30f);
+        Toast.makeText(this, "已开始模拟位置变化（GPS 30km/h，已暂停真实GPS）", Toast.LENGTH_SHORT).show();
+    }
+
     /** 高德坐标来源按钮：已启用则恢复诸暨官方，未启用则一次性匹配上下行并缓存 */
     public void toggleAmapCoordSource() throws AMapException {
         if (realTimeManager == null) {
@@ -933,6 +961,9 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     }
 
     private static final double STATION_PROXIMITY_THRESHOLD_METERS = 50.0;
+    // ⭐ 高德/GPS 专属：GPS 在线路沿线但未进入任一站点半径时，站点列表仍显示车标（贴最近站点），
+    //    保证整段行程车标可见（与车机一致）；离站/进站逻辑优先级更高。仅当到最近站直线/沿线距离小于此阈值才显示。
+    private static final double ON_ROUTE_DISPLAY_THRESHOLD_M = 300.0;
     // 距离比"进站后的最小距离"增大多少米，才算"车辆已越过最近点、开始驶离站点"。
     // 用"最小距离 + 余量"而不是"上一帧 < 当前帧"，是为了抗 GPS 抖动造成的单帧回跳。
     private static final double EXIT_MOVING_AWAY_METERS = 5.0;
@@ -1118,6 +1149,8 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
 
     private void updateAnnounceModeState() {
         if (currentAnnounceMode == AnnounceMode.GPS) {
+            Log.d(TAG, "updateAnnounceModeState: GPS 分支, hasPermission="
+                    + PermissionUtils.hasLocationPermission(this));
             if (!PermissionUtils.hasLocationPermission(this)) {
                 PermissionUtils.requestLocationPermission(this, new PermissionUtils.PermissionCallback() {
                     @Override
@@ -1127,6 +1160,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
 
                     @Override
                     public void onPermissionDenied() {
+                        Log.d(TAG, "updateAnnounceModeState: 权限被拒 -> 切回 NETWORK");
                         currentAnnounceMode = AnnounceMode.NETWORK;
                         updateAnnounceModeDisplay();
                         Toast.makeText(BusLineDetailActivity.this, "没有位置权限，GPS模式不可用", Toast.LENGTH_SHORT).show();
@@ -1240,6 +1274,8 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     }
 
     private void updateAnnounceModeDisplay() {
+        Log.d(TAG, "updateAnnounceModeDisplay() currentAnnounceMode=" + currentAnnounceMode
+                + " fromAmap=" + fromAmap);
         if (currentAnnounceMode == AnnounceMode.GPS) {
             // GPS 模式：模式文字标"GPS"（红色高亮），状态灯变绿
             // GPS 模式：显示卫星数（缓存值）
@@ -1390,6 +1426,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         nearestStationName = "";
         nearestStationDistance = -1;
         nearestStationDirectDistance = -1;
+        int nearestStationIndex = -1;
         boolean isInsideRadius = false;
         boolean isBeyondExitRadius = false;
         int currentInsideStationIndex = -1;
@@ -1443,6 +1480,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 nearestStationDistance = distanceForCompare;
                 nearestStationName = station.stationName;
                 nearestStationDirectDistance = directDistance;
+                nearestStationIndex = i;
             }
 
             // ⭐ 出站判定：只针对"上一帧还在站内"的那个站点，且必须同时满足：
@@ -1502,6 +1540,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         final String resultNearestName = nearestStationName;
         final double resultNearestDistance = nearestStationDistance;
         final double resultNearestDirect = nearestStationDirectDistance;
+        final int finalNearestStationIndex = nearestStationIndex;
         final String resultEatText = eatText;
         final boolean finalIsInsideRadius = isInsideRadius;
         final boolean finalIsBeyondExitRadius = isBeyondExitRadius;
@@ -1605,28 +1644,45 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 speakFragment.setDistanceMode(currentDistanceMode == DistanceMode.STRAIGHT_LINE);
             }
 
-            // 更新原有的 BusLineView
-            if (busLineView != null) {
-                if (finalIsLeavingTerminal) {
-                    busLineView.updateGpsPosition(-1, false);
-                } else if (finalIsInsideRadius && !isBackwardJump && finalCurrentInsideStationIndex >= 0) {
-                    // ⭐ 回跳跳变时不把标记吸附到站内，保持"途中"显示，避免反复横跳
-                    busLineView.updateGpsPosition(finalCurrentInsideStationIndex, true);
-                } else if (!finalIsInsideRadius && finalLeavingStationFinal >= 0) {
-                    busLineView.updateGpsPosition(finalLeavingStationFinal, false);
-                }
+            // ========== 计算站点列表（BusLineView / NavigationMainFragment）要展示的 GPS 位置 ==========
+            // 优先级：离终点 > 进站(到站内) > 离站(站间) > 沿线未进站（贴最近站点，保证全程可见）
+            int listGpsIndex = -1;
+            boolean listGpsArriving = false;
+            // ⭐ 模拟报站时，合成位置本就保证在路线上，强制显示车标（避免沿线阈值/无卫星导致看不到）
+            boolean simulating = navigationMainFragment != null
+                    && navigationMainFragment.getNavigation() != null
+                    && navigationMainFragment.getNavigation().isSimulating();
+            if (finalIsLeavingTerminal) {
+                listGpsIndex = -1;
+            } else if (finalIsInsideRadius && !isBackwardJump && finalCurrentInsideStationIndex >= 0) {
+                // ⭐ 回跳跳变时不把标记吸附到站内，保持"途中"显示，避免反复横跳
+                listGpsIndex = finalCurrentInsideStationIndex;
+                listGpsArriving = true;
+            } else if (!finalIsInsideRadius && finalLeavingStationFinal >= 0) {
+                listGpsIndex = finalLeavingStationFinal;
+                listGpsArriving = false;
+            } else if (!isBackwardJump
+                    && finalNearestStationIndex >= 0
+                    && (simulating
+                        || (routePoints != null && !routePoints.isEmpty()
+                            && resultNearestDistance >= 0
+                            && (resultNearestDistance < ON_ROUTE_DISPLAY_THRESHOLD_M
+                                || resultNearestDirect < ON_ROUTE_DISPLAY_THRESHOLD_M)))) {
+                // ⭐ 高德/GPS 专属：GPS 在线路沿线（或模拟）但未进入任一站点半径时，站点列表仍显示车标
+                //    （贴最近站点），保证整段行程车标可见（与车机一致）；离站/进站逻辑优先级更高。
+                //    放宽到"沿线距离<阈值 或 直线距离<阈值"，让近距离网络定位/曲线段也能看到车标。
+                listGpsIndex = finalNearestStationIndex;
+                listGpsArriving = false;
             }
 
-            // ========== 新增：同步 GPS 位置到 NavigationMainFragment ==========
+            // 更新原有的 BusLineView
+            if (busLineView != null) {
+                busLineView.updateGpsPosition(listGpsIndex, listGpsArriving);
+            }
+
+            // ========== 同步 GPS 位置到 NavigationMainFragment ==========
             if (navigationMainFragment != null) {
-                if (finalIsLeavingTerminal) {
-                    navigationMainFragment.updateGpsPosition(-1, false);
-                } else if (finalIsInsideRadius && !isBackwardJump && finalCurrentInsideStationIndex >= 0) {
-                    // ⭐ 回跳跳变时不把标记吸附到站内，保持"途中"显示，避免反复横跳
-                    navigationMainFragment.updateGpsPosition(finalCurrentInsideStationIndex, true);
-                } else if (!finalIsInsideRadius && finalLeavingStationFinal >= 0) {
-                    navigationMainFragment.updateGpsPosition(finalLeavingStationFinal, false);
-                }
+                navigationMainFragment.updateGpsPosition(listGpsIndex, listGpsArriving);
             }
             // ============================================================
 
@@ -2285,6 +2341,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         // 并让 Fragment 视图就绪后回调一次以刷新初始显示。
         if (fromAmap) {
             // 高德（非诸暨）线路：网络模式无实时数据源，禁用切换并提示「仅支持GPS」，强制 GPS 模式
+            Log.d(TAG, "setupListeners: fromAmap=true -> lockAnnounceModeToGps");
             navigationMainFragment.lockAnnounceModeToGps();
             navigationMainFragment.setModeDisplayReadyListener(() -> updateAnnounceModeDisplay());
             currentAnnounceMode = AnnounceMode.GPS;
@@ -3379,6 +3436,14 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
 
                 if (busLineView == null) {
                     Log.e(TAG, "busLineView 为 null，请检查布局文件 activity_bus_line_details.xml");
+                } else {
+                    // ⭐ 补应用 GPS/网络模式：busLineView 在 setupStationList 才 findViewById，
+                    // 而 updateAnnounceModeState（设 GPS 模式）在它初始化前就已执行，
+                    // 当时 busLineView==null 被跳过，导致垂直列表进不了 GPS 模式（点站点仍变红）。
+                    // 这里绑定后立即按当前模式补应用一次（与 NavigationMainFragment.onViewCreated 的
+                    // 补应用逻辑保持一致），后续方向切换也靠此保持模式正确。
+                    boolean gps = (currentAnnounceMode == AnnounceMode.GPS);
+                    busLineView.setGpsMode(gps);
                 }
                 if (stationScrollView == null) {
                     Log.e(TAG, "stationScrollView 为 null，请检查布局文件 activity_bus_line_details.xml");
@@ -4526,6 +4591,13 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         GpsWarmingUp.removeListener(gpsActivityListener);
         GpsWarmingUp.removeSatelliteListener(satelliteCountListener);
         GpsWarmingUp.stopWarmingUp();
+        // ⭐ 停止模拟报站并恢复真实 GPS：模拟期间 pauseLocation 暂停了真实定位，
+        //    若不在此停止模拟，simExecutor 线程会在页面销毁后继续向 GpsWarmingUp 注入模拟位置，
+        //    导致下次进入页面直接处于模拟状态（模拟线程泄漏）。
+        if (navigationMainFragment != null && navigationMainFragment.getNavigation() != null) {
+            navigationMainFragment.getNavigation().stopLocationSimulation();
+        }
+        GpsWarmingUp.resumeLocation();
         realTimeManager = null;
         if (tipsHandler != null) {
             tipsHandler.removeCallbacksAndMessages(null);
