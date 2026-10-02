@@ -19,10 +19,14 @@ import androidx.viewpager2.widget.ViewPager2;
 import com.google.android.material.tabs.TabLayout;
 import com.google.android.material.tabs.TabLayoutMediator;
 
+import java.util.ArrayList;
+import java.util.List;
+
 public class BusRouteSearchActivity extends AppCompatActivity {
     private EditText edSearchBusLine;
     private ViewPager2 viewPager;
     private SearchPagerAdapter adapter;
+    private List<SearchPagerAdapter.Tab> tabs;
     private Handler handler = new Handler(Looper.getMainLooper());
     private Runnable searchRunnable;
     private static final long DEBOUNCE_DELAY = 500; // 防抖延迟时间，单位毫秒
@@ -41,25 +45,34 @@ public class BusRouteSearchActivity extends AppCompatActivity {
             TabLayout tabLayout = findViewById(R.id.tabLayout);
             tvTest = findViewById(R.id.tv_test);
 
-            adapter = new SearchPagerAdapter(this);
+            // 按地区决定显示的 Tab：
+            // - 诸暨：显示「线路 + 站点」
+            // - 非诸暨：只显示「线路」，隐藏「站点」（无官方公交数据）与「地点」分类（已不再使用）
+            BusRegion region = new RegionManager(this).getSelectedRegion();
+            boolean isZhuji = region == null
+                    || (region.adCode != null && region.adCode.startsWith("330681"));
+            tabs = new ArrayList<>();
+            tabs.add(SearchPagerAdapter.Tab.LINE);
+            if (isZhuji) {
+                tabs.add(SearchPagerAdapter.Tab.STATION);
+            }
+
+            adapter = new SearchPagerAdapter(this, tabs);
             viewPager.setAdapter(adapter);
             viewPager.setUserInputEnabled(false);
 
             new TabLayoutMediator(tabLayout, viewPager, (tab, position) -> {
-                switch (position) {
-                    case 0:
+                switch (tabs.get(position)) {
+                    case LINE:
                         tab.setText("线路");
                         break;
-                    case 1:
+                    case STATION:
                         tab.setText("站点");
-                        break;
-                    case 2:
-                        tab.setText("地点");
                         break;
                 }
             }).attach();
 
-            viewPager.setOffscreenPageLimit(2);
+            viewPager.setOffscreenPageLimit(Math.max(1, tabs.size()));
 
             viewPager.registerOnPageChangeCallback(new ViewPager2.OnPageChangeCallback() {
                 @Override
@@ -125,24 +138,21 @@ public class BusRouteSearchActivity extends AppCompatActivity {
      * 实际的搜索执行方法
      */
     private void performSearch(String keyword) {
+        int currentItem = viewPager.getCurrentItem();
+        if (currentItem < 0 || currentItem >= tabs.size()) return;
         // 获取当前显示的Fragment
-        Fragment currentFragment = adapter.getFragment(viewPager.getCurrentItem());
+        Fragment currentFragment = adapter.getFragment(currentItem);
 
-        // 根据当前Tab执行不同的搜索逻辑
-        switch (viewPager.getCurrentItem()) {
-            case 0: // 线路
+        // 根据当前Tab类型执行不同的搜索逻辑
+        switch (tabs.get(currentItem)) {
+            case LINE: // 线路
                 if (currentFragment instanceof LineFragment) {
                     ((LineFragment) currentFragment).searchLines(keyword);
                 }
                 break;
-            case 1: // 站点
+            case STATION: // 站点
                 if (currentFragment instanceof StationFragment) {
                     ((StationFragment) currentFragment).searchStations(keyword);
-                }
-                break;
-            case 2: // 地点
-                if (currentFragment instanceof PlaceFragment) {
-                    ((PlaceFragment) currentFragment).searchPlaces(keyword);
                 }
                 break;
         }
