@@ -502,13 +502,13 @@ public class MoreFragment extends Fragment {
             label.setText(scenario.label);
             desc.setText(scenario.desc);
             edit.setText(fmt.getTemplate(scenario));
+            // 默认把光标放到文本末尾，避免没点过输入框就直接点芯片时插到开头
+            edit.setSelection(edit.getText().length());
 
-            final int[] cursorPos = {edit.getText().length()};
             edit.addTextChangedListener(new TextWatcher() {
                 @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
                 @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
                 @Override public void afterTextChanged(Editable s) {
-                    cursorPos[0] = edit.getSelectionStart();
                     fmt.setTemplate(scenario, s.toString());
                 }
             });
@@ -517,9 +517,9 @@ public class MoreFragment extends Fragment {
             preview.setOnClickListener(v -> previewAnnouncement(scenario));
 
             for (String key : AnnouncementFormatManager.VARIABLE_KEYS) {
-                addFormatChip(inflater, chips, edit, cursorPos, "{" + key + "}");
+                addFormatChip(inflater, chips, edit, "{" + key + "}");
             }
-            addFormatChip(inflater, chips, edit, cursorPos, "[语音包]");
+            addFormatChip(inflater, chips, edit, "[语音包]");
 
             parent.addView(row);
         }
@@ -549,13 +549,13 @@ public class MoreFragment extends Fragment {
         desc.setText(isDefault ? "进入/初始状态 LED 滚动文本（next_station_info）"
                                : "LED 滚动文本（" + scenario.label + "），仅文本模板");
         edit.setText(isDefault ? fmt.getLedDefaultFormat() : fmt.getLedFormat(scenario));
+        // 默认把光标放到文本末尾，避免没点过输入框就直接点芯片时插到开头
+        edit.setSelection(edit.getText().length());
 
-        final int[] cursorPos = {edit.getText().length()};
         edit.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
             @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
             @Override public void afterTextChanged(Editable s) {
-                cursorPos[0] = edit.getSelectionStart();
                 if (isDefault) fmt.setLedDefaultFormat(s.toString());
                 else fmt.setLedFormat(scenario, s.toString());
             }
@@ -574,14 +574,13 @@ public class MoreFragment extends Fragment {
         });
 
         for (String key : AnnouncementFormatManager.VARIABLE_KEYS) {
-            addFormatChip(inflater, chips, edit, cursorPos, "{" + key + "}");
+            addFormatChip(inflater, chips, edit, "{" + key + "}");
         }
 
         return row;
     }
 
-    private void addFormatChip(LayoutInflater inflater, LinearLayout chips, EditText edit,
-                               int[] cursorPos, String token) {
+    private void addFormatChip(LayoutInflater inflater, LinearLayout chips, EditText edit, String token) {
         Button chip = new Button(requireContext());
         chip.setText(token);
         chip.setTextSize(12f);
@@ -594,18 +593,32 @@ public class MoreFragment extends Fragment {
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         lp.setMargins(0, 0, 8, 0);
         chip.setLayoutParams(lp);
-        chip.setOnClickListener(v -> insertToken(edit, cursorPos, token));
+        // 芯片不抢焦点，保证插入时仍能读到编辑框里真实的光标位置
+        chip.setFocusableInTouchMode(false);
+        chip.setFocusable(false);
+        chip.setOnClickListener(v -> insertToken(edit, token));
         chips.addView(chip);
     }
 
-    private void insertToken(EditText edit, int[] cursorPos, String token) {
-        int pos = cursorPos[0];
-        if (pos < 0 || pos > edit.length()) pos = edit.length();
+    /**
+     * 把 {@code token} 插到编辑框当前光标处（有选区时替换选区），并把光标移到插入内容之后。
+     * 这里必须实时读 getSelectionStart()/getSelectionEnd()，不能用缓存值：
+     * 用户只是移动光标并不会触发 TextWatcher，缓存值会一直停留在旧位置（通常是末尾）。
+     */
+    private void insertToken(EditText edit, String token) {
+        edit.requestFocus();
         Editable e = edit.getText();
-        e.replace(pos, pos, token);
-        int newPos = pos + token.length();
-        edit.setSelection(newPos);
-        cursorPos[0] = newPos;
+        int len = e.length();
+        int start = Math.min(Math.max(edit.getSelectionStart(), 0), len);
+        int end = Math.min(Math.max(edit.getSelectionEnd(), 0), len);
+        if (start > end) {
+            int tmp = start;
+            start = end;
+            end = tmp;
+        }
+        e.replace(start, end, token);
+        int newPos = start + token.length();
+        edit.setSelection(Math.min(newPos, edit.getText().length()));
     }
 
     /** 试听某场景的自定义报站：优先用宿主提供的实时状态，否则回退样例数据。 */
