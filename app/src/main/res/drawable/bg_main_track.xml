@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 主色轨道：与报站判定进度条轨道(#637EDE)同色同圆角 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#637EDE" />
+    <corners android:radius="5dp" />
+</shape>

@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 错误详情弹窗（现代深色卡片风格）：红色警示图标 + 标题、可滚动技术详情、青色「确定」按钮 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@drawable/bg_dialog_panel"
+    android:padding="20dp">
+
+    <!-- 标题行：警示图标 + 标题 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginBottom="12dp">
+
+        <ImageView
+            android:layout_width="22dp"
+            android:layout_height="22dp"
+            android:src="@drawable/ic_error_detail"
+            android:contentDescription="错误" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:text="错误详情"
+            android:textColor="#FFFFFF"
+            android:textSize="17sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <!-- 错误内容：可滚动，等宽数字便于查看 ID/状态码 -->
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:maxHeight="280dp"
+        android:scrollbars="vertical"
+        android:fadeScrollbars="true">
+
+        <TextView
+            android:id="@+id/error_detail_message"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="#C9D0E8"
+            android:textSize="13sp"
+            android:lineSpacingExtra="3dp"
+            android:fontFeatureSettings="tnum" />
+    </ScrollView>
+
+    <!-- 确定 -->
+    <Button
+        android:id="@+id/error_detail_ok"
+        android:layout_width="match_parent"
+        android:layout_height="42dp"
+        android:layout_marginTop="16dp"
+        android:background="@drawable/bg_accent_btn"
+        app:backgroundTint="@null"
+        android:text="确定"
+        android:textColor="#FFFFFF"
+        android:textSize="15sp" />
+</LinearLayout>

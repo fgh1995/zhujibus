@@ -1,6 +1,10 @@
 package org.zjfgh.zhujibus;
 
 import android.content.Context;
+import android.content.SharedPreferences;
+import android.database.Cursor;
+import android.net.Uri;
+import android.provider.DocumentsContract;
 import android.util.Log;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -17,6 +21,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -120,10 +125,43 @@ public class VoicePackManager {
      *  而不是靠 Toast 临时提示。仅内存态，进程重启后重新探测。 */
     private final Set<String> confirmedNotInRemote = ConcurrentHashMap.newKeySet();
 
+    // ===== 用户自定义语音包目录（SAF 授权，持久化） =====
+    private static final String PREFS_NAME = "voicepack_user";
+    private static final String KEY_TREE_URI = "user_voice_pack_tree_uri";
+    /** 用户通过 SAF 选定的语音包目录树 URI；为空表示未配置 */
+    private volatile Uri voicePackTreeUri;
+    /** packName → 已拷到 cache 的本地 File 缓存，避免每次播报都扫目录/拷文件 */
+    private final ConcurrentHashMap<String, File> userPackCache = new ConcurrentHashMap<>();
+    /** 支持的音频扩展名（用于 [语音包名] 匹配「名称.*」） */
+    private static final Set<String> SUPPORTED_AUDIO_EXT = ConcurrentHashMap.newKeySet();
+    static {
+        SUPPORTED_AUDIO_EXT.add("wav");
+        SUPPORTED_AUDIO_EXT.add("mp3");
+        SUPPORTED_AUDIO_EXT.add("m4a");
+        SUPPORTED_AUDIO_EXT.add("aac");
+        SUPPORTED_AUDIO_EXT.add("ogg");
+        SUPPORTED_AUDIO_EXT.add("oga");
+        SUPPORTED_AUDIO_EXT.add("flac");
+        SUPPORTED_AUDIO_EXT.add("amr");
+        SUPPORTED_AUDIO_EXT.add("3gp");
+        SUPPORTED_AUDIO_EXT.add("opus");
+        SUPPORTED_AUDIO_EXT.add("wma");
+    }
+
     private VoicePackManager(Context context) {
         this.context = context.getApplicationContext();
         this.cacheDir = new File(this.context.getFilesDir(), "voicepack");
         if (!cacheDir.exists()) cacheDir.mkdirs();
+        // 恢复上次选定的用户语音包目录 URI
+        try {
+            SharedPreferences prefs = this.context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+            String uriStr = prefs.getString(KEY_TREE_URI, null);
+            if (uriStr != null) {
+                this.voicePackTreeUri = Uri.parse(uriStr);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "恢复用户语音包目录 URI 失败", e);
+        }
         // 配置短超时：任一源连接/响应超时后快速失败，立即切到下一源。
         // 若用默认超时（connect/read 均 10s），原始源挂起时 4 源串行可能卡很久，表现为"一直不切源"。
         this.http = new OkHttpClient.Builder()
@@ -144,6 +182,125 @@ public class VoicePackManager {
             instance = new VoicePackManager(context);
         }
         return instance;
+    }
+
+    // ===== 用户自定义语音包目录（SAF 授权） =====
+
+    /** 返回用户选定的语音包目录树 URI；未配置返回 null。 */
+    public Uri getVoicePackTreeUri() {
+        return voicePackTreeUri;
+    }
+
+    /**
+     * 设置（并持久化）用户选定的语音包目录树 URI。
+     * <p>会尝试 {@code takePersistableUriPermission} 以在应用重启后仍能访问该目录，
+     * 并清空已解析语音包的本地缓存（目录已变，旧缓存失效）。
+     */
+    public void setVoicePackTreeUri(Uri uri) {
+        this.voicePackTreeUri = uri;
+        userPackCache.clear();
+        try {
+            if (uri != null) {
+                context.getContentResolver().takePersistableUriPermission(
+                        uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                                | android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            }
+            SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+            SharedPreferences.Editor ed = prefs.edit();
+            if (uri != null) {
+                ed.putString(KEY_TREE_URI, uri.toString());
+            } else {
+                ed.remove(KEY_TREE_URI);
+            }
+            ed.apply();
+        } catch (Exception e) {
+            Log.e(TAG, "持久化用户语音包目录 URI 失败", e);
+        }
+    }
+
+    /**
+     * 按语音包名解析用户目录中的音频文件。
+     * <p>匹配规则：目录内文件名「去扩展名后 == packName」即命中（对应模板 {@code [紫庄]}=文件「紫庄.*」），
+     * 支持 {@link #SUPPORTED_AUDIO_EXT} 中的任意可播格式。命中后拷到应用 cache 并返回绝对路径，
+     * 供 {@code TTSUtils} 解码（不同格式统一重采样为 22050/单声道/16bit 后合并播出）。
+     *
+     * @param packName 模板中的语音包名（如「紫庄」）
+     * @return 本地音频文件绝对路径；未配置目录 / 未命中 / 失败 返回 null（上层回退 TTS）
+     */
+    public File resolveUserPackByName(String packName) {
+        if (packName == null || packName.isEmpty() || voicePackTreeUri == null) return null;
+
+        // 命中缓存直接返回
+        File cached = userPackCache.get(packName);
+        if (cached != null && cached.exists()) {
+            return cached;
+        }
+
+        try {
+            Uri treeUri = voicePackTreeUri;
+            String treeId = DocumentsContract.getTreeDocumentId(treeUri);
+            Uri childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, treeId);
+            String[] proj = new String[]{
+                    DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                    DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                    DocumentsContract.Document.COLUMN_MIME_TYPE};
+            Cursor c = context.getContentResolver().query(childrenUri, proj, null, null, null);
+            if (c == null) return null;
+            try {
+                int idxId = c.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID);
+                int idxName = c.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME);
+                int idxMime = c.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE);
+                while (c.moveToNext()) {
+                    String mime = c.getString(idxMime);
+                    if (mime == null || DocumentsContract.Document.MIME_TYPE_DIR.equals(mime)) continue;
+                    String name = c.getString(idxName);
+                    if (name == null) continue;
+                    int dot = name.lastIndexOf('.');
+                    if (dot <= 0) continue;
+                    String base = name.substring(0, dot);
+                    if (!base.equals(packName)) continue;
+                    String ext = name.substring(dot + 1).toLowerCase();
+                    if (!SUPPORTED_AUDIO_EXT.contains(ext)) continue;
+
+                    String docId = c.getString(idxId);
+                    Uri fileUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId);
+                    File local = copyUriToCache(fileUri, packName);
+                    if (local != null) {
+                        userPackCache.put(packName, local);
+                        return local;
+                    }
+                }
+            } finally {
+                c.close();
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "解析用户语音包失败: " + packName, e);
+        }
+        return null;
+    }
+
+    /** 把 SAF 文档 Uri 拷到应用 cache 目录（MediaExtractor 需 File 路径解码），返回本地 File。 */
+    private File copyUriToCache(Uri uri, String packName) {
+        InputStream in = null;
+        FileOutputStream fos = null;
+        try {
+            in = context.getContentResolver().openInputStream(uri);
+            if (in == null) return null;
+            File out = new File(context.getCacheDir(), "userpack_" + System.nanoTime() + "_" + packName);
+            fos = new FileOutputStream(out);
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = in.read(buf)) > 0) {
+                fos.write(buf, 0, n);
+            }
+            return out;
+        } catch (Exception e) {
+            Log.e(TAG, "拷贝用户语音包失败: " + packName, e);
+            return null;
+        } finally {
+            try { if (in != null) in.close(); } catch (Exception ignore) {}
+            try { if (fos != null) fos.close(); } catch (Exception ignore) {}
+        }
     }
 
     /**

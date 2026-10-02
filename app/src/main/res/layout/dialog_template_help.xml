@@ -1,0 +1,244 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@drawable/bg_dialog_panel"
+    android:padding="16dp">
+
+    <!-- 标题栏：标题 + 关闭 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginBottom="12dp">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="报站格式模板语法"
+            android:textColor="#FFFFFF"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/template_help_close"
+            android:layout_width="28dp"
+            android:layout_height="28dp"
+            android:background="@drawable/bg_question_circle"
+            android:text="✕"
+            android:textColor="#00FFFF"
+            android:textSize="14sp"
+            android:gravity="center"
+            android:clickable="true"
+            android:focusable="true" />
+    </LinearLayout>
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="440dp"
+        android:fillViewport="true"
+        android:scrollbars="vertical">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <!-- ① 普通文本 -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="① 普通文本（直接朗读 / 显示）"
+                android:textColor="#7FE9FF"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="3dp"
+                android:text="不含 { } 或 [ ] 的文字会直接作为播报内容朗读；在 LED 屏上则直接显示。"
+                android:textColor="#C9D0E8"
+                android:textSize="12sp" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_hint_box"
+                android:padding="8dp"
+                android:layout_marginTop="6dp">
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="模板：前方到站  →  朗读/显示「前方到站」"
+                    android:textColor="#7FE9FF"
+                    android:textSize="12sp"
+                    android:fontFamily="monospace" />
+            </LinearLayout>
+
+            <!-- ② {变量} -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:text="② {变量}（文本变量，运行时替换）"
+                android:textColor="#7FE9FF"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="3dp"
+                android:text="大括号包裹变量名，运行时替换为对应实时信息；变量找不到或为空时，原样保留 {变量名} 以便发现笔误。"
+                android:textColor="#C9D0E8"
+                android:textSize="12sp" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="3dp"
+                android:text="可用变量：线路名 / 起点站 / 终点站 / 当前站 / 下一站 / 票价 / 方向"
+                android:textColor="#9AA0BC"
+                android:textSize="11sp" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_hint_box"
+                android:padding="8dp"
+                android:layout_marginTop="6dp">
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="模板：{下一站}  →  「白门下村」\n模板：{票价}   →  「2元」"
+                    android:textColor="#7FE9FF"
+                    android:textSize="12sp"
+                    android:fontFamily="monospace" />
+            </LinearLayout>
+
+            <!-- ③ [语音包] -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:text="③ [语音包名]（固定语音包）"
+                android:textColor="#7FE9FF"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="3dp"
+                android:text="方括号包裹语音包名，从所选「语音包目录」读取「名称.*」音频播放（* 表示任意文件后缀，如 .mp3 / .wav）；找不到时回退用 TTS 播报该名称。（仅语音格式生效，LED 仅显示文本、忽略语音包）"
+                android:textColor="#C9D0E8"
+                android:textSize="12sp" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_hint_box"
+                android:padding="8dp"
+                android:layout_marginTop="6dp">
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="模板：[叮]      →  播放「叮.*」\n模板：[1号线]  →  播放「1号线.*」"
+                    android:textColor="#7FE9FF"
+                    android:textSize="12sp"
+                    android:fontFamily="monospace" />
+            </LinearLayout>
+
+            <!-- ④ [{变量}] -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:text="④ [{变量}]（动态语音包）"
+                android:textColor="#7FE9FF"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="3dp"
+                android:text="方括号内用 {变量} 表示动态语音包名：先取变量值，再当作语音包名匹配「值.*」音频；变量无值时退化为 {变量} 文本。"
+                android:textColor="#C9D0E8"
+                android:textSize="12sp" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_hint_box"
+                android:padding="8dp"
+                android:layout_marginTop="6dp">
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="模板：[{线路名}]  →  取「1号线」后播放「1号线.*」\n变量为空时：显示 {线路名}"
+                    android:textColor="#7FE9FF"
+                    android:textSize="12sp"
+                    android:fontFamily="monospace" />
+            </LinearLayout>
+
+            <!-- ⑤ [前缀_...] -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:text="⑤ [前缀_语音包]（带字母前缀，如 en_）"
+                android:textColor="#7FE9FF"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="3dp"
+                android:text="语音包名前可加任意字母前缀（如 en_ 表示英文语音包）。前缀既可与变量值拼接，也可直接写死，拼接后整体作为语音包名匹配「en_xxx.*」。"
+                android:textColor="#C9D0E8"
+                android:textSize="12sp" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_hint_box"
+                android:padding="8dp"
+                android:layout_marginTop="6dp">
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="模板：[en_{线路名}]  →  「en_1号线」播放「en_1号线.*」\n模板：[en_紫庄]    →  直接播放「en_紫庄.*」"
+                    android:textColor="#7FE9FF"
+                    android:textSize="12sp"
+                    android:fontFamily="monospace" />
+            </LinearLayout>
+
+            <!-- ⑥ 组合 -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:text="⑥ 组合示例"
+                android:textColor="#7FE9FF"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="3dp"
+                android:text="文本与语音包可随意混排（LED 仅保留文本、忽略语音包）。"
+                android:textColor="#C9D0E8"
+                android:textSize="12sp" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_hint_box"
+                android:padding="8dp"
+                android:layout_marginTop="6dp">
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="模板：前方到站，[{下一站}]，请准备下车\n语音：朗读「前方到站，」+ 播放「白门下村.*」+「请准备下车」\nLED ：前方到站，白门下村，请准备下车"
+                    android:textColor="#7FE9FF"
+                    android:textSize="12sp"
+                    android:fontFamily="monospace" />
+            </LinearLayout>
+
+        </LinearLayout>
+    </ScrollView>
+</LinearLayout>

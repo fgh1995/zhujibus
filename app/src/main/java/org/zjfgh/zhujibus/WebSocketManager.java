@@ -3,7 +3,6 @@ package org.zjfgh.zhujibus;
 import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
-import android.provider.Settings;
 import android.util.Log;
 import android.widget.Toast;
 
@@ -277,27 +276,56 @@ public class WebSocketManager {
     }
 
     /**
-     * 发送 Android ID
+     * 发送设备/安装 ID（带全 0 兜底，详见 {@link DeviceIdUtil}）
      */
     private void sendAndroidId() {
-        try {
-            String androidId = Settings.Secure.getString(
-                    context.getContentResolver(),
-                    Settings.Secure.ANDROID_ID
-            );
-            if (androidId != null && !androidId.isEmpty()) {
-                String msg = MSG_TYPE_ID + ":" + androidId;
-                sendMessage(msg);
-                Log.d(TAG, "发送 Android ID: " + msg);
+        String deviceId = DeviceIdUtil.getDeviceId(context);
+        if (deviceId != null && !deviceId.isEmpty()) {
+            String msg = MSG_TYPE_ID + ":" + deviceId;
+            sendMessage(msg);
+            Log.d(TAG, "发送设备 ID: " + msg);
 
-                // ⭐ 延迟 100ms 发送版本号，确保服务端先处理完 id 注册
-                mainHandler.postDelayed(this::sendAppVersion, 100);
-            } else {
-                Log.w(TAG, "无法获取 Android ID");
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "获取 Android ID 失败", e);
+            // ⭐ 延迟 100ms 发送版本号，确保服务端先处理完 id 注册
+            mainHandler.postDelayed(this::sendAppVersion, 100);
+        } else {
+            Log.w(TAG, "无法获取设备 ID");
         }
+    }
+
+    /**
+     * 上报地区信息：真实定位地区 + 用户选择地区。
+     * 消息格式（JSON）：{"type":"region","real":{adCode,province,city,district},"selected":{...}}
+     */
+    public void sendRegionInfo(BusRegion real, BusRegion selected) {
+        try {
+            org.json.JSONObject root = new org.json.JSONObject();
+            root.put("type", "region");
+            root.put("real", regionToJson(real));
+            root.put("selected", regionToJson(selected));
+            sendMessage(root.toString());
+            Log.d(TAG, "发送地区信息: " + root);
+        } catch (Exception e) {
+            Log.e(TAG, "发送地区信息失败", e);
+        }
+    }
+
+    private org.json.JSONObject regionToJson(BusRegion r) {
+        org.json.JSONObject o = new org.json.JSONObject();
+        try {
+            if (r == null) {
+                o.put("adCode", "");
+                o.put("province", "");
+                o.put("city", "");
+                o.put("district", "");
+            } else {
+                o.put("adCode", r.adCode);
+                o.put("province", r.provinceName);
+                o.put("city", r.cityName);
+                o.put("district", r.districtName);
+            }
+        } catch (Exception ignored) {
+        }
+        return o;
     }
 
     /**

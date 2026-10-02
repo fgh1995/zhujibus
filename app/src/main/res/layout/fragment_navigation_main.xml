@@ -403,13 +403,33 @@
                         android:textSize="45sp"
                         android:textStyle="bold" />
 
-                    <ImageView
-                        android:id="@+id/icon_network_signal"
-                        android:layout_width="15dp"
-                        android:layout_height="15dp"
+                    <LinearLayout
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
                         android:layout_gravity="bottom"
                         android:layout_marginEnd="5dp"
-                        android:src="@drawable/icon_network_0" />
+                        android:gravity="center_horizontal"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:id="@+id/error_indicator"
+                            android:layout_width="18dp"
+                            android:layout_height="18dp"
+                            android:layout_marginBottom="2dp"
+                            android:background="@drawable/red_circle"
+                            android:gravity="center"
+                            android:text="!"
+                            android:textColor="@color/white"
+                            android:textSize="14sp"
+                            android:textStyle="bold"
+                            android:visibility="gone" />
+
+                        <ImageView
+                            android:id="@+id/icon_network_signal"
+                            android:layout_width="15dp"
+                            android:layout_height="15dp"
+                            android:src="@drawable/icon_network_0" />
+                    </LinearLayout>
                 </LinearLayout>
             </LinearLayout>
         </androidx.constraintlayout.widget.ConstraintLayout>

@@ -79,7 +79,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import io.sgr.geometry.utils.GeometryUtils;
 
-public class BusLineDetailActivity extends AppCompatActivity implements BusRealTimeManager.RealTimeUpdateListener {
+public class BusLineDetailActivity extends AppCompatActivity implements BusRealTimeManager.RealTimeUpdateListener,
+        AnnouncementStateProvider {
     private String lineID;
     private String lineName;
     private String startStation;
@@ -308,6 +309,46 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     }
 
     /**
+     * ⭐ 供「报站格式」试听使用：按当前实时状态构造变量上下文。
+     * 当前站取最近一次已报站索引（lastAnnouncedStationIndex，实时未定位时退化为起点站），
+     * 下一站取其后一站；线路名/起终点/票价/方向取自当前线路字段。
+     */
+    @Override
+    public AnnouncementFormatter.VariableContext provideAnnouncementContext() {
+        AnnouncementFormatter.VariableContext ctx = new AnnouncementFormatter.VariableContext();
+        ctx.lineName = lineName;
+        ctx.startStation = startStation;
+        ctx.endStation = endStation;
+        ctx.price = priceText;
+        ctx.direction = (currentDirection == 1) ? "上行" : "下行";
+
+        List<BusApiClient.BusLineStation> stations =
+                (realTimeManager != null) ? realTimeManager.getStationList() : null;
+        if (stations != null && !stations.isEmpty()) {
+            int idx = lastAnnouncedStationIndex;
+            if (idx < 0 || idx >= stations.size()) idx = 0; // 实时未定位：退化为起点站
+            ctx.currentStation = stations.get(idx).stationName;
+            if (idx + 1 < stations.size()) {
+                ctx.nextStation = stations.get(idx + 1).stationName;
+            } else {
+                ctx.nextStation = "";
+            }
+        } else {
+            ctx.currentStation = startStation;
+            ctx.nextStation = "";
+        }
+        return ctx;
+    }
+
+    /** 预览：把渲染后的 LED 文本直接应用到车内 LED 滚动屏（next_station_info）。 */
+    @Override
+    public void applyLedPreview(String text) {
+        if (nextStationInfo != null) {
+            nextStationInfo.setText(text);
+        }
+    }
+
+    /**
      * ⭐ 获取当前方向的线路数据（供CameraActivity的POV页面直接复用，避免重新请求接口）
      * 返回 currentDirection 对应的 BusLineDirection（含 stationList、geometry、起终点等），
      * 数据来源与 showDirection() 完全一致，不存在换向后时序不一致问题。
@@ -375,27 +416,50 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private boolean amapCoordEnabled = false;
     private BusRegion amapCoordRegion;
     private String amapCoordCity;
+    // 站点坐标标记（官方红点 + 高德蓝点对比）显隐开关，默认关闭
+    private boolean stationMarkerEnabled = false;
 
     /** 当前是否处于高德坐标覆盖模式（供 MoreFragment 按钮初始状态） */
     public boolean isAmapCoordActive() {
         return amapCoordEnabled;
     }
 
+    /** 当前是否显示站点坐标对比标记（供 MoreFragment 按钮初始状态） */
+    public boolean isStationMarkerActive() {
+        return stationMarkerEnabled;
+    }
+
+    /** 站点坐标标记按钮：仅控制地图站点对比标记的显示/隐藏（官方红点 + 高德蓝点），默认关闭 */
+    public void toggleStationMarkers() {
+        if (navigationMainFragment == null || realTimeManager == null) {
+            Toast.makeText(this, "尚未加载线路，无法显示站点标记", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (stationMarkerEnabled) {
+            stationMarkerEnabled = false;
+            navigationMainFragment.drawStationMarkers(null, null, null);
+            if (moreFragment != null) moreFragment.setStationMarkerActive(false);
+            Toast.makeText(this, "已隐藏站点坐标标记", Toast.LENGTH_SHORT).show();
+        } else {
+            stationMarkerEnabled = true;
+            if (moreFragment != null) moreFragment.setStationMarkerActive(true);
+            refreshStationMarkers();
+            Toast.makeText(this, "已显示站点坐标标记", Toast.LENGTH_SHORT).show();
+        }
+    }
+
     /**
-     * 更多功能：模拟位置变化（模拟报站）。
-     * 沿当前公交路线注入合成 GPS 位置，驱动车标与报站；需 GPS 报站模式。再次点击停止。
+     * 更多功能：按指定参数开始模拟位置变化（模拟报站）。
+     * 沿当前公交路线注入合成 GPS 位置，驱动车标与报站；需 GPS 报站模式。
+     * @param speedKmh 模拟时速（km/h）
+     * @param startDwellSec 起点站停留时长（秒）
+     * @param terminalDwellSec 终点站停留时长（秒）
+     * @param arrivalDwellSec 到站停留间隔（秒）：每个中途站到站后停留时长
      */
-    public void toggleGpsSimulation() {
+    public void startGpsSimulation(float speedKmh, int startDwellSec, int terminalDwellSec, int arrivalDwellSec) {
         AmapNavigationView nav = (navigationMainFragment != null) ? navigationMainFragment.getNavigation() : null;
         if (nav == null) {
             Toast.makeText(this, "导航未就绪，无法模拟", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        if (nav.isSimulating()) {
-            nav.stopLocationSimulation();
-            // 完全恢复真实 GPS（停止时一并恢复，避免残留暂停状态影响后续定位）
-            GpsWarmingUp.resumeLocation();
-            Toast.makeText(this, "已停止位置模拟", Toast.LENGTH_SHORT).show();
             return;
         }
         // 模拟报站依赖 GPS 模式，自动切到 GPS（与切换模式对话行为一致）
@@ -403,10 +467,84 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             currentAnnounceMode = AnnounceMode.GPS;
             updateAnnounceModeState();
         }
+        // 传入站点坐标（及其真实站点列表下标），使模拟能在中途站触发到站停留（下游报站自然播报）
+        SimStationData simData = buildSimStationData();
+        if (simData != null) {
+            nav.setSimulationStations(simData.positions, simData.realIndices);
+        }
         // 模拟期间完全停止真实 GPS 回调（1Hz 也会瞬时干扰报站/视角），保留后台线程
         GpsWarmingUp.pauseLocation();
-        nav.startLocationSimulation(30f);
-        Toast.makeText(this, "已开始模拟位置变化（GPS 30km/h，已暂停真实GPS）", Toast.LENGTH_SHORT).show();
+        // ⭐ 重开模拟：复位 GPS 报站与站点列表状态，使本次从起点站重新开始
+        //    （当前通常已是 GPS 模式，updateAnnounceModeState 不会再次复位，故此处显式复位）
+        resetGpsStationState();
+        nav.startLocationSimulation(speedKmh, startDwellSec, terminalDwellSec, arrivalDwellSec);
+        Toast.makeText(this, "已开始位置模拟（GPS " + speedKmh + "km/h，已暂停真实GPS）", Toast.LENGTH_SHORT).show();
+    }
+
+    /** 模拟站点数据：坐标列表 + 各自在真实站点列表中的下标（长度一致，用于匹配路线点并修正下标错位）。 */
+    private static final class SimStationData {
+        final List<com.amap.api.maps.model.LatLng> positions;
+        final int[] realIndices;
+        SimStationData(List<com.amap.api.maps.model.LatLng> positions, int[] realIndices) {
+            this.positions = positions;
+            this.realIndices = realIndices;
+        }
+    }
+
+    /** 从实时站点列表抽取站点坐标（含起终点）及其真实下标，供模拟匹配路线点使用。 */
+    private SimStationData buildSimStationData() {
+        if (realTimeManager == null) return null;
+        List<BusApiClient.BusLineStation> stations = realTimeManager.getStationList();
+        if (stations == null || stations.isEmpty()) return null;
+        List<com.amap.api.maps.model.LatLng> list = new ArrayList<>();
+        List<Integer> idxList = new ArrayList<>();
+        for (int i = 0; i < stations.size(); i++) {
+            BusApiClient.BusLineStation s = stations.get(i);
+            if (s != null && s.poiOriginLat != 0 && s.poiOriginLon != 0) {
+                list.add(new com.amap.api.maps.model.LatLng(s.poiOriginLat, s.poiOriginLon));
+                idxList.add(i);
+            }
+        }
+        int[] realIndices = new int[idxList.size()];
+        for (int i = 0; i < idxList.size(); i++) {
+            realIndices[i] = idxList.get(i);
+        }
+        return new SimStationData(list, realIndices);
+    }
+
+    /** 停止模拟位置变化，并恢复真实 GPS。 */
+    public void stopGpsSimulation() {
+        AmapNavigationView nav = (navigationMainFragment != null) ? navigationMainFragment.getNavigation() : null;
+        if (nav != null) {
+            nav.stopLocationSimulation();
+        }
+        // 完全恢复真实 GPS（停止时一并恢复，避免残留暂停状态影响后续定位）
+        GpsWarmingUp.resumeLocation();
+        Toast.makeText(this, "已停止位置模拟", Toast.LENGTH_SHORT).show();
+    }
+
+    /** 复位 GPS 报站与站点列表状态，使一次新的模拟从起点站重新开始（列表不再残留上一轮进度）。 */
+    private void resetGpsStationState() {
+        lastVoiceStationOrder = -1;
+        lastAnnouncedStationIndex = -1;
+        isInsideStationRadius = false;
+        lastInsideStationIndex = -1;
+        insideStationMinDistance = Double.MAX_VALUE;
+        hasLeftTerminalStation = false;
+        gpsCurrentStationIndex = -1;
+        committedStationIndex = -1;
+        if (busLineView != null) {
+            busLineView.resetAllStations();
+        }
+        if (navigationMainFragment != null) {
+            navigationMainFragment.resetAllStations();
+        }
+    }
+
+    /** 是否正在模拟位置变化。 */
+    public boolean isSimulating() {
+        AmapNavigationView nav = (navigationMainFragment != null) ? navigationMainFragment.getNavigation() : null;
+        return nav != null && nav.isSimulating();
     }
 
     /** 高德坐标来源按钮：已启用则恢复诸暨官方，未启用则一次性匹配上下行并缓存 */
@@ -922,11 +1060,17 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
 
     /**
      * 在地图上叠加显示站点位置用于对比：
-     * 红色=官方原始坐标（始终显示），蓝色=高德覆盖坐标（仅启用高德坐标时叠加）；
+     * 红色=官方原始坐标，蓝色=高德覆盖坐标（仅启用高德坐标时叠加）；
      * 同站两点平面偏移 > 2m 时画橙色连线高亮差异。
+     * 仅当 stationMarkerEnabled（站点坐标标记开关）开启时才绘制，否则清除。
      */
     private void refreshStationMarkers() {
         if (navigationMainFragment == null || realTimeManager == null) return;
+        if (!stationMarkerEnabled) {
+            // 站点坐标标记开关关闭：清除地图上的站点对比 marker
+            navigationMainFragment.drawStationMarkers(null, null, null);
+            return;
+        }
         BusApiClient.BusLineDirection dir = getCurrentLineDirection();
         if (dir == null || dir.stationList == null) return;
 
@@ -1576,7 +1720,13 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
 
                 if (isStartStation) {
                     lastAnnouncedStationIndex = leavingIndex;
-                    announceStation(stations.get(leavingIndex).stationName, leavingIndex, totalStations);
+                    // 诸暨：起点站发车途中播"欢迎词+下一站"（原格式，不在进站时播报）；
+                    // 自定义：发车途中播"起点站途中格式"，其"在起点站格式"由进站分支负责播报。
+                    if (AnnouncementFormatManager.getInstance(this).getMode() == AnnouncementFormatManager.Mode.CUSTOM) {
+                        announceLeavingStation(stations.get(leavingIndex).stationName, leavingIndex, totalStations);
+                    } else {
+                        announceStation(stations.get(leavingIndex).stationName, leavingIndex, totalStations);
+                    }
                     Log.d(TAG, "起点站离开触发报站: " + stations.get(leavingIndex).stationName);
                 } else if (!isTerminalStation) {
                     announceLeavingStation(stations.get(leavingIndex).stationName, leavingIndex, totalStations);
@@ -1600,11 +1750,14 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 } else if (isTerminalStation && snapshotHasLeftTerminal) {
                     // 已离开终点站后再次进入终点站：忽略
                 } else if (isStartStation) {
-                    // ⭐ 起点站进站时不播报，等到"离开起点站"（在途中）时再播
-                    // 避免用户在起点站等车时就听到"欢迎乘坐..."的播报
-                    if (snapshotLastAnnounced != finalCurrentInsideStationIndex) {
+                    // 自定义：起点站进站播"在起点站格式"；诸暨不在进站时播报（仅在发车途中播欢迎词+下一站）。
+                    if (AnnouncementFormatManager.getInstance(this).getMode() == AnnouncementFormatManager.Mode.CUSTOM
+                            && snapshotLastAnnounced != finalCurrentInsideStationIndex) {
                         lastAnnouncedStationIndex = finalCurrentInsideStationIndex;
-                        Log.d(TAG, "起点站进站，不播报，等待离开起点站时再播: " + stations.get(finalCurrentInsideStationIndex).stationName);
+                        announceStation(stations.get(finalCurrentInsideStationIndex).stationName, finalCurrentInsideStationIndex, totalStations);
+                        Log.d(TAG, "起点站进站触发报站(在起点站格式): " + stations.get(finalCurrentInsideStationIndex).stationName);
+                    } else {
+                        Log.d(TAG, "起点站进站，诸暨模式不播报，等待离开起点站时再播: " + stations.get(finalCurrentInsideStationIndex).stationName);
                     }
                 } else {
                     if (!isInsideStationRadius || snapshotLastAnnounced != finalCurrentInsideStationIndex) {
@@ -1662,17 +1815,33 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 listGpsIndex = finalLeavingStationFinal;
                 listGpsArriving = false;
             } else if (!isBackwardJump
-                    && finalNearestStationIndex >= 0
                     && (simulating
                         || (routePoints != null && !routePoints.isEmpty()
                             && resultNearestDistance >= 0
                             && (resultNearestDistance < ON_ROUTE_DISPLAY_THRESHOLD_M
                                 || resultNearestDirect < ON_ROUTE_DISPLAY_THRESHOLD_M)))) {
-                // ⭐ 高德/GPS 专属：GPS 在线路沿线（或模拟）但未进入任一站点半径时，站点列表仍显示车标
-                //    （贴最近站点），保证整段行程车标可见（与车机一致）；离站/进站逻辑优先级更高。
-                //    放宽到"沿线距离<阈值 或 直线距离<阈值"，让近距离网络定位/曲线段也能看到车标。
-                listGpsIndex = finalNearestStationIndex;
-                listGpsArriving = false;
+                // ⭐ 沿线行驶、不在进站半径内时，车标定位取"当前/最近离开站" gpsCurrentStationIndex（=X），
+                //    而不是几何最近站：否则临近下一站 X+1 时几何最近站变 X+1，车标被错误画到 X+1~X+2 段。
+                //    同时修正"离站/途中触发过早"：车标是否"在该站"取决于是否仍在【出站半径】内，
+                //    与语音"出站"判定（超过出站半径）保持一致——未超出站范围就停在 X 站(到站)，
+                //    超过出站范围才切到 X~X+1 之间(途中)。仅当 gpsCurrentStationIndex 无效时回退几何最近站。
+                int cur = gpsCurrentStationIndex;
+                if (cur >= 0 && cur < totalStations) {
+                    double distToCur = -1;
+                    BusApiClient.BusLineStation curStation = stations.get(cur);
+                    if (curStation.poiOriginLat != 0 || curStation.poiOriginLon != 0) {
+                        float[] tmp = new float[1];
+                        Location.distanceBetween(finalGcjLat, finalGcjLon,
+                                curStation.poiOriginLat, curStation.poiOriginLon, tmp);
+                        distToCur = tmp[0];
+                    }
+                    listGpsIndex = cur;
+                    // 仍在出站半径内 => 视为"在该站"（图标落在 X 站）；超过出站半径 => "途中"（X~X+1 之间）
+                    listGpsArriving = !(distToCur >= 0 && distToCur > exitStationRadius);
+                } else {
+                    listGpsIndex = finalNearestStationIndex;
+                    listGpsArriving = false;
+                }
             }
 
             // 更新原有的 BusLineView
@@ -1997,6 +2166,17 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         boolean isStartStation = stationIndex == 0;
         boolean isTerminalStation = stationIndex == totalStations - 1;
 
+        // 自定义格式：按场景走用户模板（含语音包目录、变量替换）
+        if (AnnouncementFormatManager.getInstance(this).getMode() == AnnouncementFormatManager.Mode.CUSTOM) {
+            AnnouncementFormatter.VariableContext ctx = buildAnnounceContext(stationName, stationIndex, totalStations);
+            AnnouncementFormatManager.Scenario scenario = isStartStation ? AnnouncementFormatManager.Scenario.START_STATION
+                    : (isTerminalStation ? AnnouncementFormatManager.Scenario.ARRIVED_TERMINAL
+                    : AnnouncementFormatManager.Scenario.ARRIVED);
+            tts.playFormattedAnnouncement(scenario, ctx);
+            setNextStationInfoText(ctx, scenario);
+            return;
+        }
+
         if (isStartStation) {
             String nextStationName = "";
             if (stationIndex + 1 < totalStations) {
@@ -2004,7 +2184,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 nextStationName = stations.get(stationIndex + 1).stationName;
             }
             tts.playGpsStartStationAnnouncement(lineName, startStation, endStation, nextStationName);
-            setNextStationInfoText(nextStationName);
+            setNextStationInfoText(nextStationName, AnnouncementFormatManager.Scenario.START_STATION);
         } else if (isTerminalStation) {
             tts.playGpsTerminalStationAnnouncement(stationName);
             nextStationInfo.setText(stationName + " 到了！  We are now at " + VoicePackManager.getInstance(this).getStationEnglish(stationName) + " !");
@@ -2016,29 +2196,111 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
 
     private void announceLeavingStation(String stationName, int stationIndex, int totalStations) {
         TTSUtils tts = TTSUtils.getInstance(this);
+        boolean isStartStation = stationIndex == 0;
         boolean isTerminalStation = stationIndex + 1 >= totalStations - 1;
+
+        // 自定义格式：按场景走用户模板（含语音包目录、变量替换）
+        if (AnnouncementFormatManager.getInstance(this).getMode() == AnnouncementFormatManager.Mode.CUSTOM) {
+            AnnouncementFormatter.VariableContext ctx = buildAnnounceContext(stationName, stationIndex, totalStations);
+            AnnouncementFormatManager.Scenario scenario = isStartStation
+                    ? AnnouncementFormatManager.Scenario.START_EN_ROUTE
+                    : (isTerminalStation
+                        ? AnnouncementFormatManager.Scenario.NEXT_IS_TERMINAL
+                        : AnnouncementFormatManager.Scenario.NEXT_STATION);
+            tts.playFormattedAnnouncement(scenario, ctx);
+            setNextStationInfoText(ctx, scenario);
+            return;
+        }
+
         String nextStationName = "";
         if (stationIndex + 1 < totalStations) {
             List<BusApiClient.BusLineStation> stations = realTimeManager.getStationList();
             nextStationName = stations.get(stationIndex + 1).stationName;
         }
         tts.playGpsLeavingStationAnnouncement(nextStationName, isTerminalStation);
-        setNextStationInfoText(nextStationName);
+        setNextStationInfoText(nextStationName, AnnouncementFormatManager.Scenario.NEXT_STATION);
+    }
+
+    /** 按当前线路字段 + 指定站点序号构造报站变量上下文（供自定义格式真实报站使用）。 */
+    private AnnouncementFormatter.VariableContext buildAnnounceContext(String stationName, int stationIndex, int totalStations) {
+        AnnouncementFormatter.VariableContext ctx = new AnnouncementFormatter.VariableContext();
+        ctx.lineName = lineName;
+        ctx.startStation = startStation;
+        ctx.endStation = endStation;
+        ctx.currentStation = stationName;
+        ctx.price = priceText;
+        ctx.direction = (currentDirection == 1) ? "上行" : "下行";
+        List<BusApiClient.BusLineStation> stations = (realTimeManager != null) ? realTimeManager.getStationList() : null;
+        if (stations != null && !stations.isEmpty()) {
+            int nextIdx = stationIndex + 1;
+            if (nextIdx < stations.size()) {
+                ctx.nextStation = stations.get(nextIdx).stationName;
+            }
+        }
+        return ctx;
     }
 
     /**
-     * 设置"下一站"信息文本。
-     * GPS 模式追加"扫码评价"中英双语提示，网络模式保持原版文案。
+     * 设置 LED 文本（next_station_info），按报站格式模式分流：
+     * - 诸暨格式：沿用内置文本（含中英双语与"扫码评价"提示），与旧版一致；
+     * - 自定义格式：读取与 scenario 对齐的 LED 模板（scenario 为 null 表示"默认状态"），仅文本；
+     *   若对应 LED 模板未设置内容，则显示"请在报站设置中添加滚动模版"。
      */
-    private void setNextStationInfoText(String stationName) {
-        if (currentAnnounceMode == AnnounceMode.GPS) {
-            nextStationInfo.setText("下一站：" + stationName + QR_HINT_CN + "    Next Station:" + VoicePackManager.getInstance(this).getStationEnglish(stationName) + QR_HINT_EN);
+    private void setNextStationInfoText(AnnouncementFormatter.VariableContext ctx, AnnouncementFormatManager.Scenario scenario) {
+        if (ctx == null) return;
+        AnnouncementFormatManager fmt = AnnouncementFormatManager.getInstance(this);
+        String text = null;
+        if (fmt.getLedMode() == AnnouncementFormatManager.Mode.ZHUJI) {
+            // 诸暨格式：内置文本（保留旧版"下一站：XXX" + 中英双语 + 扫码评价提示）
+            String stationName = ctx.nextStation;
+            if (stationName == null) {
+                // 默认/欢迎状态：用内置欢迎语
+                applyWelcomeTextBuiltin();
+                return;
+            }
+            String en = VoicePackManager.getInstance(this).getStationEnglish(stationName);
+            if (en == null) en = "";
+            if (currentAnnounceMode == AnnounceMode.GPS) {
+                text = "下一站：" + stationName + QR_HINT_CN + "    Next Station:" + en + QR_HINT_EN;
+            } else {
+                text = "下一站：" + stationName + "    Next Station:" + en;
+            }
         } else {
-            nextStationInfo.setText("下一站：" + stationName + "    Next Station:" + VoicePackManager.getInstance(this).getStationEnglish(stationName));
+            // 自定义格式：读取与场景对齐的 LED 模板（仅文本）
+            if (scenario == null) {
+                // 默认状态：未设置则提示
+                String def = fmt.getLedDefaultFormat();
+                if (def == null || def.trim().isEmpty()) {
+                    text = "请在报站设置中添加滚动模版";
+                } else {
+                    text = AnnouncementFormatter.formatTextOnly(def, ctx);
+                }
+            } else {
+                // 其他状态：未设置内容则不响应（不改变 LED 文本）
+                String led = fmt.getLedFormat(scenario);
+                if (led != null && !led.trim().isEmpty()) {
+                    text = AnnouncementFormatter.formatTextOnly(led, ctx);
+                }
+            }
         }
-        if (navigationMainFragment != null && stationName != null) {
-            navigationMainFragment.updateNextStation(stationName);
+        if (text != null) {
+            nextStationInfo.setText(text);
         }
+        if (navigationMainFragment != null && ctx.nextStation != null) {
+            navigationMainFragment.updateNextStation(ctx.nextStation);
+        }
+    }
+
+    /** 兼容旧调用：仅已知下一站名时，用线路字段构造上下文后走模板渲染。 */
+    private void setNextStationInfoText(String stationName, AnnouncementFormatManager.Scenario scenario) {
+        if (stationName == null) return;
+        AnnouncementFormatter.VariableContext ctx = new AnnouncementFormatter.VariableContext();
+        ctx.lineName = lineName;
+        ctx.startStation = startStation;
+        ctx.endStation = endStation;
+        ctx.direction = (currentDirection == 1) ? "上行" : "下行";
+        ctx.nextStation = stationName;
+        setNextStationInfoText(ctx, scenario);
     }
 
     /** 是否普通公交：诸暨线路恒为 true；高德线路仅当 lineTypeName 明确为「普通公交」时为 true，其余类型（地铁/机场大巴等）为 false */
@@ -2049,8 +2311,29 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         return t == null || "普通公交".equals(t);
     }
 
-    /** 依据线路类型设置 LED 欢迎语：非普通公交只去掉中文「公交车」，英文欢迎语保留 */
+    /** 依据线路类型设置 LED 欢迎语（默认状态）：诸暨用内置；自定义读「默认状态」LED 模板（未设置则提示）。 */
     private void applyWelcomeText() {
+        if (nextStationInfo == null || lineName == null) return;
+        AnnouncementFormatManager fmt = AnnouncementFormatManager.getInstance(this);
+        if (fmt.getLedMode() == AnnouncementFormatManager.Mode.ZHUJI) {
+            applyWelcomeTextBuiltin();
+        } else {
+            String led = fmt.getLedDefaultFormat();
+            if (led == null || led.trim().isEmpty()) {
+                nextStationInfo.setText("请在报站设置中添加滚动模版");
+            } else {
+                AnnouncementFormatter.VariableContext ctx = new AnnouncementFormatter.VariableContext();
+                ctx.lineName = lineName;
+                ctx.startStation = startStation;
+                ctx.endStation = endStation;
+                ctx.direction = (currentDirection == 1) ? "上行" : "下行";
+                nextStationInfo.setText(AnnouncementFormatter.formatTextOnly(led, ctx));
+            }
+        }
+    }
+
+    /** 内置欢迎语（诸暨格式）：非普通公交只去掉中文「公交车」，英文欢迎语保留。 */
+    private void applyWelcomeTextBuiltin() {
         if (nextStationInfo == null || lineName == null) return;
         if (isNormalBusLine()) {
             nextStationInfo.setText("欢迎乘坐 " + lineName + " 公交车"
@@ -2304,22 +2587,9 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         // ⭐ 高德地图初始化已迁移到 NavigationMainFragment.onViewCreated()，
         //   这里不再需要手动创建 AmapNavigationView 和注册 layout listener。
 
-        errorIndicator = findViewById(R.id.error_indicator);
-        errorIndicator.setOnClickListener(v -> {
-            if (lastErrorDetail != null && !lastErrorDetail.isEmpty()) {
-                new AlertDialog.Builder(BusLineDetailActivity.this)
-                        .setTitle("错误详情")
-                        .setMessage(lastErrorDetail)
-                        .setPositiveButton("确定", null)
-                        .show();
-            } else if (lastErrorMessage != null && !lastErrorMessage.isEmpty()) {
-                new AlertDialog.Builder(BusLineDetailActivity.this)
-                        .setTitle("错误详情")
-                        .setMessage(lastErrorMessage)
-                        .setPositiveButton("确定", null)
-                        .show();
-            }
-        });
+        // ⭐ 错误指示图标已迁移到 NavigationMainFragment（位于网络信号上方），
+        // 视图就绪后再从 fragment 视图中绑定（见 bindErrorIndicator，含懒绑定兜底）
+        bindErrorIndicator();
 
         updateAnnounceModeDisplay();
         // ⭐ gpsSpeedText 已迁移到 NavigationMainFragment，字体设置在 fragment.onViewCreated() 中完成
@@ -2456,6 +2726,8 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         }
         View hideSwitch = findViewById(R.id.hide_switch);
         TextView hideSwitchText = findViewById(R.id.hide_switch_text);
+        // 置于侧栏面板之上，确保“隐藏”文字不被 nav_icon_bar（后声明、有背景）遮挡且可正常点击
+        hideSwitch.bringToFront();
         View navIconContainer = findViewById(R.id.nav_icon_container);
         View navContentContainer = findViewById(R.id.nav_content_container);
         View navIconBar = findViewById(R.id.nav_icon_bar);
@@ -4272,7 +4544,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
                 BusApiClient.BusLineStation nextStation = realTimeManager.getStationList().get(nextStationIndex - 1);
                 TTSUtils tts = TTSUtils.getInstance(this);
                 tts.playLineDetailAnnouncement(lineName, startStation, endStation, nextStation.stationName);
-                setNextStationInfoText(nextStation.stationName);
+                setNextStationInfoText(nextStation.stationName, AnnouncementFormatManager.Scenario.NEXT_STATION);
                 lastVoiceStationOrder = nearestVehicle.currentStationOrder;
             }
         }
@@ -4316,12 +4588,30 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     private int lastFragmentDisplayStationOrder = -2;
     private boolean lastFragmentDisplayIsArrived = false;
 
+    /** 从 NavigationMainFragment 的视图中绑定错误指示图标并设置点击（懒绑定：fragment 视图就绪前可安全重复调用） */
+    private void bindErrorIndicator() {
+        if (navigationMainFragment == null) return;
+        View root = navigationMainFragment.getView();
+        if (root == null) return;
+        errorIndicator = root.findViewById(R.id.error_indicator);
+        if (errorIndicator != null) {
+            errorIndicator.setOnClickListener(v -> {
+                if (lastErrorDetail != null && !lastErrorDetail.isEmpty()) {
+                    showErrorDetailDialog(lastErrorDetail);
+                } else if (lastErrorMessage != null && !lastErrorMessage.isEmpty()) {
+                    showErrorDetailDialog(lastErrorMessage);
+                }
+            });
+        }
+    }
+
     private void startErrorBlinkAnimation() {
         errorBlinkAnimator = ValueAnimator.ofFloat(0f, 1f);
         errorBlinkAnimator.setDuration(1000);
         errorBlinkAnimator.setRepeatCount(ValueAnimator.INFINITE);
         errorBlinkAnimator.setRepeatMode(ValueAnimator.RESTART);
         errorBlinkAnimator.addUpdateListener(animation -> {
+            if (errorIndicator == null) return;
             float progress = (float) animation.getAnimatedValue();
             if (errorIndicator.getVisibility() == View.VISIBLE) {
                 float alpha = progress < 0.5f ? 1f : 0f;
@@ -4332,6 +4622,7 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
     }
 
     private void showErrorIndicator() {
+        bindErrorIndicator(); // 确保图标已绑定（fragment 视图可能晚于 activity onCreate 就绪）
         if (errorIndicator != null) {
             errorIndicator.setVisibility(View.VISIBLE);
             errorIndicator.setAlpha(1f);
@@ -4362,7 +4653,8 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
             if (isOnline) {
                 navigationMainFragment.setNetworkStatusIndicatorColor(0xFF37D4F4);
             } else {
-                navigationMainFragment.setNetworkStatusIndicatorColor(0xFF555555);
+                // 失败/离线：用醒目红色，避免在深色背景上因深灰而看不清
+                navigationMainFragment.setNetworkStatusIndicatorColor(0xFFFF5252);
             }
         }
     }
@@ -4439,13 +4731,27 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         sb.append("技术详情:\n");
         sb.append(message).append("\n\n");
         if (lineDirection != null) {
-            sb.append("线路ID: ").append(lineDirection.id).append("\n");
+            sb.append("线路ID: ").append(lineDirection.id);
         }
-        if (cachedResponse != null) {
-            sb.append("线路详情API状态: ").append(cachedResponse.code).append("\n");
-            sb.append("线路详情返回信息: ").append(cachedResponse.returnInfo).append("\n");
-        }
+        // 注意：不追加 cachedResponse（那是初始加载线路详情的成功响应），
+        // 与本次实时数据请求失败无关，避免出现「失败却显示成功」的误导信息。
         return sb.toString();
+    }
+
+    /** 错误详情弹窗（现代深色卡片风格）：图标 + 标题 + 可滚动详情 + 确定按钮 */
+    private void showErrorDetailDialog(String content) {
+        android.app.Dialog dialog = new android.app.Dialog(this);
+        View view = LayoutInflater.from(this).inflate(R.layout.dialog_error_detail, null);
+        dialog.setContentView(view);
+        dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT));
+        dialog.getWindow().setLayout(
+                (int) (getResources().getDisplayMetrics().widthPixels * 0.85f),
+                android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
+
+        TextView messageView = view.findViewById(R.id.error_detail_message);
+        messageView.setText(content);
+        view.findViewById(R.id.error_detail_ok).setOnClickListener(v -> dialog.dismiss());
+        dialog.show();
     }
 
     private void loadTestData() {

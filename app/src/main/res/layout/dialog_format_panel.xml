@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 报站格式设置面板（语音格式 / LED 设置共用）：复用外部 dialog_container 的 nav_panel_bg 作面板，本布局透明；
+     文本尺寸 / 按钮配色（bg_accent_btn 青色）对齐“模拟报站”弹窗风格 -->
+<androidx.core.widget.NestedScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/transparent"
+    android:fillViewport="true"
+    android:scrollbars="vertical"
+    android:overScrollMode="ifContentScrolls">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="12dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="8dp">
+
+            <TextView
+                android:id="@+id/format_title"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="格式设置"
+                android:textColor="#FFFFFF"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+
+            <ImageButton
+                android:id="@+id/format_close"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:src="@drawable/ic_close"
+                android:tint="#FFFFFF"
+                android:contentDescription="关闭"
+                android:scaleType="centerInside" />
+        </LinearLayout>
+
+        <!-- 模板语法提示：顶部简单说明 + 右侧 ? 按钮 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="@drawable/bg_hint_box"
+            android:padding="10dp"
+            android:layout_marginBottom="10dp">
+
+            <TextView
+                android:id="@+id/format_hint_text"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="报站格式模板语法：\n普通文字直接朗读\n{变量} 替换为实时信息\n[语音包] 播放自定义音频\n点右侧 ? 看完整说明与示例"
+                android:textColor="#C9D0E8"
+                android:textSize="12sp"
+                android:lineSpacingExtra="3dp" />
+
+            <TextView
+                android:id="@+id/format_help_btn"
+                android:layout_width="26dp"
+                android:layout_height="26dp"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/bg_question_circle"
+                android:text="?"
+                android:textColor="#00FFFF"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:gravity="center"
+                android:clickable="true"
+                android:focusable="true" />
+        </LinearLayout>
+
+        <!-- 报站格式模式：诸暨内置 / 自定义 -->
+        <RadioGroup
+            android:id="@+id/format_mode_group"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_marginBottom="8dp">
+
+            <RadioButton
+                android:id="@+id/radio_zhuji"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:button="@null"
+                android:background="@drawable/radio_mode_bg"
+                android:drawableEnd="@drawable/radio_mode_dot"
+                android:drawablePadding="12dp"
+                android:paddingStart="14dp"
+                android:paddingEnd="14dp"
+                android:paddingTop="10dp"
+                android:paddingBottom="10dp"
+                android:layout_marginBottom="8dp"
+                android:text="诸暨公交报站格式"
+                android:textColor="#FFFFFF"
+                android:textSize="14sp" />
+
+            <RadioButton
+                android:id="@+id/radio_custom"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:button="@null"
+                android:background="@drawable/radio_mode_bg"
+                android:drawableEnd="@drawable/radio_mode_dot"
+                android:drawablePadding="12dp"
+                android:paddingStart="14dp"
+                android:paddingEnd="14dp"
+                android:paddingTop="10dp"
+                android:paddingBottom="10dp"
+                android:text="自定义格式"
+                android:textColor="#FFFFFF"
+                android:textSize="14sp" />
+        </RadioGroup>
+
+        <!-- 模式为“自定义”时显示的模板行（由 MoreFragment 动态填充） -->
+        <LinearLayout
+            android:id="@+id/format_rows_container"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone" />
+
+    </LinearLayout>
+
+</androidx.core.widget.NestedScrollView>

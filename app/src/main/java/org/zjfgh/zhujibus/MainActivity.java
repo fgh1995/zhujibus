@@ -96,6 +96,8 @@ public class MainActivity extends AppCompatActivity {
     private RegionLocator regionLocator;
     private boolean regionLocatorStarted = false;
     private boolean regionPromptShown = false;
+    /** 最近一次由定位解析出的「真实地区」（用于上报给 WS 服务端） */
+    private BusRegion currentRealRegion;
     private final Handler regionFallbackHandler = new Handler(Looper.getMainLooper());
     /** 兜底：定位迟迟解析不到或失败时，仍提示用户手动选择地区（需求 1） */
     private final Runnable regionFallback = () -> {
@@ -111,6 +113,8 @@ public class MainActivity extends AppCompatActivity {
                     if (r != null) {
                         regionManager.setSelectedRegion(r);
                         regionManager.setManualMode(false);
+                        // 选择地区变化，立即上报 WS（真实地区 + 选择地区）
+                        sendWsRegionInfo();
                         // 注意：不更新 promptedAdCode，去重基准仍是「真实定位地区」，
                         // 避免用户手动选了与定位不同的地区后，真实定位地区每次解析都重复弹窗。
                         updateRegionChip(r);
@@ -158,6 +162,8 @@ public class MainActivity extends AppCompatActivity {
             setContentView(R.layout.activity_main);
             // Android 15+ 强制 Edge-to-Edge，动态避让状态栏，防止顶部 UI 重叠
             SystemBarUtils.fitSystemBars(this);
+            // 注入 Context，供 BusApiClient / DeviceIdUtil 生成设备标识
+            BusApiClient.init(this);
             recyclerView = findViewById(R.id.recyclerView);
             tv_search_line = findViewById(R.id.tv_search_line);
             autoScrollTextView = findViewById(R.id.auto_scroll_text);
@@ -463,6 +469,10 @@ public class MainActivity extends AppCompatActivity {
      * 不再按 manualMode 永久屏蔽，避免「手动选择后每次进入都弹窗」或「换城市却不提示」。
      */
     private void handleLocatedRegion(BusRegion located) {
+        // 记录真实地区，并在已连接 WS 时实时上报（真实地区 + 选择地区）
+        currentRealRegion = located;
+        sendWsRegionInfo();
+
         BusRegion selected = regionManager.getSelectedRegion();
 
         // 长按重置后置位：下次定位检测强制重新弹窗（跨重启生效）
@@ -1208,6 +1218,8 @@ public class MainActivity extends AppCompatActivity {
                             public void onConnected() {
                                 Log.d(TAG, "WebSocket 连接成功回调");
                                 updateWebSocketStatus(true, "在线");
+                                // 连接建立后立即上报地区（真实地区 + 选择地区）
+                                sendWsRegionInfo();
                             }
 
                             @Override
@@ -1308,6 +1320,16 @@ public class MainActivity extends AppCompatActivity {
         this.currentOnlineCount = count;
         // 强制刷新状态显示（保持"在线"状态）
         updateWebSocketStatus(true, null);
+    }
+
+    /**
+     * 向 WS 服务端上报当前地区信息：定位出的「真实地区」+ 用户「选择地区」。
+     * 若尚未定位到真实地区则真实地区字段为空，服务端可按选择地区处理。
+     */
+    private void sendWsRegionInfo() {
+        if (webSocketManager == null || !webSocketManager.isConnected()) return;
+        BusRegion selected = regionManager != null ? regionManager.getSelectedRegion() : null;
+        webSocketManager.sendRegionInfo(currentRealRegion, selected);
     }
 
     private int getLocalVersionCode() {

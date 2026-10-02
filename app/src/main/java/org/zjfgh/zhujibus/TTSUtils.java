@@ -4,6 +4,9 @@ import android.content.Context;
 import android.media.AudioAttributes;
 import android.media.AudioFocusRequest;
 import android.media.AudioManager;
+import android.media.MediaCodec;
+import android.media.MediaExtractor;
+import android.media.MediaFormat;
 import android.media.MediaPlayer;
 import android.media.SoundPool;
 import android.os.Build;
@@ -67,7 +70,7 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
             .build();
 
     private static class PlaybackItem {
-        enum Type { WAV, TTS_CN, MEDIA_PLAYER_WAV, FILE_WAV }
+        enum Type { WAV, TTS_CN, TTS_EN, MEDIA_PLAYER_WAV, FILE_WAV }
         Type type;
         int rawResId;
         String text;
@@ -467,7 +470,7 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
                     PlaybackItem.Type.TTS_CN));
             items.add(new PlaybackItem(
                     buildDepartureAnnouncementTextEn(lineName, startStation, endStation, planTime),
-                    PlaybackItem.Type.TTS_CN));
+                    PlaybackItem.Type.TTS_EN));
             return;
         }
 
@@ -792,6 +795,56 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
         });
     }
 
+    /**
+     * 按「自定义报站格式」模板播放某场景的报站。
+     * <p>模板由 {@link AnnouncementFormatManager} 提供，经 {@link AnnouncementFormatter} 解析为
+     * 文本段（TTS 合成）与语音包段（按 {@link AnnouncementFormatter.VoicePackResolver} 解析）。
+     * 当前语音包架构尚未接入目录读取，解析不到时优雅回退为 TTS 播报包名并打日志。
+     *
+     * @param scenario 报站场景（起点站 / 已到站 / 下一站 / 终点站 等）
+     * @param ctx      变量上下文（线路名、站点、票价等）
+     */
+    public void playFormattedAnnouncement(AnnouncementFormatManager.Scenario scenario,
+                                          AnnouncementFormatter.VariableContext ctx) {
+        if (scenario == null) return;
+        stopAll();
+        backgroundHandler.post(() -> {
+            AnnouncementFormatManager fm = AnnouncementFormatManager.getInstance(context);
+            String template = fm.getTemplate(scenario);
+            // 接入用户自定义语音包目录：模板中的 [语音包名] 解析为用户所选目录里「名称.*」的音频
+            AnnouncementFormatter.VoicePackResolver resolver = packName -> {
+                File f = VoicePackManager.getInstance(context).resolveUserPackByName(packName);
+                return (f != null) ? f.getAbsolutePath() : null;
+            };
+            List<AnnouncementFormatter.Segment> segments =
+                    AnnouncementFormatter.parse(template, ctx, resolver);
+
+            List<PlaybackItem> items = new ArrayList<>();
+            for (AnnouncementFormatter.Segment seg : segments) {
+                if (seg.type == AnnouncementFormatter.Segment.Type.TEXT) {
+                    if (seg.text != null && !seg.text.isEmpty()) {
+                        items.add(new PlaybackItem(seg.text, PlaybackItem.Type.TTS_CN));
+                    }
+                } else { // VOICE_PACK
+                    if (seg.voicePackResolved && seg.resolvedPath != null) {
+                        items.add(new PlaybackItem(seg.resolvedPath, true));
+                    } else {
+                        // 架构占位：语音包未找到，回退为 TTS 播报包名并提示
+                        Log.w(TAG, "语音包未找到(架构占位)，回退 TTS: " + seg.text);
+                        if (seg.text != null && !seg.text.isEmpty()) {
+                            items.add(new PlaybackItem(seg.text, PlaybackItem.Type.TTS_CN));
+                        }
+                    }
+                }
+            }
+            if (items.isEmpty()) {
+                Log.w(TAG, "playFormattedAnnouncement: 解析后无有效播放内容, scenario=" + scenario);
+                return;
+            }
+            buildAndPlayMergedAudio(items);
+        });
+    }
+
     public void playScanCodeSuccessSound() {
         stopAll();
         backgroundHandler.post(() -> {
@@ -830,14 +883,17 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
             List<WavInfo> wavInfos = new ArrayList<>();
 
             for (PlaybackItem item : items) {
-                if (item.type == PlaybackItem.Type.TTS_CN || item.type == PlaybackItem.Type.TTS_CN) {
-                    WavInfo ttsWav = synthesizeTtsToWav(item.text,
-                            item.type == PlaybackItem.Type.TTS_CN ? Locale.US : Locale.CHINESE);
+                if (item.type == PlaybackItem.Type.TTS_CN || item.type == PlaybackItem.Type.TTS_EN) {
+                    // TTS_CN 用中文引擎（避免中文被读成拼音），TTS_EN 用英文引擎（美式）
+                    Locale locale = (item.type == PlaybackItem.Type.TTS_CN) ? Locale.CHINESE : Locale.US;
+                    WavInfo ttsWav = synthesizeTtsToWav(item.text, locale);
                     if (ttsWav != null && ttsWav.pcmData.length > 0) {
                         wavInfos.add(ttsWav);
                     }
                 } else if (item.type == PlaybackItem.Type.FILE_WAV) {
-                    WavInfo fileWav = readWavFile(new File(item.wavFilePath));
+                    // 支持 WAV 与 mp3/m4a/aac/ogg/flac 等压缩格式：统一解码为 16bit PCM，
+                    // 后续由 resampleAudio 重采样到 22050/单声道/16bit 合并播出（格式不统一也自动对齐）
+                    WavInfo fileWav = decodeVoicePackFile(new File(item.wavFilePath));
                     if (fileWav != null && fileWav.pcmData.length > 0) {
                         wavInfos.add(fileWav);
                     }
@@ -1084,6 +1140,117 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
             }
         }
         return null;
+    }
+
+    /**
+     * 解码用户语音包音频文件为 16bit PCM 的 {@link WavInfo}。
+     * <p>WAV 直接读裸 PCM；压缩格式（mp3/m4a/aac/ogg/flac 等）走 MediaExtractor + MediaCodec 解码。
+     * 不同格式最终都统一重采样为 22050/单声道/16bit 后合并播出（格式不统一也自动对齐）。
+     *
+     * @return 解码后的 PCM 信息；文件无效或解码失败返回 null（上层跳过该段）
+     */
+    private WavInfo decodeVoicePackFile(File file) {
+        if (file == null || !file.exists() || file.length() == 0) return null;
+        String name = file.getName().toLowerCase();
+        if (name.endsWith(".wav")) {
+            return readWavFile(file);
+        }
+        return decodeCompressedToWavInfo(file);
+    }
+
+    /** 用 MediaExtractor + MediaCodec 把压缩音频解码为 16bit PCM。 */
+    private WavInfo decodeCompressedToWavInfo(File file) {
+        MediaExtractor extractor = null;
+        MediaCodec decoder = null;
+        try {
+            extractor = new MediaExtractor();
+            extractor.setDataSource(file.getAbsolutePath());
+            int trackIndex = -1;
+            MediaFormat format = null;
+            for (int i = 0; i < extractor.getTrackCount(); i++) {
+                MediaFormat f = extractor.getTrackFormat(i);
+                String mime = f.getString(MediaFormat.KEY_MIME);
+                if (mime != null && mime.startsWith("audio/")) {
+                    trackIndex = i;
+                    format = f;
+                    break;
+                }
+            }
+            if (trackIndex < 0 || format == null) return null;
+
+            int sampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE);
+            int channels = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT);
+
+            extractor.selectTrack(trackIndex);
+            decoder = MediaCodec.createDecoderByType(format.getString(MediaFormat.KEY_MIME));
+            decoder.configure(format, null, null, 0);
+            decoder.start();
+
+            ByteArrayOutputStream pcmOut = new ByteArrayOutputStream();
+            MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
+            boolean sawInputEos = false;
+            boolean sawOutputEos = false;
+            final int TIMEOUT_US = 10000;
+            int consecutiveTimeout = 0;
+
+            while (!sawOutputEos) {
+                if (!sawInputEos) {
+                    int inIdx = decoder.dequeueInputBuffer(TIMEOUT_US);
+                    if (inIdx >= 0) {
+                        ByteBuffer inBuf = decoder.getInputBuffer(inIdx);
+                        if (inBuf == null) break;
+                        int sampleSize = extractor.readSampleData(inBuf, 0);
+                        if (sampleSize < 0) {
+                            decoder.queueInputBuffer(inIdx, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM);
+                            sawInputEos = true;
+                        } else {
+                            long pts = extractor.getSampleTime();
+                            decoder.queueInputBuffer(inIdx, 0, sampleSize, pts, 0);
+                            extractor.advance();
+                        }
+                    }
+                }
+
+                int outIdx = decoder.dequeueOutputBuffer(info, TIMEOUT_US);
+                if (outIdx == MediaCodec.INFO_TRY_AGAIN_LATER) {
+                    if (++consecutiveTimeout > 50) break; // 防止解码器卡死导致死循环
+                    continue;
+                }
+                consecutiveTimeout = 0;
+                if (outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                    MediaFormat outFormat = decoder.getOutputFormat();
+                    if (outFormat.containsKey(MediaFormat.KEY_SAMPLE_RATE)) {
+                        sampleRate = outFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE);
+                    }
+                    if (outFormat.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) {
+                        channels = outFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT);
+                    }
+                    continue;
+                }
+                if (outIdx < 0) continue;
+
+                ByteBuffer outBuf = decoder.getOutputBuffer(outIdx);
+                if (outBuf != null && info.size > 0) {
+                    byte[] chunk = new byte[info.size];
+                    outBuf.get(chunk);
+                    pcmOut.write(chunk, 0, info.size);
+                }
+                decoder.releaseOutputBuffer(outIdx, false);
+                if ((info.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
+                    sawOutputEos = true;
+                }
+            }
+
+            byte[] pcm = pcmOut.toByteArray();
+            if (pcm.length == 0) return null;
+            return new WavInfo(pcm, sampleRate, channels, 16);
+        } catch (Exception e) {
+            Log.e(TAG, "解码压缩音频失败: " + file.getName(), e);
+            return null;
+        } finally {
+            try { if (decoder != null) { decoder.stop(); decoder.release(); } } catch (Exception ignore) {}
+            try { if (extractor != null) extractor.release(); } catch (Exception ignore) {}
+        }
     }
 
     private byte[] buildWavHeader(int pcmDataLength, int sampleRate, int channels, int bitsPerSample) {
@@ -1500,7 +1667,7 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
         if (lineName == null || lineName.isEmpty()) return;
         List<LineToken> tokens = tokenizeLineName(lineName);
         if (tokens == null) {
-            items.add(new PlaybackItem(lineName, PlaybackItem.Type.TTS_CN));
+            items.add(new PlaybackItem(lineName, PlaybackItem.Type.TTS_EN));
             return;
         }
         boolean hasRoute = false;
@@ -1515,7 +1682,7 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
                 case LETTER:
                     int eres = enLetterRes(t.letter);
                     if (eres != 0) items.add(new PlaybackItem(eres));
-                    else items.add(new PlaybackItem(String.valueOf(t.letter), PlaybackItem.Type.TTS_CN));
+                    else items.add(new PlaybackItem(String.valueOf(t.letter), PlaybackItem.Type.TTS_EN));
                     break;
             }
         }
@@ -1557,13 +1724,8 @@ public class TTSUtils implements TextToSpeech.OnInitListener {
         if (file != null) {
             items.add(new PlaybackItem(file.getAbsolutePath(), true));
         } else {
-            // 英文语音包缺失/下载中：改用站名英文（缺省取拼音）由英文 TTS 合成
-            String enName = VoicePackManager.getInstance(context).getStationEnglish(stationName);
-            if (enName == null || enName.isEmpty()) {
-                items.add(new PlaybackItem(stationName, PlaybackItem.Type.TTS_CN));
-            } else {
-                items.add(new PlaybackItem(enName, PlaybackItem.Type.TTS_CN));
-            }
+            // 英文语音包缺失/下载中：改用中文站名播报（避免英文/拼音被读成拼音）
+            items.add(new PlaybackItem(stationName, PlaybackItem.Type.TTS_CN));
         }
     }
 

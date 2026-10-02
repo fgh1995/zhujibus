@@ -241,6 +241,45 @@
         }
         .hidden { display: none !important; }
 
+        /* 表头排序指示 */
+        th[data-key] { cursor: pointer; user-select: none; }
+        th[data-key]:hover { color: #c9d1d9; }
+        .sort-ind { font-size: 10px; color: #58a6ff; margin-left: 2px; }
+
+        /* 地区排名面板 */
+        .rank-panel {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            padding: 14px 16px;
+            margin-bottom: 20px;
+        }
+        .rank-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 14px;
+            color: #f0f6fc;
+            margin-bottom: 12px;
+        }
+        .rank-sub { font-size: 11px; color: #8b949e; }
+        .rank-list { display: flex; flex-direction: column; gap: 10px; }
+        .rank-item { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+        .rank-no {
+            width: 22px; height: 22px; flex-shrink: 0;
+            border-radius: 50%;
+            background: #21262d; color: #8b949e;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 11px;
+        }
+        .rank-item.top1 .rank-no { background: #1f3a5f; color: #79c0ff; }
+        .rank-item.top2 .rank-no { background: #1a3a2a; color: #3fb950; }
+        .rank-item.top3 .rank-no { background: #3a1a1a; color: #f85149; }
+        .rank-name { flex: 1; min-width: 0; color: #c9d1d9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .rank-count { color: #8b949e; font-size: 12px; flex-shrink: 0; }
+        .rank-bar { height: 4px; background: #21262d; border-radius: 2px; margin-top: 4px; overflow: hidden; }
+        .rank-bar-fill { height: 100%; background: #58a6ff; border-radius: 2px; }
+
         /* ===== 移动端适配 ===== */
         @media (max-width: 768px) {
             body { padding: 16px 12px; }
@@ -306,20 +345,28 @@
             <div class="stat-card offline"><div class="number" id="offlineCount">0</div><div class="label">离线</div></div>
         </div>
 
+        <!-- 地区排名面板 -->
+        <div class="rank-panel" id="rankPanel">
+            <div class="rank-head"><span>📊 地区排名（按在线设备数）</span><span class="rank-sub" id="rankTime"></span></div>
+            <div class="rank-list" id="regionRankList">加载中...</div>
+        </div>
+
         <!-- 桌面端表格 -->
         <div class="table-wrapper">
             <table>
                 <thead><tr>
-                    <th>编号</th>
-                    <th>安卓安装标识</th>
-                    <th>状态</th>
-                    <th>版本</th>
-                    <th>首次连接</th>
-                    <th>最后心跳</th>
+                    <th data-key="id" onclick="sortBy('id')">编号 <span class="sort-ind" id="sort-id"></span></th>
+                    <th data-key="android_id" onclick="sortBy('android_id')">安卓标识 <span class="sort-ind" id="sort-android_id"></span></th>
+                    <th data-key="status" onclick="sortBy('status')">状态 <span class="sort-ind" id="sort-status"></span></th>
+                    <th data-key="app_version" onclick="sortBy('app_version')">版本 <span class="sort-ind" id="sort-app_version"></span></th>
+                    <th data-key="region_name" onclick="sortBy('region_name')">地区 <span class="sort-ind" id="sort-region_name"></span></th>
+                    <th data-key="region_real_name" onclick="sortBy('region_real_name')">真实定位 <span class="sort-ind" id="sort-region_real_name"></span></th>
+                    <th data-key="first_seen" onclick="sortBy('first_seen')">首次连接 <span class="sort-ind" id="sort-first_seen"></span></th>
+                    <th data-key="last_heartbeat" onclick="sortBy('last_heartbeat')">最后心跳 <span class="sort-ind" id="sort-last_heartbeat"></span></th>
                     <th>备注</th>
                     <th>操作</th>
                 </tr></thead>
-                <tbody id="userTableBody"><tr><td colspan="8" style="text-align:center;color:#8b949e;">加载中...</td></tr></tbody>
+                <tbody id="userTableBody"><tr><td colspan="10" style="text-align:center;color:#8b949e;">加载中...</td></tr></tbody>
             </table>
         </div>
 
@@ -330,7 +377,7 @@
     </div>
 </div>
 <script>
-    let isLoggedIn = false, refreshInterval = null;
+    let isLoggedIn = false, refreshInterval = null, lastData = null;
     const TOKEN_KEY = 'ws_admin_token';
 
     function getToken() {
@@ -367,8 +414,10 @@
                 document.getElementById('loginBox').classList.add('hidden');
                 document.getElementById('content').classList.remove('hidden');
                 renderData(data);
+                updateSortIndicators();
+                loadRegionRank();
                 if (refreshInterval) clearInterval(refreshInterval);
-                refreshInterval = setInterval(loadData, 5000);
+                refreshInterval = setInterval(() => { loadData(); loadRegionRank(); }, 5000);
             })
             .catch(err => { if (err !== 'unauthorized') console.error('登录失败:', err); });
     }
@@ -402,6 +451,7 @@
     }
 
     function renderData(data) {
+        lastData = data;
         document.getElementById('totalCount').textContent = data.total || 0;
         document.getElementById('onlineCount').textContent = data.online || 0;
         document.getElementById('offlineCount').textContent = data.offline || 0;
@@ -414,14 +464,20 @@
         }
 
         if (!data.users || data.users.length === 0) {
-            document.getElementById('userTableBody').innerHTML = '<tr><td colspan="8" style="text-align:center;color:#8b949e;">暂无用户</td></tr>';
+            document.getElementById('userTableBody').innerHTML = '<tr><td colspan="10" style="text-align:center;color:#8b949e;">暂无用户</td></tr>';
             document.getElementById('userCards').innerHTML = '<div style="text-align:center;color:#8b949e;padding:20px;">暂无用户</div>';
             return;
         }
 
+        // 按当前排序状态对客户端排序（不影响服务端原始数据）
+        const users = sortUsers(data.users.slice(), sortState.key, sortState.asc);
+
+        const regionCell = (name) =>
+            '<td style="font-size:13px;">' + (name ? escapeHtml(name) : '<span style="color:#8b949e;">-</span>') + '</td>';
+
         // 渲染桌面端表格
         let tableHtml = '';
-        data.users.forEach(user => {
+        users.forEach(user => {
             const statusClass = user.status === 'online' ? 'status-online' : 'status-offline';
             const statusText = user.status === 'online' ? '🟢 在线' : '🔴 离线';
             const firstSeen = user.first_seen ? formatTime(user.first_seen) : '-';
@@ -437,6 +493,8 @@
                 '<td style="font-family:monospace;font-size:13px;">' + escapeHtml(androidIdDisplay) + '</td>' +
                 '<td><span class="status-badge ' + statusClass + '">' + statusText + '</span></td>' +
                 '<td>' + appVersion + '</td>' +
+                regionCell(user.region_name) +
+                regionCell(user.region_real_name) +
                 '<td style="font-size:12px;">' + firstSeen + '</td>' +
                 '<td style="font-size:12px;">' + lastHeartbeat + '</td>' +
                 '<td>' +
@@ -450,7 +508,7 @@
 
         // 渲染移动端卡片
         let cardsHtml = '';
-        data.users.forEach(user => {
+        users.forEach(user => {
             const statusClass = user.status === 'online' ? 'status-online' : 'status-offline';
             const statusText = user.status === 'online' ? '🟢 在线' : '🔴 离线';
             const firstSeen = user.first_seen ? formatTime(user.first_seen) : '-';
@@ -460,6 +518,12 @@
             const note = user.note || '';
             const appVersion = user.app_version
                 ? '<span class="version-tag">' + escapeHtml(user.app_version) + '</span>'
+                : '<span style="color:#8b949e;">-</span>';
+            const regionText = user.region_name
+                ? escapeHtml(user.region_name)
+                : '<span style="color:#8b949e;">-</span>';
+            const realText = user.region_real_name
+                ? escapeHtml(user.region_real_name)
                 : '<span style="color:#8b949e;">-</span>';
 
             cardsHtml += '<div class="user-card">' +
@@ -474,6 +538,14 @@
                 '<div class="user-card-row">' +
                     '<span class="user-card-label">版本</span>' +
                     '<span class="user-card-value">' + appVersion + '</span>' +
+                '</div>' +
+                '<div class="user-card-row">' +
+                    '<span class="user-card-label">地区</span>' +
+                    '<span class="user-card-value">' + regionText + '</span>' +
+                '</div>' +
+                '<div class="user-card-row">' +
+                    '<span class="user-card-label">真实定位</span>' +
+                    '<span class="user-card-value">' + realText + '</span>' +
                 '</div>' +
                 '<div class="user-card-row">' +
                     '<span class="user-card-label">首次连接</span>' +
@@ -492,6 +564,80 @@
             '</div>';
         });
         document.getElementById('userCards').innerHTML = cardsHtml;
+    }
+
+    // 排序状态：key=字段，asc=true 升序
+    let sortState = { key: 'id', asc: true };
+    const SORT_KEYS = ['id', 'android_id', 'status', 'app_version', 'region_name', 'region_real_name', 'first_seen', 'last_heartbeat'];
+
+    function sortBy(key) {
+        if (!SORT_KEYS.includes(key)) return;
+        if (sortState.key === key) {
+            sortState.asc = !sortState.asc;
+        } else {
+            sortState.key = key;
+            sortState.asc = true;
+        }
+        updateSortIndicators();
+        // 用最近一次数据重渲染（无需重新请求）
+        if (lastData) renderData(lastData);
+    }
+
+    function updateSortIndicators() {
+        SORT_KEYS.forEach(k => {
+            const el = document.getElementById('sort-' + k);
+            if (el) el.textContent = (k === sortState.key) ? (sortState.asc ? '▲' : '▼') : '';
+        });
+    }
+
+    function sortUsers(users, key, asc) {
+        return users.sort((a, b) => {
+            let va = a[key], vb = b[key];
+            if (key === 'first_seen' || key === 'last_heartbeat') {
+                va = va ? new Date(va).getTime() || 0 : 0;
+                vb = vb ? new Date(vb).getTime() || 0 : 0;
+            } else {
+                va = (va == null ? '' : String(va));
+                vb = (vb == null ? '' : String(vb));
+            }
+            let cmp = (va < vb) ? -1 : (va > vb ? 1 : 0);
+            return asc ? cmp : -cmp;
+        });
+    }
+
+    // 地区排名面板数据加载
+    function loadRegionRank() {
+        if (!isLoggedIn) return;
+        apiFetch('/api/regions')
+            .then(res => res.json())
+            .then(d => {
+                if (!d || !d.success) return;
+                const list = d.regions || [];
+                const el = document.getElementById('regionRankList');
+                if (!list.length) {
+                    el.innerHTML = '<div style="color:#8b949e;font-size:13px;">暂无地区数据</div>';
+                    return;
+                }
+                const max = list[0].count || 1;
+                let html = '';
+                list.forEach((r, i) => {
+                    const cls = i === 0 ? 'top1' : (i === 1 ? 'top2' : (i === 2 ? 'top3' : ''));
+                    const pct = Math.max(6, Math.round(r.count / max * 100));
+                    html += '<div class="rank-item ' + cls + '">' +
+                        '<span class="rank-no">' + (i + 1) + '</span>' +
+                        '<div style="flex:1;min-width:0;">' +
+                            '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+                                '<span class="rank-name">' + escapeHtml(r.name || r.adCode || '未知') + '</span>' +
+                                '<span class="rank-count">' + r.count + ' 台</span>' +
+                            '</div>' +
+                            '<div class="rank-bar"><div class="rank-bar-fill" style="width:' + pct + '%"></div></div>' +
+                        '</div>' +
+                    '</div>';
+                });
+                el.innerHTML = html;
+                document.getElementById('rankTime').textContent = '更新：' + formatTime(new Date());
+            })
+            .catch(() => {});
     }
 
     function formatTime(t) {

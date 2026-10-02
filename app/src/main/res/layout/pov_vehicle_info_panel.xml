@@ -19,22 +19,26 @@
             android:gravity="center_vertical">
 
             <ImageView
+                android:id="@+id/pov_logo_1"
                 android:layout_width="@dimen/_15sdp"
                 android:layout_height="@dimen/_15sdp"
                 android:layout_marginStart="@dimen/_5sdp"
                 android:layout_marginEnd="@dimen/_3sdp"
                 android:layout_gravity="center"
-                android:contentDescription="TODO"
+                android:contentDescription="公交标识1"
                 android:src="@drawable/icon_zhuji_bus_city" />
 
             <ImageView
+                android:id="@+id/pov_logo_2"
                 android:layout_width="@dimen/_15sdp"
                 android:layout_height="@dimen/_15sdp"
                 android:layout_marginEnd="@dimen/_3sdp"
                 android:layout_gravity="center"
+                android:contentDescription="公交标识2"
                 android:src="@drawable/icon_zhuji_bus_ur" />
 
             <TextView
+                android:id="@+id/pov_company_text"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:textSize="@dimen/_8ssp"

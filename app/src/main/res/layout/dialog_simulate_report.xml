@@ -1,0 +1,347 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 模拟报站设置页：复用外部 dialog_container 的 nav_panel_bg 作为面板，本布局透明；
+     文本尺寸 / 按钮配色（bg_accent_btn 青色）对齐“报站”页面风格；数值可直接输入编辑 -->
+<androidx.core.widget.NestedScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/transparent"
+    android:fillViewport="true"
+    android:scrollbars="vertical"
+    android:overScrollMode="ifContentScrolls">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="12dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="10dp">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="模拟报站设置"
+                android:textColor="#FFFFFF"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/sim_toggle"
+                android:layout_width="wrap_content"
+                android:layout_height="32dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:background="@drawable/bg_accent_btn"
+                app:backgroundTint="@null"
+                android:text="开启位置模拟"
+                android:textColor="#FFFFFF"
+                android:textSize="13sp"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:layout_marginEnd="8dp" />
+
+            <ImageButton
+                android:id="@+id/sim_close"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:src="@drawable/ic_close"
+                android:tint="#FFFFFF"
+                android:contentDescription="关闭"
+                android:scaleType="centerInside" />
+        </LinearLayout>
+
+        <!-- 时速 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="@drawable/radio_mode_bg"
+            android:padding="8dp"
+            android:layout_marginBottom="10dp">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="时速"
+                android:textColor="#FFFFFF"
+                android:textSize="15sp" />
+
+            <Button
+                android:id="@+id/sim_speed_minus"
+                android:layout_width="36dp"
+                android:layout_height="32dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:background="@drawable/bg_accent_btn"
+                app:backgroundTint="@null"
+                android:text="-"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:textColor="#FFFFFF"
+                android:padding="0dp" />
+
+            <EditText
+                android:id="@+id/sim_speed_value"
+                android:layout_width="48dp"
+                android:layout_height="32dp"
+                android:gravity="center"
+                android:text="30"
+                android:textSize="16sp"
+                android:textColor="#FFFFFF"
+                android:textColorHint="#6A6F90"
+                android:background="@drawable/chip_bg"
+                android:inputType="number"
+                android:singleLine="true"
+                android:padding="0dp"
+                android:layout_marginStart="6dp" />
+
+            <Button
+                android:id="@+id/sim_speed_plus"
+                android:layout_width="36dp"
+                android:layout_height="32dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:background="@drawable/bg_accent_btn"
+                app:backgroundTint="@null"
+                android:text="+"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:textColor="#FFFFFF"
+                android:padding="0dp"
+                android:layout_marginStart="6dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="km/h"
+                android:textColor="#9AA0BC"
+                android:textSize="12sp"
+                android:layout_marginStart="8dp" />
+        </LinearLayout>
+
+        <!-- 起点站停留时长 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="@drawable/radio_mode_bg"
+            android:padding="8dp"
+            android:layout_marginBottom="10dp">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="起点站停留"
+                android:textColor="#FFFFFF"
+                android:textSize="15sp" />
+
+            <Button
+                android:id="@+id/sim_start_minus"
+                android:layout_width="36dp"
+                android:layout_height="32dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:background="@drawable/bg_accent_btn"
+                app:backgroundTint="@null"
+                android:text="-"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:textColor="#FFFFFF"
+                android:padding="0dp" />
+
+            <EditText
+                android:id="@+id/sim_start_value"
+                android:layout_width="48dp"
+                android:layout_height="32dp"
+                android:gravity="center"
+                android:text="0"
+                android:textSize="16sp"
+                android:textColor="#FFFFFF"
+                android:textColorHint="#6A6F90"
+                android:background="@drawable/chip_bg"
+                android:inputType="number"
+                android:singleLine="true"
+                android:padding="0dp"
+                android:layout_marginStart="6dp" />
+
+            <Button
+                android:id="@+id/sim_start_plus"
+                android:layout_width="36dp"
+                android:layout_height="32dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:background="@drawable/bg_accent_btn"
+                app:backgroundTint="@null"
+                android:text="+"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:textColor="#FFFFFF"
+                android:padding="0dp"
+                android:layout_marginStart="6dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="秒"
+                android:textColor="#9AA0BC"
+                android:textSize="12sp"
+                android:layout_marginStart="8dp" />
+        </LinearLayout>
+
+        <!-- 终点站停留时长 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="@drawable/radio_mode_bg"
+            android:padding="8dp"
+            android:layout_marginBottom="10dp">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="终点站停留"
+                android:textColor="#FFFFFF"
+                android:textSize="15sp" />
+
+            <Button
+                android:id="@+id/sim_terminal_minus"
+                android:layout_width="36dp"
+                android:layout_height="32dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:background="@drawable/bg_accent_btn"
+                app:backgroundTint="@null"
+                android:text="-"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:textColor="#FFFFFF"
+                android:padding="0dp" />
+
+            <EditText
+                android:id="@+id/sim_terminal_value"
+                android:layout_width="48dp"
+                android:layout_height="32dp"
+                android:gravity="center"
+                android:text="0"
+                android:textSize="16sp"
+                android:textColor="#FFFFFF"
+                android:textColorHint="#6A6F90"
+                android:background="@drawable/chip_bg"
+                android:inputType="number"
+                android:singleLine="true"
+                android:padding="0dp"
+                android:layout_marginStart="6dp" />
+
+            <Button
+                android:id="@+id/sim_terminal_plus"
+                android:layout_width="36dp"
+                android:layout_height="32dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:background="@drawable/bg_accent_btn"
+                app:backgroundTint="@null"
+                android:text="+"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:textColor="#FFFFFF"
+                android:padding="0dp"
+                android:layout_marginStart="6dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="秒"
+                android:textColor="#9AA0BC"
+                android:textSize="12sp"
+                android:layout_marginStart="8dp" />
+        </LinearLayout>
+
+        <!-- 到站停留间隔 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="@drawable/radio_mode_bg"
+            android:padding="8dp"
+            android:layout_marginBottom="10dp">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="到站停留"
+                android:textColor="#FFFFFF"
+                android:textSize="15sp" />
+
+            <Button
+                android:id="@+id/sim_arrival_minus"
+                android:layout_width="36dp"
+                android:layout_height="32dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:background="@drawable/bg_accent_btn"
+                app:backgroundTint="@null"
+                android:text="-"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:textColor="#FFFFFF"
+                android:padding="0dp" />
+
+            <EditText
+                android:id="@+id/sim_arrival_value"
+                android:layout_width="48dp"
+                android:layout_height="32dp"
+                android:gravity="center"
+                android:text="0"
+                android:textSize="16sp"
+                android:textColor="#FFFFFF"
+                android:textColorHint="#6A6F90"
+                android:background="@drawable/chip_bg"
+                android:inputType="number"
+                android:singleLine="true"
+                android:padding="0dp"
+                android:layout_marginStart="6dp" />
+
+            <Button
+                android:id="@+id/sim_arrival_plus"
+                android:layout_width="36dp"
+                android:layout_height="32dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:background="@drawable/bg_accent_btn"
+                app:backgroundTint="@null"
+                android:text="+"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:textColor="#FFFFFF"
+                android:padding="0dp"
+                android:layout_marginStart="6dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="秒"
+                android:textColor="#9AA0BC"
+                android:textSize="12sp"
+                android:layout_marginStart="8dp" />
+        </LinearLayout>
+
+    </LinearLayout>
+
+</androidx.core.widget.NestedScrollView>

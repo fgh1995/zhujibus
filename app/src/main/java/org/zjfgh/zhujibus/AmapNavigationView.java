@@ -56,6 +56,7 @@ import com.amap.api.navi.model.NaviLatLng;
 import com.amap.api.navi.model.NaviPoi;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -262,6 +263,25 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
         if (isGpsMode && aMap != null) {
             applyNavigationCameraPerspective();
         }
+    }
+
+    /**
+     * ⭐ 外部（统一定位源 GpsWarmingUp）驱动车标与相机跟随。
+     * 用于 POV 小地图：真实 GPS 与模拟位置都经 GpsWarmingUp 下发，而 POV 的 AmapNavigationView
+     * 实例自身不跑模拟（doSimStep 在线路详情页实例上），因此由 CameraActivity 把位置转发到此处，
+     * 让 POV 小地图也能跟随——包括模拟位置。
+     */
+    public void drawCarFromExternal(Location location) {
+        if (location == null || carOverlay == null || aMap == null) return;
+        LatLng pos = new LatLng(location.getLatitude(), location.getLongitude());
+        float bearing = location.getBearing();
+        if (bearing < 0 || bearing > 360) bearing = 0f;
+        carOverlay.draw(aMap, pos, bearing);
+    }
+
+    /** POV 小地图：开启外部车标跟随时保留其当前缩放/倾角，避免被强制改视角 */
+    public void enableExternalCarFollow() {
+        if (carOverlay != null) carOverlay.setPreserveCamera(true);
     }
 
     /**
@@ -1138,6 +1158,16 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
     private int simSegIndex = 0;
     private double simSegFrac = 0.0;
     private float simSpeedKmh = 30f;
+    private int simStartDwellSec = 0;     // 起点站停留时长（秒）
+    private int simTerminalDwellSec = 0;  // 终点站停留时长（秒）
+    private int simArrivalDwellSec = 0;   // 到站停留间隔（秒）：中途站到站停留时长，0 表示不停留
+    private int simDwellRemaining = 0;    // 当前停留剩余秒数（>0 表示原地停留、速度 0）
+    private boolean simAtTerminal = false;
+    private boolean simStartDwellPending = false; // 循环回到起点后是否触发起点停留
+    private List<LatLng> simStationPositions = null; // 模拟所用站点坐标（含起终点，用于匹配路线点）
+    private int[] simStationRealIndices = null; // 模拟站点对应的【真实站点列表】下标（与 simStationPositions 等长，用于修正坐标过滤导致的下标错位）
+    private int[] simStationRouteIdxAll = null; // 每个站点（含起终点）对应的路线点索引（与站点顺序等长），用于判定"到站"
+    private int simStationPtr = 0;         // 已到达/下一个中途站指针（station-order 索引，0=起点，size-1=终点）
 
     public boolean isSimulating() {
         return simulating;
@@ -1147,25 +1177,78 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
      * 开始沿当前公交路线（routePoints）模拟 GPS 位置变化，循环行驶。
      * 位置通过统一的 notifyLocationUpdated 出口注入，与真实 GPS 走相同下游（车标 + 报站）。
      * @param speedKmh 模拟行驶速度（km/h），<=0 时按 30 处理
+     * @param startDwellSec 起点站停留时长（秒），0 表示不停留
+     * @param terminalDwellSec 终点站停留时长（秒），0 表示不停留
+     * @param arrivalDwellSec 到站停留间隔（秒）：每个中途站到站后停留时长，0 表示不停留
      */
-    public void startLocationSimulation(float speedKmh) {
-        if (simulating) return;
+    public void startLocationSimulation(float speedKmh, int startDwellSec, int terminalDwellSec, int arrivalDwellSec) {
+        if (simulating) stopLocationSimulation();
         if (routePoints == null || routePoints.size() < 2) {
             Log.w(TAG, "[SIM] 未载入公交路线，无法模拟");
             return;
         }
         simulating = true;
         simSpeedKmh = speedKmh > 0 ? speedKmh : 30f;
+        simStartDwellSec = Math.max(0, startDwellSec);
+        simTerminalDwellSec = Math.max(0, terminalDwellSec);
+        simArrivalDwellSec = Math.max(0, arrivalDwellSec);
+        simDwellRemaining = 0;
+        simAtTerminal = false;
+        simStartDwellPending = true; // 开局即在起点停留
         simSegIndex = 0;
         simSegFrac = 0.0;
+        // 预计算每个站点对应的路线点索引（与站点顺序等长），用于判定"到站"
+        simStationRouteIdxAll = computeStationRouteIndices(simStationPositions);
+        simStationPtr = 0;
         simExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "gps-sim");
             t.setDaemon(true);
             return t;
         });
-        // ⭐ 与真实 GPS 保持一致：1Hz（1000ms），避免更高频率造成差异
-        simExecutor.scheduleAtFixedRate(this::simTick, 0, 1000, TimeUnit.MILLISECONDS);
-        Log.d(TAG, "[SIM] 开始模拟位置变化 速度=" + simSpeedKmh + "km/h (1Hz)");
+        // ⭐ 模拟位置生成 5Hz（200ms），让地图车标/相机获得高频平滑数据；
+        //    POV 端文本等其它数据在 CameraActivity.gpsListener 中限频到 1Hz，互不影响。
+        //    注：路径推进速度由 simSpeedKmh 决定，与步频无关，提高步频仅增加采样密度。
+        simExecutor.scheduleAtFixedRate(this::simTick, 0, 200, TimeUnit.MILLISECONDS);
+        Log.d(TAG, "[SIM] 开始模拟位置变化 速度=" + simSpeedKmh + "km/h 起点停留=" + simStartDwellSec
+                + "s 终点停留=" + simTerminalDwellSec + "s 到站停留=" + simArrivalDwellSec
+                + "s (5Hz)");
+    }
+
+    /** 兼容旧调用：无停留时长 */
+    public void startLocationSimulation(float speedKmh) {
+        startLocationSimulation(speedKmh, 0, 0, 0);
+    }
+
+    /** 设置模拟所用站点坐标（含起终点）及其对应的真实站点列表下标，用于把中途站匹配到路线点以触发到站停留，
+     *  并保证"到站/途中"标记回传的是真实站点下标（修正坐标过滤导致的下标错位）。 */
+    public void setSimulationStations(List<LatLng> stations, int[] realIndices) {
+        this.simStationPositions = (stations != null) ? new ArrayList<>(stations) : null;
+        this.simStationRealIndices = (realIndices != null) ? realIndices.clone() : null;
+    }
+
+    /** 把每个站点（含起终点）匹配到最近的路线点索引，返回与 stations 等长的数组（下标即站点顺序）。 */
+    private int[] computeStationRouteIndices(List<LatLng> stations) {
+        if (stations == null || stations.isEmpty() || routePoints == null || routePoints.size() < 2) {
+            return new int[0];
+        }
+        int n = routePoints.size();
+        int[] arr = new int[stations.size()];
+        for (int i = 0; i < stations.size(); i++) {
+            LatLng s = stations.get(i);
+            int best = 0;
+            double bestDist = Double.MAX_VALUE;
+            if (s != null) {
+                for (int j = 0; j < n; j++) {
+                    double d = computeDistanceMeters(s, routePoints.get(j));
+                    if (d < bestDist) {
+                        bestDist = d;
+                        best = j;
+                    }
+                }
+            }
+            arr[i] = best;
+        }
+        return arr;
     }
 
     /** 停止模拟位置变化 */
@@ -1186,7 +1269,31 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
     private void doSimStep() {
         if (!simulating || routePoints == null || routePoints.size() < 2) return;
         int n = routePoints.size();
-        // 1 秒内应行驶的距离（米），与真实 GPS 1Hz 对齐
+
+        // 1) 停留计时中：原地不动，速度置 0（用于起点站 / 终点站 / 中途站停留）
+        if (simDwellRemaining > 0) {
+            simDwellRemaining--;
+            postSimLocation(0f, currentDwellStationIndex(), true); // 停留中即"在站内"，标记 isArrived
+            if (simDwellRemaining == 0 && simAtTerminal) {
+                // 终点站停留结束 -> 回到起点循环，下一帧触发起点停留
+                simSegIndex = 0;
+                simSegFrac = 0.0;
+                simAtTerminal = false;
+                simStartDwellPending = true;
+                simStationPtr = 0; // 重置中途站停留指针
+            }
+            return;
+        }
+
+        // 2) 起点站停留（每个循环首帧、发车前停留）
+        if (simStartDwellPending && !simAtTerminal) {
+            simStartDwellPending = false;
+            simDwellRemaining = simStartDwellSec;
+            postSimLocation(0f, 0, true); // 在起点站内
+            return;
+        }
+
+        // 3) 推进位置（1 秒内应行驶的距离，与真实 GPS 1Hz 对齐）
         double stepMeters = (simSpeedKmh / 3.6) * 1.0;
         while (stepMeters > 0 && simSegIndex < n - 1) {
             LatLng p1 = routePoints.get(simSegIndex);
@@ -1207,17 +1314,69 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
                 stepMeters = 0;
             }
         }
-        // 到终点后回到起点循环，便于持续演示报站
-        if (simSegIndex >= n - 1) {
-            simSegIndex = 0;
-            simSegFrac = 0;
+
+        // 3.5) 中途站到站停留：推进后若越过下一个中途站对应的路线点，原地停留并标记"到站"
+        if (simArrivalDwellSec > 0 && simStationRouteIdxAll != null
+                && simStationRouteIdxAll.length >= 3) {
+            int nextStation = simStationPtr + 1; // station-order 指针（0=起点，size-1=终点）
+            // 仅对"中途站"触发停留：跳过起点(0)与终点(size-1)
+            if (nextStation > 0 && nextStation < simStationRouteIdxAll.length - 1
+                    && simSegIndex >= simStationRouteIdxAll[nextStation]) {
+                simDwellRemaining = simArrivalDwellSec;
+                simStationPtr = nextStation; // 标记已到达该中途站
+                postSimLocation(0f, nextStation, true);
+                return;
+            }
         }
-        LatLng p1 = routePoints.get(simSegIndex);
-        LatLng p2 = routePoints.get(Math.min(simSegIndex + 1, n - 1));
-        double lat = p1.latitude + (p2.latitude - p1.latitude) * simSegFrac;
-        double lng = p1.longitude + (p2.longitude - p1.longitude) * simSegFrac;
-        float bearing = computeBearing(p1, p2);
-        float speed = simSpeedKmh / 3.6f;
+
+        // 4) 到达终点站：停留后由步骤 1 循环回起点
+        if (simSegIndex >= n - 1) {
+            simAtTerminal = true;
+            simDwellRemaining = simTerminalDwellSec;
+            postSimLocation(simSpeedKmh / 3.6f, lastStationIndex(), true); // 在终点站内
+            return;
+        }
+
+        // 5) 正常行驶：不在任何站内，标记 isArrived=false
+        postSimLocation(simSpeedKmh / 3.6f, -1, false);
+    }
+
+    /** 当前正处于停留的站点 order 索引（用于标记"到站"）。 */
+    private int currentDwellStationIndex() {
+        int last = (simStationPositions != null) ? simStationPositions.size() - 1 : 0;
+        if (simAtTerminal) return last;          // 终点站停留
+        if (simStationPtr <= 0) return 0;        // 起点站停留（尚未越过任何中途站）
+        return simStationPtr;                    // 中途站停留（simStationPtr 已被置为该站 order）
+    }
+
+    /** 终点站 order 索引。 */
+    private int lastStationIndex() {
+        return (simStationPositions != null) ? simStationPositions.size() - 1 : 0;
+    }
+
+    /** 按当前 simSegIndex / simSegFrac 合成位置并以给定速度注入（与真实 GPS 同下游）。
+     *  @param stationIndex 当前所在站点 order 索引（-1 表示不在任何站）
+     *  @param atStation   是否正处于站内（isArrived）：true=在 stationIndex 站，false=行驶中 */
+    private void postSimLocation(float speed, int stationIndex, boolean atStation) {
+        int n = routePoints.size();
+        LatLng p1, p2;
+        double lat, lng;
+        if (atStation && stationIndex >= 0 && simStationPositions != null
+                && stationIndex < simStationPositions.size()) {
+            // ⭐ 到站：直接定位到该站坐标，确保下游"到站"判定与站点列表显示精准，
+            //    不再依赖路线点相对站点坐标的偏移（这是此前"模拟位置传入错误"的根因）。
+            LatLng sp = simStationPositions.get(stationIndex);
+            lat = sp.latitude;
+            lng = sp.longitude;
+            p1 = routePoints.get(Math.min(simSegIndex, n - 1));
+            p2 = p1;
+        } else {
+            p1 = routePoints.get(simSegIndex);
+            p2 = routePoints.get(Math.min(simSegIndex + 1, n - 1));
+            lat = p1.latitude + (p2.latitude - p1.latitude) * simSegFrac;
+            lng = p1.longitude + (p2.longitude - p1.longitude) * simSegFrac;
+        }
+        float bearing = (p1 != p2) ? computeBearing(p1, p2) : 0f;
         Location loc = new Location("gps_sim");
         loc.setLatitude(lat);
         loc.setLongitude(lng);
@@ -1226,6 +1385,27 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
         loc.setSpeed(speed);
         loc.setBearing(bearing);
         loc.setAccuracy(5f);
+        // ⭐ 显式携带"到站标记"，供下游 handleGpsLocation 直接判定 isArrived 并精确定位站点列表车标，
+        //    避免路线点偏移 / 坐标过滤导致半径匹配与下标错位。
+        //    注：回传的是【真实站点列表】下标：到站时为该站；途中时为"正在驶离"的上一站（simStationPtr），
+        //    使列表车标在"途中"仍吸附在离站一侧（与报站口径一致），而不是吸附到几何最近的下一站。
+        Bundle simExtra = loc.getExtras();
+        if (simExtra == null) {
+            simExtra = new Bundle();
+            loc.setExtras(simExtra);
+        }
+        int simListIndex;
+        if (atStation && stationIndex >= 0 && simStationRealIndices != null
+                && stationIndex < simStationRealIndices.length) {
+            simListIndex = simStationRealIndices[stationIndex];
+        } else {
+            // 途中：使用已驶离的站点（simStationPtr 为模拟顺序下标）对应的真实站点下标
+            int ptr = simStationPtr;
+            simListIndex = (simStationRealIndices != null && ptr >= 0 && ptr < simStationRealIndices.length)
+                    ? simStationRealIndices[ptr] : stationIndex;
+        }
+        simExtra.putInt("sim_station_index", simListIndex);
+        simExtra.putBoolean("sim_arrived", atStation);
         // 关键：报站引擎由 GpsWarmingUp 驱动（gpsActivityListener -> handleGpsLocation），
         // 而非 AMapNavi 的 notifyLocationUpdated（后者在线路详情页并未挂监听，只会动车标）。
         // 因此把合成位置注入 GpsWarmingUp，走与真实 GPS 完全一致的下游（报站判断 + 地图定位）。

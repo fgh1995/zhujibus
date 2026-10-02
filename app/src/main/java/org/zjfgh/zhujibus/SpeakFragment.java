@@ -1,21 +1,30 @@
 package org.zjfgh.zhujibus;
 
+import android.net.Uri;
 import android.os.Bundle;
+import android.provider.DocumentsContract;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.SeekBar;
 import android.widget.TextView;
 
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.fragment.app.Fragment;
 
+import org.zjfgh.zhujibus.PermissionUtils;
+import org.zjfgh.zhujibus.VoicePackManager;
+
 import java.util.Locale;
 
 public class SpeakFragment extends Fragment {
+
     private static final String TAG = "SpeakFragment";
     private static final float DEFAULT_ENTER_STATION_RADIUS = 30.0f;
     private static final float DEFAULT_EXIT_STATION_RADIUS = 80.0f;
@@ -31,12 +40,25 @@ public class SpeakFragment extends Fragment {
     private SeekBar enterRadiusSeekBar;
     private SeekBar exitRadiusSeekBar;
 
+    // 语音包目录 UI
+    private ActivityResultLauncher<Uri> dirPickerLauncher;
+    private TextView voicePackPathText;
+
     // 数据
     private float enterStationRadius = DEFAULT_ENTER_STATION_RADIUS;
     private float exitStationRadius = DEFAULT_EXIT_STATION_RADIUS;
 
     public static SpeakFragment newInstance() {
         return new SpeakFragment();
+    }
+
+    @Override
+    public void onCreate(@Nullable Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        // SAF 目录选择器：用户选定语音包目录后回调
+        dirPickerLauncher = registerForActivityResult(
+                new ActivityResultContracts.OpenDocumentTree(),
+                this::onVoicePackDirPicked);
     }
 
     @Nullable
@@ -57,6 +79,7 @@ public class SpeakFragment extends Fragment {
             //   所以这里必须再绑一次，否则点击永远没反应）
             applyDistanceModeText();
             bindDistanceModeToggle();
+            initVoicePackDirUI(view);
         } catch (Exception e) {
             Log.e(TAG, "onViewCreated 失败", e);
         }
@@ -287,6 +310,57 @@ public class SpeakFragment extends Fragment {
     public interface OnRadiusChangedListener {
         void onEnterRadiusChanged(float radius);
         void onExitRadiusChanged(float radius);
+    }
+
+    // ===== 语音包目录选择 =====
+
+    /** 初始化语音包目录选择 UI，并刷新已选目录显示。 */
+    private void initVoicePackDirUI(View view) {
+        voicePackPathText = view.findViewById(R.id.voice_pack_path_text);
+        Button pickBtn = view.findViewById(R.id.btn_pick_voice_pack_dir);
+        refreshVoicePackPathText();
+        pickBtn.setOnClickListener(v -> {
+            // 适配各安卓版本请求存储读取权限；SAF 选择目录本身已具备访问能力，权限仅作合规
+            PermissionUtils.ensureStoragePermission(requireActivity());
+            dirPickerLauncher.launch(null);
+        });
+    }
+
+    private void refreshVoicePackPathText() {
+        if (voicePackPathText == null) return;
+        Uri uri = VoicePackManager.getInstance(requireContext()).getVoicePackTreeUri();
+        if (uri == null) {
+            voicePackPathText.setText("未选择目录");
+        } else {
+            String name = describeTreeUri(uri);
+            voicePackPathText.setText(name != null ? ("已选择：" + name) : "已选择目录");
+        }
+    }
+
+    /** 取 SAF 树 URI 对应的文件夹展示名（拿不到则回退 null）。 */
+    private String describeTreeUri(Uri treeUri) {
+        try {
+            Uri docUri = DocumentsContract.buildDocumentUriUsingTree(treeUri,
+                    DocumentsContract.getTreeDocumentId(treeUri));
+            android.database.Cursor c = requireContext().getContentResolver().query(
+                    docUri, new String[]{DocumentsContract.Document.COLUMN_DISPLAY_NAME}, null, null, null);
+            if (c != null) {
+                try {
+                    if (c.moveToFirst()) return c.getString(0);
+                } finally {
+                    c.close();
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "读取语音包目录名失败", e);
+        }
+        return null;
+    }
+
+    private void onVoicePackDirPicked(Uri uri) {
+        if (uri == null) return;
+        VoicePackManager.getInstance(requireContext()).setVoicePackTreeUri(uri);
+        refreshVoicePackPathText();
     }
 
     /**

@@ -15,6 +15,11 @@
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+    <!-- 适配各安卓版本：Android 13+ 用 READ_MEDIA_AUDIO；低版本用 READ_EXTERNAL_STORAGE -->
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <!-- 高德 SDK 9.3.0 内部会向 Settings.System 写入状态/隐私协议标记，必须声明此权限 -->
     <uses-permission android:name="android.permission.WRITE_SETTINGS" />

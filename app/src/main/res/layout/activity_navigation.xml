@@ -12,6 +12,36 @@
     android:background="@drawable/nav_bg"
     android:padding="6dp">
 
+    <!-- 隐藏/显示 切换按钮：常驻顶部固定位置（不随侧栏整体高度变化）。
+         抬高 elevation 并置于侧栏之上，避免被左侧 nav_icon_bar 面板（后声明）遮挡文字 -->
+    <LinearLayout
+        android:id="@+id/hide_switch"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:background="@drawable/led_button_blue_selector"
+        android:clickable="true"
+        android:focusable="true"
+        android:elevation="4dp"
+        android:translationZ="4dp"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp"
+        android:paddingTop="2dp"
+        android:paddingBottom="2dp"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        android:layout_marginTop="5dp"
+        android:layout_marginStart="5dp">
+
+        <TextView
+            android:id="@+id/hide_switch_text"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="隐藏"
+            android:gravity="center"
+            android:textColor="#00FFFF"
+            android:textSize="11sp" />
+    </LinearLayout>
+
     <LinearLayout
         android:id="@+id/nav_icon_bar"
         android:layout_width="wrap_content"
@@ -24,36 +54,13 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintBottom_toBottomOf="parent">
-        <!-- 隐藏/显示 切换按钮：常驻面板顶部，不受菜单隐藏影响 -->
-        <LinearLayout
-            android:id="@+id/hide_switch"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="center"
-            android:background="@drawable/led_button_blue_selector"
-            android:clickable="true"
-            android:focusable="true"
-            android:layout_marginTop="5dp"
-            android:layout_marginBottom="5dp"
-            android:paddingStart="8dp"
-            android:paddingEnd="8dp"
-            android:paddingTop="2dp"
-            android:paddingBottom="2dp">
-            <TextView
-                android:id="@+id/hide_switch_text"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="隐藏"
-                android:layout_gravity="center_horizontal"
-                android:textColor="#00FFFF"
-                android:textSize="11sp"/>
-        </LinearLayout>
         <LinearLayout
             android:id="@+id/nav_icon_container"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:gravity="center_horizontal"
-            android:orientation="vertical">
+            android:orientation="vertical"
+            android:layout_marginTop="34dp">
             <!-- 拍POV -->
             <LinearLayout
                 android:id="@+id/nav_icon_pov"

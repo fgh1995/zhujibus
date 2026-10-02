@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 报站格式单选行右侧圆点：选中=进度青色(#37D4F4)，未选中=暗灰(#3A4068) -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_checked="true">
+        <shape android:shape="oval">
+            <solid android:color="#37D4F4" />
+            <size android:width="18dp" android:height="18dp" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="oval">
+            <solid android:color="#3A4068" />
+            <size android:width="18dp" android:height="18dp" />
+        </shape>
+    </item>
+</selector>

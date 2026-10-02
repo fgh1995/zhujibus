@@ -26,6 +26,8 @@ public class BusApiClient {
 
     private final OkHttpClient httpClient;
     private final ObjectMapper objectMapper;
+    /** 应用上下文（由 {@link #init} 注入），用于生成设备标识 */
+    private static android.content.Context sAppContext;
     private final Map<String, String> commonHeaders;
     private final ExecutorService executorService;
     private final Handler mainHandler;
@@ -48,8 +50,17 @@ public class BusApiClient {
         initCommonHeaders();
     }
 
+    /** 在 Application/Activity 中尽早调用一次，用于提供设备标识所需的 Context */
+    public static void init(android.content.Context context) {
+        sAppContext = context != null ? context.getApplicationContext() : null;
+    }
+
     private void initCommonHeaders() {
-        commonHeaders.put("deviceId", "DSSFSFSFSFSFSFS");
+        // 设备标识：优先使用稳定的 DeviceIdUtil（自动处理 ANDROID_ID 全 0 兜底）
+        String deviceId = (sAppContext != null)
+                ? DeviceIdUtil.getDeviceId(sAppContext)
+                : "DSSFSFSFSFSFSFS";
+        commonHeaders.put("deviceId", deviceId);
         commonHeaders.put("userToken", "userToken");
         commonHeaders.put("codeValue", "330681");
         commonHeaders.put("appCode", "330681");

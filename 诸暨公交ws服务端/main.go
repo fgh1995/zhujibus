@@ -7,21 +7,22 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sort"
 	"sync"
 	"time"
 
-	_ "modernc.org/sqlite"
 	"github.com/gorilla/websocket"
 	"golang.org/x/crypto/bcrypt"
+	_ "modernc.org/sqlite"
 )
 
 // ==================== 配置常量 ====================
 
 const (
-	frontendVersion   = "1.0.0" // 前端版本号，用于构建脚本读取
-	defaultPort       = "8701"
-	defaultAdminPassword = "admin123" // 默认管理员密码
-	heartbeatTimeout  = 60 * time.Second // 心跳超时时间
+	frontendVersion         = "1.0.0" // 前端版本号，用于构建脚本读取
+	defaultPort             = "8701"
+	defaultAdminPassword    = "admin123"       // 默认管理员密码
+	heartbeatTimeout        = 60 * time.Second // 心跳超时时间
 	onlineBroadcastInterval = 10 * time.Second // 在线人数广播间隔
 )
 
@@ -29,13 +30,20 @@ const (
 
 // User 用户数据模型
 type User struct {
-	ID           int       `json:"id"`
-	AndroidID    string    `json:"android_id"`
-	Status       string    `json:"status"` // "online" 或 "offline"
-	AppVersion   string    `json:"app_version"`
-	FirstSeen    time.Time `json:"first_seen"`
+	ID            int       `json:"id"`
+	AndroidID     string    `json:"android_id"`
+	Status        string    `json:"status"` // "online" 或 "offline"
+	AppVersion    string    `json:"app_version"`
+	FirstSeen     time.Time `json:"first_seen"`
 	LastHeartbeat time.Time `json:"last_heartbeat"`
-	Note         string    `json:"note"`
+	Note          string    `json:"note"`
+	// 地区统计（有效地区 = 选择地区优先，缺失时回退真实定位地区）
+	RegionAdCode     string `json:"region_adcode"`
+	RegionName       string `json:"region_name"`
+	RegionRealAdCode string `json:"region_real_adcode"`
+	RegionRealName   string `json:"region_real_name"`
+	RegionSelAdCode  string `json:"region_selected_adcode"`
+	RegionSelName    string `json:"region_selected_name"`
 }
 
 // Client WebSocket 客户端连接
@@ -44,13 +52,44 @@ type Client struct {
 	AndroidID  string
 	AppVersion string
 	LastPing   time.Time
-	mu         sync.Mutex
+	// 最近一次上报的地区（用于断线时从统计中扣减）
+	RegionAdCode string
+	RegionName   string
+	mu           sync.Mutex
 }
 
 // VersionMessage 版本号消息格式
 type VersionMessage struct {
 	Type    string `json:"type"`
 	Version string `json:"version"`
+}
+
+// RegionMessage 客户端上报的地区消息格式（JSON）
+type RegionMessage struct {
+	Type     string      `json:"type"`
+	Real     *RegionInfo `json:"real"`
+	Selected *RegionInfo `json:"selected"`
+}
+
+// RegionInfo 单个地区信息
+type RegionInfo struct {
+	AdCode   string `json:"adCode"`
+	Province string `json:"province"`
+	City     string `json:"city"`
+	District string `json:"district"`
+}
+
+// RegionStat 地区统计项
+type RegionStat struct {
+	AdCode string `json:"adCode"`
+	Name   string `json:"name"`
+	Count  int    `json:"count"`
+}
+
+// RegionRankResponse 地区排名接口响应
+type RegionRankResponse struct {
+	Success bool         `json:"success"`
+	Regions []RegionStat `json:"regions"`
 }
 
 // API 响应结构
@@ -60,10 +99,10 @@ type APIResponse struct {
 }
 
 type UsersResponse struct {
-	Total   int     `json:"total"`
-	Online  int     `json:"online"`
-	Offline int     `json:"offline"`
-	Users   []User  `json:"users"`
+	Total   int    `json:"total"`
+	Online  int    `json:"online"`
+	Offline int    `json:"offline"`
+	Users   []User `json:"users"`
 }
 
 // ==================== 全局变量 ====================
@@ -78,7 +117,72 @@ var (
 		},
 	}
 	adminTokenHash []byte // 管理员密码哈希
+
+	// 地区统计：adCode -> 统计项（仅统计当前已连接的客户端上报的有效地区）
+	regionStats   = make(map[string]*RegionStat)
+	regionStatsMu sync.RWMutex
 )
+
+// regionDisplayName 取地区的展示名：区/县 > 市 > 省 > adCode > 未知
+func regionDisplayName(r *RegionInfo) string {
+	if r == nil {
+		return "未知"
+	}
+	if r.District != "" {
+		return r.District
+	}
+	if r.City != "" {
+		return r.City
+	}
+	if r.Province != "" {
+		return r.Province
+	}
+	if r.AdCode != "" {
+		return r.AdCode
+	}
+	return "未知"
+}
+
+// incrementRegion 增加某地区的在线计数
+func incrementRegion(adCode, name string) {
+	regionStatsMu.Lock()
+	defer regionStatsMu.Unlock()
+	s := regionStats[adCode]
+	if s == nil {
+		s = &RegionStat{AdCode: adCode, Name: name}
+		regionStats[adCode] = s
+	}
+	s.Name = name
+	s.Count++
+}
+
+// decrementRegion 减少某地区的在线计数（归零则删除）
+func decrementRegion(adCode string) {
+	if adCode == "" {
+		return
+	}
+	regionStatsMu.Lock()
+	defer regionStatsMu.Unlock()
+	s := regionStats[adCode]
+	if s != nil {
+		s.Count--
+		if s.Count <= 0 {
+			delete(regionStats, adCode)
+		}
+	}
+}
+
+// buildRegionRank 按在线人数降序返回地区排名
+func buildRegionRank() []RegionStat {
+	regionStatsMu.RLock()
+	defer regionStatsMu.RUnlock()
+	list := make([]RegionStat, 0, len(regionStats))
+	for _, s := range regionStats {
+		list = append(list, *s)
+	}
+	sort.Slice(list, func(i, j int) bool { return list[i].Count > list[j].Count })
+	return list
+}
 
 // ==================== 数据库初始化 ====================
 
@@ -113,6 +217,13 @@ func initDB() error {
 	_, _ = db.Exec("ALTER TABLE users ADD COLUMN app_version TEXT DEFAULT ''")
 	// 尝试添加 note 列（兼容旧数据库）
 	_, _ = db.Exec("ALTER TABLE users ADD COLUMN note TEXT DEFAULT ''")
+	// 尝试添加地区统计相关列（兼容旧数据库）
+	_, _ = db.Exec("ALTER TABLE users ADD COLUMN region_adcode TEXT DEFAULT ''")
+	_, _ = db.Exec("ALTER TABLE users ADD COLUMN region_name TEXT DEFAULT ''")
+	_, _ = db.Exec("ALTER TABLE users ADD COLUMN region_real_adcode TEXT DEFAULT ''")
+	_, _ = db.Exec("ALTER TABLE users ADD COLUMN region_real_name TEXT DEFAULT ''")
+	_, _ = db.Exec("ALTER TABLE users ADD COLUMN region_selected_adcode TEXT DEFAULT ''")
+	_, _ = db.Exec("ALTER TABLE users ADD COLUMN region_selected_name TEXT DEFAULT ''")
 
 	log.Println("数据库初始化成功")
 	return nil
@@ -212,7 +323,9 @@ func getAndroidIDByID(id int) (string, error) {
 // getAllUsers 获取所有用户
 func getAllUsers() (*UsersResponse, error) {
 	rows, err := db.Query(`
-		SELECT id, android_id, status, app_version, first_seen, last_heartbeat, note
+		SELECT id, android_id, status, app_version, first_seen, last_heartbeat, note,
+		       region_adcode, region_name, region_real_adcode, region_real_name,
+		       region_selected_adcode, region_selected_name
 		FROM users ORDER BY CASE WHEN status = 'online' THEN 0 ELSE 1 END, id ASC
 	`)
 	if err != nil {
@@ -227,7 +340,9 @@ func getAllUsers() (*UsersResponse, error) {
 	for rows.Next() {
 		var user User
 		err := rows.Scan(&user.ID, &user.AndroidID, &user.Status, &user.AppVersion,
-			&user.FirstSeen, &user.LastHeartbeat, &user.Note)
+			&user.FirstSeen, &user.LastHeartbeat, &user.Note,
+			&user.RegionAdCode, &user.RegionName, &user.RegionRealAdCode, &user.RegionRealName,
+			&user.RegionSelAdCode, &user.RegionSelName)
 		if err != nil {
 			continue
 		}
@@ -294,6 +409,13 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			delete(clients, client.AndroidID)
 			clientsMutex.Unlock()
 
+			// 断线：从地区统计中扣减该地区
+			client.mu.Lock()
+			if client.RegionAdCode != "" {
+				decrementRegion(client.RegionAdCode)
+			}
+			client.mu.Unlock()
+
 			setUserOffline(client.AndroidID)
 			log.Printf("客户端断开: %s", client.AndroidID)
 
@@ -320,10 +442,17 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 func handleMessage(client *Client, message []byte) {
 	msg := string(message)
 
-	// 尝试解析 JSON 格式（版本号）
+	// 尝试解析 JSON 格式（版本号 / 地区）
 	var versionMsg VersionMessage
 	if err := json.Unmarshal(message, &versionMsg); err == nil && versionMsg.Type == "version" {
 		handleVersionMessage(client, versionMsg.Version)
+		return
+	}
+
+	// 尝试解析地区上报消息（JSON）
+	var regionMsg RegionMessage
+	if err := json.Unmarshal(message, &regionMsg); err == nil && regionMsg.Type == "region" {
+		handleRegionMessage(client, &regionMsg)
 		return
 	}
 
@@ -402,6 +531,61 @@ func handleVersionMessage(client *Client, version string) {
 	if client.AndroidID != "" {
 		_ = updateUserVersion(client.AndroidID, version)
 	}
+}
+
+// handleRegionMessage 处理客户端上报的地区信息（真实定位 + 用户选择）
+func handleRegionMessage(client *Client, msg *RegionMessage) {
+	// 有效地区：选择地区优先，缺失时回退真实定位地区
+	eff := msg.Selected
+	if eff == nil || eff.AdCode == "" {
+		eff = msg.Real
+	}
+
+	client.mu.Lock()
+	// 若之前已有地区，先将该地区计数减 1
+	if client.RegionAdCode != "" {
+		decrementRegion(client.RegionAdCode)
+	}
+	if eff != nil && eff.AdCode != "" {
+		name := regionDisplayName(eff)
+		client.RegionAdCode = eff.AdCode
+		client.RegionName = name
+		incrementRegion(eff.AdCode, name)
+	} else {
+		client.RegionAdCode = ""
+		client.RegionName = ""
+	}
+	// 记录原始真实/选择地区，供持久化与前端展示
+	var realAdCode, realName, selAdCode, selName string
+	if msg.Real != nil {
+		realAdCode = msg.Real.AdCode
+		realName = regionDisplayName(msg.Real)
+	}
+	if msg.Selected != nil {
+		selAdCode = msg.Selected.AdCode
+		selName = regionDisplayName(msg.Selected)
+	}
+	client.mu.Unlock()
+
+	// 已注册（android_id 已知）则持久化到数据库
+	if client.AndroidID != "" {
+		_ = updateUserRegion(client.AndroidID, client.RegionAdCode, client.RegionName,
+			realAdCode, realName, selAdCode, selName)
+	}
+
+	log.Printf("地区上报 [%s]: 有效=%s(%s) 真实=%s(%s) 选择=%s(%s)",
+		client.AndroidID, client.RegionAdCode, client.RegionName,
+		realAdCode, realName, selAdCode, selName)
+}
+
+// updateUserRegion 更新用户地区信息
+func updateUserRegion(androidID, adCode, name, realAdCode, realName, selAdCode, selName string) error {
+	_, err := db.Exec(`
+		UPDATE users SET region_adcode=?, region_name=?, region_real_adcode=?, region_real_name=?,
+		                  region_selected_adcode=?, region_selected_name=?
+		WHERE android_id=?`,
+		adCode, name, realAdCode, realName, selAdCode, selName, androidID)
+	return err
 }
 
 func handlePingMessage(client *Client) {
@@ -484,6 +668,9 @@ func handleGetUsers(w http.ResponseWriter, r *http.Request) {
 		if time.Since(client.LastPing) > heartbeatTimeout {
 			client.Conn.Close()
 			delete(clients, androidID)
+			if client.RegionAdCode != "" {
+				decrementRegion(client.RegionAdCode)
+			}
 			setUserOffline(androidID)
 		}
 		client.mu.Unlock()
@@ -496,6 +683,18 @@ func handleGetUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(data)
+}
+
+// API: 获取地区排名（按在线人数降序）
+func handleGetRegions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, `{"success":false,"error":"方法不允许"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	data := RegionRankResponse{Success: true, Regions: buildRegionRank()}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(data)
 }
@@ -591,6 +790,7 @@ func main() {
 	http.HandleFunc("/api/users", authMiddleware(handleGetUsers))
 	http.HandleFunc("/api/users/note", authMiddleware(handleUpdateNote))
 	http.HandleFunc("/api/users/delete", authMiddleware(handleDeleteUser))
+	http.HandleFunc("/api/regions", authMiddleware(handleGetRegions))
 
 	// 静态文件服务
 	fs := http.FileServer(http.Dir("./static"))
@@ -615,6 +815,9 @@ func main() {
 					log.Printf("客户端心跳超时，断开: %s", androidID)
 					client.Conn.Close()
 					delete(clients, androidID)
+					if client.RegionAdCode != "" {
+						decrementRegion(client.RegionAdCode)
+					}
 					setUserOffline(androidID)
 				}
 				client.mu.Unlock()

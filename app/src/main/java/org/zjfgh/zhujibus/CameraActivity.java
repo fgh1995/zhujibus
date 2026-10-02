@@ -36,6 +36,8 @@ import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.CheckBox;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
+import android.widget.EditText;
 import android.widget.SeekBar;
 import android.widget.Spinner;
 import android.widget.TextView;
@@ -65,12 +67,35 @@ import java.util.Locale;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import java.io.InputStream;
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
+
 import io.sgr.geometry.Coordinate;
 import io.sgr.geometry.utils.RouteGeometryUtils;
 
 public class CameraActivity extends AppCompatActivity {
     private static final String TAG = "CameraActivity";
     private static final int REQUEST_CAMERA_PERMISSION = 200;
+    private static final String POV_PREFS = "pov_prefs";
+
+    // 公交标识自定义图标选择器（非诸暨地区，可在 POV 拍摄设置中选择图标文件）
+    private final ActivityResultLauncher<String[]> logoPickerLauncher =
+            registerForActivityResult(new ActivityResultContracts.OpenDocument(), uri -> {
+                if (uri != null) {
+                    try {
+                        getContentResolver().takePersistableUriPermission(uri,
+                                Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    } catch (Throwable ignore) { /* 部分提供方不支持持久授权，忽略 */ }
+                    getSharedPreferences(POV_PREFS, MODE_PRIVATE).edit()
+                            .putString("pov_logo_uri", uri.toString()).apply();
+                    Toast.makeText(CameraActivity.this, "图标已保存", Toast.LENGTH_SHORT).show();
+                }
+            });
 
     private TextureView textureView;
     private String cameraId;
@@ -216,12 +241,28 @@ public class CameraActivity extends AppCompatActivity {
     private static final float LOW_SPEED_NO_SMOOTH_KMH = 10f;
 
     private final LocationListener gpsListener = new LocationListener() {
+        private long lastMapUpdateMs = 0;   // 地图车标/相机跟随：最高 5Hz
+        private long lastUiUpdateMs = 0;    // 站名/速度等其它文本数据：最高 1Hz
+
         @Override
         public void onLocationChanged(Location location) {
-            if (povDetector != null) {
-                povDetector.onGpsLocation(location);
+            long now = System.currentTimeMillis();
+            // 其它数据（站名/速度等文本）保持 1Hz 刷新，避免高频闪烁与冗余计算
+            if (now - lastUiUpdateMs >= 1000) {
+                lastUiUpdateMs = now;
+                if (povDetector != null) {
+                    povDetector.onGpsLocation(location);
+                }
+                updatePovRealtimeSpeed(location);
             }
-            updatePovRealtimeSpeed(location);
+            // 地图车标+相机跟随：最高 5Hz（≈200ms），更平滑；若数据源本身低于此频率则按实际频率
+            if (now - lastMapUpdateMs >= 200) {
+                lastMapUpdateMs = now;
+                if (navigationView != null) {
+                    final Location loc = location;
+                    runOnUiThread(() -> navigationView.drawCarFromExternal(loc));
+                }
+            }
         }
         @Override public void onStatusChanged(String provider, int status, Bundle extras) {}
         @Override public void onProviderEnabled(String provider) {}
@@ -257,6 +298,7 @@ public class CameraActivity extends AppCompatActivity {
         updateInfoPanelData();
         startDoorAnimation();
         initMapView(savedInstanceState);
+        if (navigationView != null) navigationView.enableExternalCarFollow();
         initPovDetector();
         loadRouteInfoFromDetail();
 
@@ -603,7 +645,28 @@ public class CameraActivity extends AppCompatActivity {
         findViewById(R.id.btn_close_settings).setOnClickListener(v -> hideSettingsPanel());
         settingsPanelContainer.setOnClickListener(v -> hideSettingsPanel());
         settingsPanel.setOnClickListener(v -> {});
-        findViewById(R.id.btn_apply_settings).setOnClickListener(v -> hideSettingsPanel());
+
+        // 公交标识自定义（非诸暨地区显示）：公司中/英文名称 + 自定义图标文件
+        SharedPreferences povSp = getSharedPreferences(POV_PREFS, MODE_PRIVATE);
+        EditText etPovCn = findViewById(R.id.et_pov_company_cn);
+        EditText etPovEn = findViewById(R.id.et_pov_company_en);
+        if (etPovCn != null) etPovCn.setText(povSp.getString("pov_company_cn", "XX公交"));
+        if (etPovEn != null) etPovEn.setText(povSp.getString("pov_company_en", "XXbus"));
+        TextView btnPovLogo = findViewById(R.id.btn_pov_logo_picker);
+        if (btnPovLogo != null) btnPovLogo.setOnClickListener(v -> pickPovLogo());
+
+        findViewById(R.id.btn_apply_settings).setOnClickListener(v -> {
+            EditText cn = findViewById(R.id.et_pov_company_cn);
+            EditText en = findViewById(R.id.et_pov_company_en);
+            if (cn != null && en != null) {
+                getSharedPreferences(POV_PREFS, MODE_PRIVATE).edit()
+                        .putString("pov_company_cn", cn.getText().toString().trim())
+                        .putString("pov_company_en", en.getText().toString().trim())
+                        .apply();
+            }
+            applyPovBranding();
+            hideSettingsPanel();
+        });
 
         seekbarVideoBitrate.setMax(100);
         seekbarVideoBitrate.setProgress(30);
@@ -1885,6 +1948,68 @@ public class CameraActivity extends AppCompatActivity {
         if (povEndStation != null && endStationName != null && !endStationName.isEmpty()) {
             povEndStation.setText(endStationName);
         }
+
+        applyPovBranding();
+    }
+
+    /**
+     * POV 信息面板品牌标识（按地区切换）：
+     * - 诸暨：显示两个原始 LOGO + “诸暨公交 / Zhuji Bus”；
+     * - 非诸暨：隐藏一个 LOGO，另一个显示自定义默认图标（可在 POV 拍摄设置中选择文件），
+     *   公司名称显示用户自定义的中/英文（默认“XX公交 / XXbus”）。
+     */
+    private void applyPovBranding() {
+        ImageView logo1 = findViewById(R.id.pov_logo_1);
+        ImageView logo2 = findViewById(R.id.pov_logo_2);
+        TextView companyText = findViewById(R.id.pov_company_text);
+        if (logo1 == null || logo2 == null || companyText == null) return;
+
+        BusRegion region = new RegionManager(this).getSelectedRegion();
+        boolean isZhuji = region != null && region.adCode != null && region.adCode.startsWith("330681");
+
+        if (isZhuji) {
+            logo1.setVisibility(View.VISIBLE);
+            logo1.setImageResource(R.drawable.icon_zhuji_bus_city);
+            logo2.setVisibility(View.VISIBLE);
+            logo2.setImageResource(R.drawable.icon_zhuji_bus_ur);
+            companyText.setText("诸暨公交\nZhuji Bus");
+        } else {
+            logo1.setVisibility(View.GONE);
+            logo2.setVisibility(View.VISIBLE);
+            loadPovCustomLogo(logo2);
+            SharedPreferences sp = getSharedPreferences(POV_PREFS, MODE_PRIVATE);
+            String cn = sp.getString("pov_company_cn", "XX公交");
+            String en = sp.getString("pov_company_en", "XXbus");
+            companyText.setText(cn + "\n" + en);
+        }
+    }
+
+    /** 加载非诸暨地区自定义默认图标：优先用户选择的文件，失败/未设置则回退内置默认图标 pov_default_logo */
+    private void loadPovCustomLogo(ImageView iv) {
+        SharedPreferences sp = getSharedPreferences(POV_PREFS, MODE_PRIVATE);
+        String uriStr = sp.getString("pov_logo_uri", "");
+        if (uriStr != null && !uriStr.isEmpty()) {
+            try {
+                Uri uri = Uri.parse(uriStr);
+                InputStream is = getContentResolver().openInputStream(uri);
+                if (is != null) {
+                    Bitmap bmp = BitmapFactory.decodeStream(is);
+                    is.close();
+                    if (bmp != null) {
+                        iv.setImageBitmap(bmp);
+                        return;
+                    }
+                }
+            } catch (Throwable t) {
+                Log.e(TAG, "加载自定义 POV 图标失败: " + t.getMessage());
+            }
+        }
+        iv.setImageResource(R.drawable.pov_default_logo);
+    }
+
+    /** 打开图片选择器，用于自定义非诸暨地区的公交标识图标 */
+    private void pickPovLogo() {
+        logoPickerLauncher.launch(new String[]{"image/*"});
     }
 
     private void startMapBitmapUpdate() {

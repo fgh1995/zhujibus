@@ -27,6 +27,7 @@ public class CarOverlay {
     private static final String TAG = "CarOverlay";
 
     protected boolean mIsLock = true;  // 锁车态标记
+    protected boolean preserveZoomTilt = false;  // true 时跟随仅更新中心/方向，保留当前缩放与倾角（POV 小地图）
     protected float newAngle = 0;      // 当前车头方向
     protected BitmapDescriptor carDescriptor = null;        // 车标图标
     protected BitmapDescriptor fourCornersDescriptor = null; // 方向指示器图标
@@ -93,17 +94,25 @@ public class CarOverlay {
 
         if (mIsLock) {
             // ⭐ 锁车态：地图跟随车移动和旋转
-            CameraPosition cameraPosition = new CameraPosition.Builder()
+            CameraPosition.Builder cpb = new CameraPosition.Builder()
                     .target(carMarker.getPosition())  // 地图中心 = 车的位置
-                    .bearing(newAngle)                // 地图方向 = 车头方向
-                    .tilt(NAVI_TILT)                  // 完全俯视（0度）
-                    .zoom(NAVI_ZOOM)                  // 适中缩放（15级）
-                    .build();
-            mAmap.moveCamera(CameraUpdateFactory.newCameraPosition(cameraPosition));
+                    .bearing(newAngle);               // 地图方向 = 车头方向
+            if (preserveZoomTilt && mAmap.getCameraPosition() != null) {
+                CameraPosition cur = mAmap.getCameraPosition();
+                cpb.zoom(cur.zoom).tilt(cur.tilt);
+            } else {
+                cpb.tilt(NAVI_TILT).zoom(NAVI_ZOOM);
+            }
+            mAmap.moveCamera(CameraUpdateFactory.newCameraPosition(cpb.build()));
             Log.d(TAG, "[LOCK] 锁车态已启用：地图跟随车移动和旋转");
         } else {
             Log.d(TAG, "[UNLOCK] 解锁车态：用户可以拖动地图");
         }
+    }
+
+    /** 设置是否保留当前缩放/倾角（仅更新中心与方向）。POV 小地图建议置 true，避免被强制改视角 */
+    public void setPreserveCamera(boolean preserve) {
+        preserveZoomTilt = preserve;
     }
 
     /**
@@ -183,14 +192,16 @@ public class CarOverlay {
 
         // ⭐ 锁车态：地图跟随车移动和旋转
         if (mIsLock) {
-            // ⭐ 关键API：changeBearingGeoCenter（同时改变地图方向和中心点）
-            CameraPosition cameraPosition = new CameraPosition.Builder()
+            CameraPosition.Builder cpb = new CameraPosition.Builder()
                     .target(latLng)      // 地图中心 = 车的位置
-                    .bearing(bearing)    // 地图方向 = 车头方向
-                    .tilt(NAVI_TILT)     // 完全俯视（0度）
-                    .zoom(NAVI_ZOOM)     // 适中缩放（15级）
-                    .build();
-            mAmap.moveCamera(CameraUpdateFactory.newCameraPosition(cameraPosition));
+                    .bearing(bearing);   // 地图方向 = 车头方向
+            if (preserveZoomTilt && mAmap != null && mAmap.getCameraPosition() != null) {
+                CameraPosition cur = mAmap.getCameraPosition();
+                cpb.zoom(cur.zoom).tilt(cur.tilt);   // 保留当前缩放/倾角（POV 小地图）
+            } else {
+                cpb.tilt(NAVI_TILT).zoom(NAVI_ZOOM);
+            }
+            mAmap.moveCamera(CameraUpdateFactory.newCameraPosition(cpb.build()));
         }
     }
 

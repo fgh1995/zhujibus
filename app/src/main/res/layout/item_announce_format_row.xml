@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@drawable/radio_mode_bg"
+    android:padding="10dp"
+    android:layout_marginTop="8dp"
+    android:layout_marginBottom="4dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:minHeight="32dp">
+
+        <TextView
+            android:id="@+id/row_label"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textColor="#FFFFFF"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/row_preview"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:minWidth="0dp"
+            android:minHeight="0dp"
+            app:backgroundTint="@null"
+            android:layout_marginStart="10dp"
+            android:layout_gravity="center_vertical"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp"
+            android:text="试听"
+            android:textSize="14sp"
+            android:textColor="#FFFFFF"
+            android:background="@drawable/bg_accent_btn" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/row_desc"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:textColor="#9AA0BC"
+        android:textSize="11sp" />
+
+    <EditText
+        android:id="@+id/row_edit"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:minLines="2"
+        android:gravity="top"
+        android:textSize="14sp"
+        android:textColor="#FFFFFF"
+        android:textColorHint="#6A6F90"
+        android:hint="例如：欢迎乘坐{线路名}，下一站{下一站}"
+        android:background="@drawable/chip_bg"
+        android:padding="8dp"
+        android:layout_marginTop="6dp" />
+
+    <HorizontalScrollView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:scrollbars="none">
+
+        <LinearLayout
+            android:id="@+id/row_chips"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal" />
+    </HorizontalScrollView>
+</LinearLayout>

@@ -423,6 +423,80 @@
                         android:checked="true" />
                 </LinearLayout>
 
+                <!-- 公交标识（非诸暨地区自定义显示） -->
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/_16sdp"
+                    android:text="公交标识（非诸暨地区显示）"
+                    android:textColor="#333333"
+                    android:textSize="@dimen/_16ssp"
+                    android:textStyle="bold" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/_8sdp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="自定义图标"
+                        android:textColor="#666666"
+                        android:textSize="@dimen/_14ssp" />
+                    <TextView
+                        android:id="@+id/btn_pov_logo_picker"
+                        android:layout_width="wrap_content"
+                        android:layout_height="@dimen/_40sdp"
+                        android:background="#0d8dfb"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:gravity="center"
+                        android:paddingStart="@dimen/_12sdp"
+                        android:paddingEnd="@dimen/_12sdp"
+                        android:text="选择图标文件"
+                        android:textColor="#FFFFFF"
+                        android:textSize="@dimen/_14ssp" />
+                </LinearLayout>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/_12sdp"
+                    android:text="公交名称（中文）"
+                    android:textColor="#666666"
+                    android:textSize="@dimen/_14ssp" />
+                <EditText
+                    android:id="@+id/et_pov_company_cn"
+                    android:layout_width="match_parent"
+                    android:layout_height="@dimen/_44sdp"
+                    android:layout_marginTop="@dimen/_6sdp"
+                    android:background="#F0F0F0"
+                    android:hint="如：XX公交"
+                    android:paddingStart="@dimen/_12sdp"
+                    android:textColor="#333333"
+                    android:textSize="@dimen/_14ssp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/_12sdp"
+                    android:text="公交名称（英文）"
+                    android:textColor="#666666"
+                    android:textSize="@dimen/_14ssp" />
+                <EditText
+                    android:id="@+id/et_pov_company_en"
+                    android:layout_width="match_parent"
+                    android:layout_height="@dimen/_44sdp"
+                    android:layout_marginTop="@dimen/_6sdp"
+                    android:background="#F0F0F0"
+                    android:hint="如：XXbus"
+                    android:paddingStart="@dimen/_12sdp"
+                    android:textColor="#333333"
+                    android:textSize="@dimen/_14ssp" />
+
                 <TextView
                     android:id="@+id/btn_apply_settings"
                     android:layout_width="match_parent"
