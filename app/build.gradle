@@ -10,7 +10,7 @@ android {
         applicationId "org.zjfgh.zhujibus"
         minSdk 24
         targetSdk 35
-        versionCode 102046
+        versionCode 102045
         versionName "1.2.46"
         //wsServerAddress = `http://zhujibus.360967.xyz/ws`
         //githubAddSpeed = `https://gh-proxy.org`
