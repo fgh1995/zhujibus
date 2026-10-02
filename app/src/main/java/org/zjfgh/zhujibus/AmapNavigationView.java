@@ -641,6 +641,10 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
                     + ", msg=" + aMapLocation.getErrorInfo());
             return;
         }
+        // ⭐ 模拟进行中（全局标志）：忽略本实例真实 GPS 回调（车标/相机/坐标/速度/外部监听均改由模拟位置驱动）
+        if (simActiveGlobally) {
+            return;
+        }
         lastGpsSuccessTimeMs = System.currentTimeMillis();
 
         // ⭐ 始终更新最新定位坐标（不受速度影响，供POV面板显示）
@@ -794,6 +798,10 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
     public void onLocationChange(AMapNaviLocation location) {
         // ⭐ 导航SDK的定位回调（官方方式：使用这个回调绘制车标）
         if (location == null || location.getCoord() == null) return;
+        // ⭐ 模拟进行中（全局标志）：忽略导航 SDK 的真实 GPS 回调，避免其车标/数据抢占模拟位置
+        if (simActiveGlobally) {
+            return;
+        }
         Location androidLocation = new Location("amap_navi");
         androidLocation.setLatitude(location.getCoord().getLatitude());
         androidLocation.setLongitude(location.getCoord().getLongitude());
@@ -1155,6 +1163,9 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
     // ==================== GPS 位置模拟（沿公交路线插值，用于模拟报站） ====================
     private ScheduledExecutorService simExecutor;
     private volatile boolean simulating = false;
+    // ⭐ 全局“模拟进行中”标志（模拟只可能全局同时一个）：用于让所有 AmapNavigationView 实例
+    //   （主图实例 + POV 实例）在模拟期间统一忽略自身的真实 GPS 回调，避免抢占模拟位置/干扰车标与 UI
+    private static volatile boolean simActiveGlobally = false;
     private int simSegIndex = 0;
     private double simSegFrac = 0.0;
     private float simSpeedKmh = 30f;
@@ -1188,6 +1199,7 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
             return;
         }
         simulating = true;
+        simActiveGlobally = true;   // ⭐ 全局置位：所有实例据此忽略真实 GPS 回调
         simSpeedKmh = speedKmh > 0 ? speedKmh : 30f;
         simStartDwellSec = Math.max(0, startDwellSec);
         simTerminalDwellSec = Math.max(0, terminalDwellSec);
@@ -1255,6 +1267,7 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
     public void stopLocationSimulation() {
         if (!simulating) return;
         simulating = false;
+        simActiveGlobally = false;   // ⭐ 全局复位：恢复各实例对真实 GPS 的响应
         if (simExecutor != null) {
             simExecutor.shutdownNow();
             simExecutor = null;
