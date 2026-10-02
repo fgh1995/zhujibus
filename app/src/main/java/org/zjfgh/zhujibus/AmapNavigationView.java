@@ -1179,6 +1179,7 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
     private int[] simStationRealIndices = null; // 模拟站点对应的【真实站点列表】下标（与 simStationPositions 等长，用于修正坐标过滤导致的下标错位）
     private int[] simStationRouteIdxAll = null; // 每个站点（含起终点）对应的路线点索引（与站点顺序等长），用于判定"到站"
     private int simStationPtr = 0;         // 已到达/下一个中途站指针（station-order 索引，0=起点，size-1=终点）
+    private int simActiveDwellType = 0;    // 当前进行中的停留类型：0=无，1=起点，2=终点，3=中途到站（用于实时刷新剩余时长）
 
     public boolean isSimulating() {
         return simulating;
@@ -1192,6 +1193,10 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
      * @param terminalDwellSec 终点站停留时长（秒），0 表示不停留
      * @param arrivalDwellSec 到站停留间隔（秒）：每个中途站到站后停留时长，0 表示不停留
      */
+    // 模拟位置以 SIM_TICK_MS 为周期推进（与 scheduleAtFixedRate 一致），故"停留秒数"需换算成 tick 数
+    private static final int SIM_TICK_MS = 200;
+    private static final int SIM_TICKS_PER_SEC = 1000 / SIM_TICK_MS; // 1 秒 = 5 个 tick
+
     public void startLocationSimulation(float speedKmh, int startDwellSec, int terminalDwellSec, int arrivalDwellSec) {
         if (simulating) stopLocationSimulation();
         if (routePoints == null || routePoints.size() < 2) {
@@ -1229,6 +1234,27 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
     /** 兼容旧调用：无停留时长 */
     public void startLocationSimulation(float speedKmh) {
         startLocationSimulation(speedKmh, 0, 0, 0);
+    }
+
+    /**
+     * 实时更新模拟参数（模拟进行中调用，无需重启）：
+     * 车速立即生效；各停留时长用于后续起点站 / 终点站 / 中途站到站停留。
+     */
+    public void updateSimParams(float speedKmh, int startDwellSec, int terminalDwellSec, int arrivalDwellSec) {
+        if (!simulating) return;
+        simSpeedKmh = speedKmh > 0 ? speedKmh : 30f;
+        simStartDwellSec = Math.max(0, startDwellSec);
+        simTerminalDwellSec = Math.max(0, terminalDwellSec);
+        simArrivalDwellSec = Math.max(0, arrivalDwellSec);
+        // 若当前正处于某次停留中，按新时长立即刷新剩余 tick，使本次停留实时生效（无需等到下一站）
+        if (simDwellRemaining > 0) {
+            switch (simActiveDwellType) {
+                case 1: simDwellRemaining = simStartDwellSec * SIM_TICKS_PER_SEC; break;
+                case 2: simDwellRemaining = simTerminalDwellSec * SIM_TICKS_PER_SEC; break;
+                case 3: simDwellRemaining = simArrivalDwellSec * SIM_TICKS_PER_SEC; break;
+                default: break;
+            }
+        }
     }
 
     /** 设置模拟所用站点坐标（含起终点）及其对应的真实站点列表下标，用于把中途站匹配到路线点以触发到站停留，
@@ -1287,13 +1313,16 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
         if (simDwellRemaining > 0) {
             simDwellRemaining--;
             postSimLocation(0f, currentDwellStationIndex(), true); // 停留中即"在站内"，标记 isArrived
-            if (simDwellRemaining == 0 && simAtTerminal) {
-                // 终点站停留结束 -> 回到起点循环，下一帧触发起点停留
-                simSegIndex = 0;
-                simSegFrac = 0.0;
-                simAtTerminal = false;
-                simStartDwellPending = true;
-                simStationPtr = 0; // 重置中途站停留指针
+            if (simDwellRemaining == 0) {
+                simActiveDwellType = 0;
+                if (simAtTerminal) {
+                    // 终点站停留结束 -> 回到起点循环，下一帧触发起点停留
+                    simSegIndex = 0;
+                    simSegFrac = 0.0;
+                    simAtTerminal = false;
+                    simStartDwellPending = true;
+                    simStationPtr = 0; // 重置中途站停留指针
+                }
             }
             return;
         }
@@ -1301,13 +1330,15 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
         // 2) 起点站停留（每个循环首帧、发车前停留）
         if (simStartDwellPending && !simAtTerminal) {
             simStartDwellPending = false;
-            simDwellRemaining = simStartDwellSec;
+            simActiveDwellType = 1;
+            simDwellRemaining = simStartDwellSec * SIM_TICKS_PER_SEC;
             postSimLocation(0f, 0, true); // 在起点站内
             return;
         }
 
-        // 3) 推进位置（1 秒内应行驶的距离，与真实 GPS 1Hz 对齐）
-        double stepMeters = (simSpeedKmh / 3.6) * 1.0;
+        // 3) 推进位置：按本 tick 真实时长（SIM_TICK_MS=200ms，5Hz）内、以 simSpeedKmh 真实 km/h
+        //    应行驶的距离行进；这样 1 真实秒内累计正好走 1 秒的路程，车速与设定 km/h 一致（不再是 5 倍）。
+        double stepMeters = (simSpeedKmh / 3.6) * (SIM_TICK_MS / 1000.0);
         while (stepMeters > 0 && simSegIndex < n - 1) {
             LatLng p1 = routePoints.get(simSegIndex);
             LatLng p2 = routePoints.get(simSegIndex + 1);
@@ -1335,7 +1366,8 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
             // 仅对"中途站"触发停留：跳过起点(0)与终点(size-1)
             if (nextStation > 0 && nextStation < simStationRouteIdxAll.length - 1
                     && simSegIndex >= simStationRouteIdxAll[nextStation]) {
-                simDwellRemaining = simArrivalDwellSec;
+                simActiveDwellType = 3;
+                simDwellRemaining = simArrivalDwellSec * SIM_TICKS_PER_SEC;
                 simStationPtr = nextStation; // 标记已到达该中途站
                 postSimLocation(0f, nextStation, true);
                 return;
@@ -1345,7 +1377,8 @@ public class AmapNavigationView implements LocationSource, AMapLocationListener,
         // 4) 到达终点站：停留后由步骤 1 循环回起点
         if (simSegIndex >= n - 1) {
             simAtTerminal = true;
-            simDwellRemaining = simTerminalDwellSec;
+            simActiveDwellType = 2;
+            simDwellRemaining = simTerminalDwellSec * SIM_TICKS_PER_SEC;
             postSimLocation(simSpeedKmh / 3.6f, lastStationIndex(), true); // 在终点站内
             return;
         }

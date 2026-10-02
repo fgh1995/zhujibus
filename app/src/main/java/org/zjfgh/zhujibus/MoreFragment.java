@@ -114,11 +114,13 @@ public class MoreFragment extends Fragment {
         list.add(new FunctionItem("刷卡机", "card_reader", R.drawable.icon_card_reader));
         // 仅诸暨市显示"站点坐标来源：高德"切换按钮（其他城市坐标本就来自高德）
         BusRegion region = new RegionManager(requireContext()).getSelectedRegion();
+        // 仅诸暨市显示"站点坐标来源：高德"切换按钮（其他城市坐标本就来自高德）
         if (region != null && region.adCode.startsWith("330681")) {
             list.add(new FunctionItem("使用高德站点坐标", "amap_coord", R.drawable.ic_directions));
-            // 站点坐标标记：开启后在地图上叠加官方红点 + 高德蓝点对比（默认关闭）
-            list.add(new FunctionItem("站点坐标标记", "station_markers", R.drawable.ic_station_marker));
         }
+        // 站点坐标标记：开启后在地图上叠加官方红点 + 高德蓝点对比（默认关闭）。
+        // 对所有地区开放——非诸暨也需要用它核对高德站点坐标是否准确，不应按地区隐藏。
+        list.add(new FunctionItem("站点坐标标记", "station_markers", R.drawable.ic_station_marker));
         // 模拟报站：沿当前公交路线注入合成 GPS 位置，用于测试报站（再次点击停止）
         list.add(new FunctionItem("模拟报站", "simulate_report", R.drawable.ic_location));
         // 报站格式设置：语音模板（与模拟报站同风格的弹窗）
@@ -693,26 +695,35 @@ public class MoreFragment extends Fragment {
         terminalValue.setText(String.valueOf(terminalDwell[0]));
         arrivalValue.setText(String.valueOf(arrivalDwell[0]));
 
-        bindSimStepper(dialogView, R.id.sim_speed_minus, R.id.sim_speed_plus, speedValue, speed, 1);
-        bindSimStepper(dialogView, R.id.sim_start_minus, R.id.sim_start_plus, startValue, startDwell, 0);
-        bindSimStepper(dialogView, R.id.sim_terminal_minus, R.id.sim_terminal_plus, terminalValue, terminalDwell, 0);
-        bindSimStepper(dialogView, R.id.sim_arrival_minus, R.id.sim_arrival_plus, arrivalValue, arrivalDwell, 0);
+        // 实时更新所需：提前拿到 Activity 引用与"是否模拟中"状态（供 +/- 与直接输入时即时下发参数）
+        final BusLineDetailActivity act = (getActivity() instanceof BusLineDetailActivity)
+                ? (BusLineDetailActivity) getActivity() : null;
+        final boolean[] simulating = {act != null && act.isSimulating()};
+        // 模拟进行中改变参数时，立即把最新值下发到导航层（实时生效，无需重启模拟）；
+        // 同时立即持久化，避免"调完退出再进入又变回旧值"（点弹窗外区域关闭时不会走 close 的保存）。
+        final Runnable applyLive = () -> {
+            saveSimSettings(speed[0], startDwell[0], terminalDwell[0], arrivalDwell[0]);
+            if (simulating[0] && act != null) {
+                act.updateSimParams(speed[0], startDwell[0], terminalDwell[0], arrivalDwell[0]);
+            }
+        };
+
+        bindSimStepper(dialogView, R.id.sim_speed_minus, R.id.sim_speed_plus, speedValue, speed, 1, applyLive);
+        bindSimStepper(dialogView, R.id.sim_start_minus, R.id.sim_start_plus, startValue, startDwell, 0, applyLive);
+        bindSimStepper(dialogView, R.id.sim_terminal_minus, R.id.sim_terminal_plus, terminalValue, terminalDwell, 0, applyLive);
+        bindSimStepper(dialogView, R.id.sim_arrival_minus, R.id.sim_arrival_plus, arrivalValue, arrivalDwell, 0, applyLive);
         // 直接输入时同步回内存值（夹紧在合理范围由 +/- / 开启时统一处理）
-        addSimValueWatcher(speedValue, speed);
-        addSimValueWatcher(startValue, startDwell);
-        addSimValueWatcher(terminalValue, terminalDwell);
-        addSimValueWatcher(arrivalValue, arrivalDwell);
+        addSimValueWatcher(speedValue, speed, applyLive);
+        addSimValueWatcher(startValue, startDwell, applyLive);
+        addSimValueWatcher(terminalValue, terminalDwell, applyLive);
+        addSimValueWatcher(arrivalValue, arrivalDwell, applyLive);
 
         Button toggle = dialogView.findViewById(R.id.sim_toggle);
         View close = dialogView.findViewById(R.id.sim_close);
 
-        final boolean[] simulating = {getActivity() instanceof BusLineDetailActivity
-                && ((BusLineDetailActivity) getActivity()).isSimulating()};
         updateSimToggleText(toggle, simulating[0]);
 
         toggle.setOnClickListener(v -> {
-            BusLineDetailActivity act = (getActivity() instanceof BusLineDetailActivity)
-                    ? (BusLineDetailActivity) getActivity() : null;
             if (act == null) return;
             // 先按输入框当前内容夹紧并回写，确保直接输入的数值生效
             syncSimValue(speedValue, speed, 1);
@@ -762,9 +773,9 @@ public class MoreFragment extends Fragment {
                 .start();
     }
 
-    /** 步进器：点击 −/+ 按输入框当前数值增减并刷新显示，下限为 min（不设上限）。 */
+    /** 步进器：点击 −/+ 按输入框当前数值增减并刷新显示，下限为 min（不设上限）。onChanged 在数值变化后回调（用于实时下发）。 */
     private void bindSimStepper(View root, int minusId, int plusId, EditText valueView,
-                               final int[] holder, int min) {
+                               final int[] holder, int min, Runnable onChanged) {
         View minus = root.findViewById(minusId);
         View plus = root.findViewById(plusId);
         if (minus != null) {
@@ -774,6 +785,7 @@ public class MoreFragment extends Fragment {
                     holder[0]--;
                     valueView.setText(String.valueOf(holder[0]));
                 }
+                if (onChanged != null) onChanged.run();
             });
         }
         if (plus != null) {
@@ -781,6 +793,7 @@ public class MoreFragment extends Fragment {
                 syncSimValue(valueView, holder, min);
                 holder[0]++;
                 valueView.setText(String.valueOf(holder[0]));
+                if (onChanged != null) onChanged.run();
             });
         }
     }
@@ -810,8 +823,8 @@ public class MoreFragment extends Fragment {
                 .apply();
     }
 
-    /** 监听直接输入，把数值同步回 holder（夹紧在 +/- / 开启时统一处理）。 */
-    private void addSimValueWatcher(EditText et, final int[] holder) {
+    /** 监听直接输入，把数值同步回 holder（夹紧在 +/- / 开启时统一处理）。onChanged 在数值变化后回调（用于实时下发）。 */
+    private void addSimValueWatcher(EditText et, final int[] holder, Runnable onChanged) {
         et.addTextChangedListener(new android.text.TextWatcher() {
             @Override
             public void beforeTextChanged(CharSequence s, int start, int count, int after) {
@@ -827,6 +840,7 @@ public class MoreFragment extends Fragment {
                     holder[0] = Integer.parseInt(s.toString().trim());
                 } catch (NumberFormatException ignored) {
                 }
+                if (onChanged != null) onChanged.run();
             }
         });
     }

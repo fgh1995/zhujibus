@@ -481,6 +481,14 @@ public class BusLineDetailActivity extends AppCompatActivity implements BusRealT
         Toast.makeText(this, "已开始位置模拟（GPS " + speedKmh + "km/h，已暂停真实GPS）", Toast.LENGTH_SHORT).show();
     }
 
+    /**
+     * 实时更新模拟参数（不重启模拟）：模拟进行中由模拟报站设置页调用，使车速/停留时长即时生效。
+     */
+    public void updateSimParams(float speedKmh, int startDwellSec, int terminalDwellSec, int arrivalDwellSec) {
+        AmapNavigationView nav = (navigationMainFragment != null) ? navigationMainFragment.getNavigation() : null;
+        if (nav != null) nav.updateSimParams(speedKmh, startDwellSec, terminalDwellSec, arrivalDwellSec);
+    }
+
     /** 模拟站点数据：坐标列表 + 各自在真实站点列表中的下标（长度一致，用于匹配路线点并修正下标错位）。 */
     private static final class SimStationData {
         final List<com.amap.api.maps.model.LatLng> positions;
