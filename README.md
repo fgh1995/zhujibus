@@ -15,4 +15,4 @@ https://gh-proxy.org/https://github.com/fgh1995/zhujibus/releases/download/Relea
 # 备用：
 https://github.360967.xyz/https://github.com/fgh1995/zhujibus/releases/download/Release/zhujibus-102046-release.apk
 # 赞助二维码：
-<img width="1242" height="1692" alt="mm_facetoface_collect_qrcode_1791196704492" src="https://github.com/user-attachments/assets/d40e4173-e9a3-4cf7-bde9-d6c9b077847b" />
+<img width="1242" height="1692" alt="mm_facetoface_collect_qrcode_1791196704492" src="https://gh-proxy.org/https://github.com/user-attachments/assets/d40e4173-e9a3-4cf7-bde9-d6c9b077847b" />
