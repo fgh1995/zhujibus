@@ -1,55 +1,18 @@
+# 说明：
+<h2>1. 没有语音包时，使用系统TTS语音合成调用，请确保系统TTS正常运行。</h2>
+<h2>2. 诸暨地区可实现实时公交查询，其他地区因高德限制无法查询实时公交，仅提供GPS相关功能。</h2>
+<h2>3. 高德数据准确率较低</h2>
+
 # UI界面
-<img width="1740" height="1920" alt="zhuji01" src="https://github.com/user-attachments/assets/b523403a-28ff-4adc-80d0-ebaef477660e" />
-
+<img width="1920" height="981" alt="Screenshot_2026-10-05-18-17-16-879_org zjfgh zhu" src="https://github.com/user-attachments/assets/752ce90a-4c21-4cf1-bd4c-c0de6c307828" />
 # 音频文件统一规格说明
-
 > 适用版本：v1.1.5（101050）及以上  
 > 适用范围：所有预制音频文件（语音报站、音效等）
-
+若音频文件的位深或声道数与其他文件不一致，会进行实时转换，报站将出现一定的延时。
 ---
-
-## 核心要求
-
-**所有预制音频文件的编码规格必须完全一致。**
-
-> 原因：v1.1.5 版本将语音报站机制优化为“先拼接音频流、再整段播放”。拼接要求所有音频片段参数完全相同，否则会导致播放异常。
-
----
-
-## 当前统一规格
-
-| 参数 | 当前规格 |
-|------|----------|
-| 位深 | 16位 |
-| 声道 | 单声道 |
-
-> 此规格为**当前选定的统一标准**。所有音频文件均已按此规格制作，后续添加或更新的音频文件也须保持与此一致。
-
----
-
-## 允许的调整说明
-
-统一规格仅要求**所有音频文件使用同一种规格**，理论上可以选择任意位深和声道组合，但必须满足以下条件：
-
-1. 所有文件参数完全一致（位深、声道数、采样率）
-2. 程序播放引擎支持该规格
-
-> 目前选定的统一规格为 **16位单声道**。如需变更，需同步转换所有音频文件并自行确认兼容性。
-
----
-
-## 不符合统一规格的后果
-
-若音频文件的位深或声道数与其他文件不一致，在拼接播放时会出现：
-
-- **爆音**
-- **语速变快或变慢**
-- **音调异常**
-
----
-
-## 检查音频文件规格
-
-### 使用 FFmpeg 检查
-```bash
-ffmpeg -i 音频文件.wav
+# 下载地址（哪个快用哪个）：
+https://gh-proxy.org/https://github.com/fgh1995/zhujibus/releases/download/Release/zhujibus-102046-release.apk
+# 备用：
+https://github.360967.xyz/https://github.com/fgh1995/zhujibus/releases/download/Release/zhujibus-102046-release.apk
+# 赞助二维码：
+<img width="1242" height="1692" alt="mm_facetoface_collect_qrcode_1791196704492" src="https://github.com/user-attachments/assets/d40e4173-e9a3-4cf7-bde9-d6c9b077847b" />
